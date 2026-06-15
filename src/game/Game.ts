@@ -6,6 +6,7 @@ import { MobileControls } from './MobileControls';
 import { SaveSystem } from './SaveSystem';
 import { CollisionWorld } from '../world/Collision';
 import { PrisonMap, Interactable } from '../world/PrisonMap';
+import { Backdrop } from '../world/Backdrop';
 import { roomAt, ROOM_MAP } from '../data/rooms';
 import { Player } from '../entities/Player';
 import { NPC } from '../entities/NPC';
@@ -26,7 +27,7 @@ import { InventoryUI } from '../ui/InventoryUI';
 
 type Mode = 'menu' | 'playing' | 'paused' | 'dialogue' | 'inventory' | 'event' | 'activity';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const INTERACT_RANGE = 2.4;
 
 export class Game {
@@ -35,6 +36,7 @@ export class Game {
   private cam: CameraController;
   private collision = new CollisionWorld();
   private map: PrisonMap;
+  private backdrop = new Backdrop();
   private clock = new THREE.Clock();
   private dirLight!: THREE.DirectionalLight;
   private followLight!: THREE.SpotLight;
@@ -86,6 +88,7 @@ export class Game {
 
     this.map = new PrisonMap(this.scene, this.collision);
     this.map.build();
+    this.backdrop.apply(this.scene, 'indoor', false);
 
     // systems
     this.audio = new AudioSystem(this.state.settings);
@@ -640,6 +643,10 @@ export class Game {
     // current room + heat
     const room = roomAt(this.player.x, this.player.z);
     this.state.currentRoom = room.id;
+    // swap the backdrop per area — the yard opens onto the free world
+    const outside = room.id === 'yard';
+    this.backdrop.apply(this.scene, outside ? 'outdoor' : 'indoor', this.state.lockdown);
+    this.map.setOutdoor(outside);
     const guardNear = this.npcs.some((n) => n.isGuard && !n.ko && n.distTo(this.player.x, this.player.z) < 9);
     this.heat.update(dt, room.id, guardNear);
 

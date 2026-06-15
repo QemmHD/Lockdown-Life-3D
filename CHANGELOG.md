@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.1 — Scene backdrops & tighter framing
+- Camera pulled in further (orthographic view size 8.5 → **7**, min 5) for an even more
+  character-focused frame.
+- **Shorter walls** (height 4 → 2.7) so the prison no longer towers over the inmate at the
+  closer zoom and you can read rooms over the partitions.
+- **Per-area backdrops**: indoors is a dark concrete gloom; stepping into **the yard** swaps to a
+  bright sky with **a distant city skyline, lit windows and trees — the free world beyond the
+  walls**. Lockdown tints the outdoor sky an angry red. Fog re-tunes to match each setting.
+
 ## v1.1.0 — "Up Close & Personal" (Character Focus & Graphics)
 
 Focus pass: pull the camera in tight on the inmate and make the world look grittier and more

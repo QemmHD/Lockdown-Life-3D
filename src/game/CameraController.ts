@@ -4,8 +4,8 @@ export class CameraController {
   camera: THREE.OrthographicCamera;
   private target = new THREE.Vector3();
   private current = new THREE.Vector3();
-  private baseZoom = 8.5;      // viewport half-height in world units (smaller = more zoomed in)
-  private minZoom = 6;
+  private baseZoom = 7;        // viewport half-height in world units (smaller = more zoomed in)
+  private minZoom = 5;
   private maxZoom = 34;
   private focus = 0;           // dynamic zoom-in bias (combat/tension)
   private focusTarget = 0;

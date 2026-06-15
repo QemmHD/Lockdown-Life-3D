@@ -30,7 +30,7 @@ export interface PrisonDoor {
   axis: 'x' | 'z';
 }
 
-const WALL_H = 4;
+const WALL_H = 2.7;
 const WALL_T = 0.6;
 
 export class PrisonMap {
@@ -48,6 +48,8 @@ export class PrisonMap {
     this.collision = collision;
   }
 
+  private skyline = new THREE.Group();
+
   build() {
     this.scene.add(this.root);
     this.buildFloor();
@@ -59,7 +61,50 @@ export class PrisonMap {
     }
     this.buildProps();
     this.buildLights();
+    this.buildSkyline();
   }
+
+  // The "free world" beyond the walls: distant ground, a city skyline and trees.
+  // Hidden indoors, revealed when the player is outside (the yard).
+  private buildSkyline() {
+    this.skyline.visible = false;
+    // far ground extending to the horizon
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(700, 700),
+      new THREE.MeshLambertMaterial({ color: 0x4a5240 })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -0.12;
+    this.skyline.add(ground);
+
+    const cityMat = new THREE.MeshLambertMaterial({ color: 0x2c3e57, flatShading: true });
+    const addBuilding = (x: number, z: number) => {
+      const w = 6 + Math.random() * 10;
+      const h = 10 + Math.random() * 26;
+      const d = 6 + Math.random() * 10;
+      const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), cityMat);
+      b.position.set(x, h / 2, z);
+      this.skyline.add(b);
+    };
+    // skyline along the north (z) and west (x) — the sides the iso camera faces
+    for (let x = -120; x <= 120; x += 12 + Math.random() * 8) addBuilding(x, -46 - Math.random() * 30);
+    for (let z = -90; z <= 60; z += 12 + Math.random() * 8) addBuilding(-80 - Math.random() * 30, z);
+
+    // a few trees near the yard fence for a touch of freedom-green
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5a3a22 });
+    const leafMat = new THREE.MeshLambertMaterial({ color: 0x3a6b3a, flatShading: true });
+    for (let i = 0; i < 8; i++) {
+      const tx = -120 + Math.random() * 240, tz = -40 - Math.random() * 20;
+      const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 3, 6), trunkMat);
+      trunk.position.set(tx, 1.5, tz);
+      const leaves = new THREE.Mesh(new THREE.ConeGeometry(2.4, 5, 7), leafMat);
+      leaves.position.set(tx, 5, tz);
+      this.skyline.add(trunk, leaves);
+    }
+    this.root.add(this.skyline);
+  }
+
+  setOutdoor(outside: boolean) { this.skyline.visible = outside; }
 
   private grungeTexture(): THREE.Texture {
     const c = document.createElement('canvas');
