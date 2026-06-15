@@ -4,8 +4,8 @@ export class CameraController {
   camera: THREE.OrthographicCamera;
   private target = new THREE.Vector3();
   private current = new THREE.Vector3();
-  private zoom = 17;          // viewport half-height in world units (smaller = more zoomed in)
-  private minZoom = 10;
+  private zoom = 12;          // viewport half-height in world units (smaller = more zoomed in)
+  private minZoom = 8;
   private maxZoom = 40;
   private shakeAmt = 0;
   private shakeEnabled = true;

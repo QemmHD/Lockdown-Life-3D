@@ -2,14 +2,25 @@ import { GameState } from '../game/GameState';
 import { SCHEDULE, phaseAt } from '../data/schedule';
 import type { SchedulePhase, SchedulePhaseId } from '../game/types';
 
-// Real seconds per in-game hour
-const SECONDS_PER_HOUR = 20;
+// Real seconds per in-game hour. A "day" runs the awake schedule 6:00 -> 24:00 (18h),
+// so one in-game day takes (24 - 6) * SECONDS_PER_HOUR seconds of real time.
+// Tuned middle-ground pace: 1 real minute ~= 2 in-game hours => ~9 minutes of active
+// play per day (the clock also pauses during jobs, training and menus), brisk enough to
+// stay engaging but long enough that a full sentence is a real, replayable run.
+export const SECONDS_PER_HOUR = 30;
+export const DAY_START_HOUR = 6;
+export const DAY_END_HOUR = 24;
 
 export class ScheduleSystem {
   onPhaseChange?: (phase: SchedulePhase, prev: SchedulePhaseId) => void;
   needsSleep = false;
 
   constructor(private state: GameState) {}
+
+  // Real-time length of a single in-game day, in minutes (~6 min by default).
+  realMinutesPerDay(): number {
+    return Math.round(((DAY_END_HOUR - DAY_START_HOUR) * SECONDS_PER_HOUR) / 60 * 10) / 10;
+  }
 
   current(): SchedulePhase { return phaseAt(this.state.timeOfDay); }
   requiredRoom(): string { return this.current().requiredRoom ?? ''; }

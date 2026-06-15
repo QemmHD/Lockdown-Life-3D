@@ -224,12 +224,42 @@ export class Game {
   }
 
   // ---------------- Mode transitions ----------------
+  private static CRIMES: { crime: string; min: number; max: number }[] = [
+    { crime: 'Grand Theft Auto', min: 10, max: 16 },
+    { crime: 'Armed Robbery', min: 16, max: 24 },
+    { crime: 'Aggravated Assault', min: 12, max: 20 },
+    { crime: 'Possession of Contraband', min: 7, max: 12 },
+    { crime: 'Burglary in the First Degree', min: 10, max: 18 },
+    { crime: 'Running an Illegal Gambling Ring', min: 8, max: 14 },
+    { crime: 'Tax Fraud & Racketeering', min: 14, max: 22 },
+    { crime: 'Smuggling Across State Lines', min: 12, max: 20 },
+    { crime: 'Disorderly Conduct & Resisting Arrest', min: 6, max: 10 },
+    { crime: 'Grand Larceny', min: 9, max: 15 }
+  ];
+
   private newGame() {
     this.state.reset();
+    // roll a random crime + sentence
+    const c = Game.CRIMES[Math.floor(Math.random() * Game.CRIMES.length)];
+    const days = c.min + Math.floor(Math.random() * (c.max - c.min + 1));
+    this.state.sentenceDays = days;
     this.resetEntities();
     SaveSystem.clear();
-    this.startPlaying();
-    this.hud.toast('New game started. Survive your sentence.', 'event');
+    this.menus.intro(
+      {
+        name: 'Inmate #' + (10000 + Math.floor(Math.random() * 89999)),
+        crime: c.crime,
+        days,
+        minutesPerDay: this.schedule.realMinutesPerDay(),
+        sentenceText: `${days} DAYS`
+      },
+      () => {
+        this.startPlaying();
+        this.hud.toast(`${days} days for ${c.crime}. Survive it.`, 'event');
+      }
+    );
+    // keep the prison rotating behind the cutscene
+    this.mode = 'menu';
   }
 
   private continueGame() {

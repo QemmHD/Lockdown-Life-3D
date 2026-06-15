@@ -247,6 +247,56 @@ export class Menus {
     this.bind('#back', () => fromMain ? this.mainMenu() : this.goBack());
   }
 
+  // ---------- Intake cutscene ----------
+  intro(data: { name: string; crime: string; days: number; minutesPerDay: number; sentenceText: string }, cb: () => void) {
+    this.pausedScreen = false;
+    this.wrap(`
+      <div class="menu-bg"></div>
+      <div class="menu-panel intake">
+        <div class="intake-siren">🚨 INTAKE — PROCESSING 🚨</div>
+        <div class="intake-stamp">STATE CORRECTIONAL FACILITY</div>
+        <div class="intake-rows">
+          <div class="intake-line"><span>INMATE</span><b id="t-name"></b></div>
+          <div class="intake-line"><span>CONVICTED OF</span><b id="t-crime" class="crime"></b></div>
+          <div class="intake-line"><span>SENTENCE</span><b id="t-sentence"></b></div>
+        </div>
+        <div class="intake-note">
+          Survive each day, keep your nose clean, and you walk out a free inmate.
+          Cause trouble and you'll do harder time. <br/>
+          <i>Each day inside is about <b>${data.minutesPerDay} minutes</b> of active play
+          (6:00 AM → lights out — the clock pauses during jobs, training and menus).
+          Sleep in your bunk to advance to the next day.</i>
+        </div>
+        <button id="intake-go" class="menu-big" disabled>Processing…</button>
+      </div>`);
+    const nameEl = this.overlay.querySelector('#t-name') as HTMLElement;
+    const crimeEl = this.overlay.querySelector('#t-crime') as HTMLElement;
+    const sentEl = this.overlay.querySelector('#t-sentence') as HTMLElement;
+    const go = this.overlay.querySelector('#intake-go') as HTMLButtonElement;
+    // simple typewriter reveal sequence
+    const steps: [HTMLElement, string][] = [
+      [nameEl, data.name],
+      [crimeEl, data.crime],
+      [sentEl, data.sentenceText]
+    ];
+    let si = 0;
+    const typeNext = () => {
+      if (si >= steps.length) {
+        go.disabled = false;
+        go.textContent = `▶ Begin Your ${data.days}-Day Sentence`;
+        return;
+      }
+      const [el, text] = steps[si++];
+      let ci = 0;
+      const iv = setInterval(() => {
+        el.textContent = text.slice(0, ++ci);
+        if (ci >= text.length) { clearInterval(iv); setTimeout(typeNext, 300); }
+      }, 28);
+    };
+    setTimeout(typeNext, 400);
+    go.onclick = () => { if (!go.disabled) { this.hide(); cb(); } };
+  }
+
   // ---------- Day summary ----------
   daySummary(earned: { money: number; rep: number }, cb: () => void) {
     const s = this.state.stats;
