@@ -265,14 +265,14 @@ export class DialogueSystem {
     const npc = this.npc!;
     const s = this.state.stats;
     const intimidation = s.strength + s.respect * 0.1 + s.fear * 0.1;
-    if (intimidation > npc.def.base.strength + 4 || npc.def.archetype === 'coward') {
+    if (intimidation > npc.base.strength + 4 || npc.def.archetype === 'coward') {
       this.state.changeRelationship(npc.def.id, -6);
       s.fear += 4; s.respect += 1;
       this.say('"Okay, okay! Easy! Whatever you say, man."');
     } else {
       this.state.changeRelationship(npc.def.id, -12);
       this.say('"Ha! You? Threatening ME? Step careful, fish."');
-      if (npc.def.base.aggression > 0.7) { this.close(); this.onChallenge?.(npc); }
+      if (npc.base.aggression > 0.7) { this.close(); this.onChallenge?.(npc); }
     }
   }
 
@@ -282,7 +282,7 @@ export class DialogueSystem {
     this.state.changeRelationship(npc.def.id, -15);
     this.state.changeFactionRep(npc.def.faction, -8);
     this.say('"You\'ll regret that mouth."');
-    if (npc.def.base.aggression > 0.55 || npc.def.archetype === 'hothead') { this.close(); this.onChallenge?.(npc); }
+    if (npc.base.aggression > 0.55 || npc.def.archetype === 'hothead') { this.close(); this.onChallenge?.(npc); }
   }
 
   private offerHelp() {

@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.3.1 — Randomization
+- **🎲 Randomize Everything** button in character creation — instantly rolls a random name, build,
+  skin, hair, jumpsuit and backstory.
+- **Procedurally varied inmates**: every NPC now gets seeded randomization of clothing colour, build,
+  skin/hair, accents (beard/glasses/scar) and **combat stats** (health, strength, aggression, fear,
+  respect, loyalty). Seeded by ID, so each named inmate stays consistent across save/load while the
+  whole roster looks and fights differently every playthrough.
+
 ## v1.3.0 — "Hard Time" (deeper sim systems)
 Leans the sim toward the Hard Time prison-sandbox feel:
 - **Character creation**: after intake, build your inmate — name, body build, skin tone, hair

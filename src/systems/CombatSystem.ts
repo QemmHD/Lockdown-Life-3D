@@ -122,7 +122,7 @@ export class CombatSystem {
 
     const arch = npc.def.archetype;
     const fearful = arch === 'coward' || arch === 'sick' || arch === 'new' || arch === 'booksmart';
-    if (npc.def.base.health < 60 || fearful || npc.health < npc.maxHealth * 0.3) {
+    if (npc.base.health < 60 || fearful || npc.health < npc.maxHealth * 0.3) {
       npc.ai = 'flee';
       npc.fleeTarget = null;
       if (arch === 'snitch' || arch === 'coward') this.onFightSeen?.(npc.x, npc.z, true); // calls guards
@@ -134,7 +134,7 @@ export class CombatSystem {
       // allies join
       for (const ally of this.npcs) {
         if (ally === npc || ally.ko) continue;
-        if (ally.def.faction === npc.def.faction && ally.distTo(npc.x, npc.z) < 8 && (ally.def.role === 'enforcer' || ally.def.base.aggression > 0.6)) {
+        if (ally.def.faction === npc.def.faction && ally.distTo(npc.x, npc.z) < 8 && (ally.def.role === 'enforcer' || ally.base.aggression > 0.6)) {
           ally.ai = 'fight'; ally.combatTarget = 'player'; ally.hostile = true;
           this.onHostile?.(ally);
         }
@@ -150,7 +150,7 @@ export class CombatSystem {
       if (n.combatTarget === 'player' && n.consumeAttack()) {
         const d = n.distTo(this.player.x, this.player.z);
         if (d > 2.0) continue;
-        let dmg = 4 + n.def.base.strength * 1.5;
+        let dmg = 4 + n.base.strength * 1.5;
         // block
         if (this.player.blocking) {
           dmg *= 0.3;

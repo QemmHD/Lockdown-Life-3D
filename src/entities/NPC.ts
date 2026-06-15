@@ -8,6 +8,27 @@ import type { NPCDef } from '../game/types';
 
 export type AIState = 'schedule' | 'flee' | 'fight' | 'approach' | 'down';
 
+// Deterministic per-id PRNG so each named NPC's randomization stays consistent across save/load.
+function seedFrom(str: string): () => number {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); }
+  return () => { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967296; };
+}
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+// shade-shift a hex colour by +/- amount per channel
+function tint(color: number, rng: () => number, amt = 28): number {
+  let r = (color >> 16) & 255, g = (color >> 8) & 255, b = color & 255;
+  const d = () => Math.round((rng() * 2 - 1) * amt);
+  r = Math.max(0, Math.min(255, r + d())); g = Math.max(0, Math.min(255, g + d())); b = Math.max(0, Math.min(255, b + d()));
+  return (r << 16) | (g << 8) | b;
+}
+
+const INMATE_SUITS = [0x3a6ea5, 0x4a7a55, 0x8a6a3a, 0x7a4a6a, 0x556070, 0x6a5a8a, 0x9a5a3a, 0x4a6a6a];
+const SKIN_POOL = [0xffdbac, 0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0x6b4423];
+const HAIR_POOL = [0x2b1d0e, 0x000000, 0x5a3a1a, 0x888888, 0xd9b382, 0xb33a2a];
+const HAIR_STYLES = ['short', 'bald', 'mohawk', 'cap', 'beanie', 'long'] as const;
+const ACCENTS = ['none', 'beard', 'glasses', 'scar'] as const;
+
 export interface NPCContext {
   px: number; pz: number;
   dt: number; time: number;
@@ -36,27 +57,52 @@ export class NPC {
   fleeTarget: Vec2 | null = null;
   speakTimer = 0;
   hostile = false; // currently aggro on player
+  base: { health: number; aggression: number; fear: number; respect: number; loyalty: number; strength: number };
 
   constructor(def: NPCDef, private collision: CollisionWorld) {
     this.def = def;
-    this.health = def.base.health;
-    this.maxHealth = def.base.health;
+    const rng = seedFrom('lockdown_' + def.id);
+    const jit01 = (v: number, a = 0.28) => clamp01(v + (rng() * 2 - 1) * a);
+
+    // randomized per-NPC stats (seeded → stable across reloads)
+    this.base = {
+      health: Math.round(def.base.health * (0.85 + rng() * 0.4)),
+      aggression: jit01(def.base.aggression),
+      fear: jit01(def.base.fear),
+      respect: jit01(def.base.respect, 0.2),
+      loyalty: jit01(def.base.loyalty, 0.2),
+      strength: Math.max(1, Math.round(def.base.strength + (rng() * 2 - 1) * 2.5))
+    };
+    this.health = this.base.health;
+    this.maxHealth = this.base.health;
     this.targetRoom = def.spawnRoom;
     const f = FACTIONS[def.faction];
+
+    // randomized clothing & looks
+    const isGuard = def.faction === 'guards', isStaff = def.faction === 'staff';
+    const uniform = isGuard ? tint(0x2c3e50, rng, 14)
+      : isStaff ? tint(0x16a085, rng, 16)
+      : tint(INMATE_SUITS[Math.floor(rng() * INMATE_SUITS.length)], rng, 22);
+    // staff/guards keep curated looks; inmates get more variety
+    const skin = (!isGuard && !isStaff && rng() < 0.5) ? SKIN_POOL[Math.floor(rng() * SKIN_POOL.length)] : def.skin;
+    const hair = (!isGuard && !isStaff && rng() < 0.5) ? HAIR_POOL[Math.floor(rng() * HAIR_POOL.length)] : def.hair;
+    const hairStyle = (!isGuard && rng() < 0.35) ? HAIR_STYLES[Math.floor(rng() * HAIR_STYLES.length)] : def.hairStyle;
+    const accent = (!isGuard && !isStaff && rng() < 0.4) ? ACCENTS[Math.floor(rng() * ACCENTS.length)] : (def.accent ?? 'none');
+    const height = def.height * (0.94 + rng() * 0.12);
+
     this.rig = new CharacterRig({
-      height: def.height,
-      skin: def.skin,
-      hair: def.hair,
-      hairStyle: def.hairStyle,
-      uniform: def.faction === 'guards' ? 0x2c3e50 : def.faction === 'staff' ? 0x16a085 : 0x3a6ea5,
+      height,
+      skin,
+      hair,
+      hairStyle: hairStyle as any,
+      uniform,
       accentColor: f.color,
-      guard: def.faction === 'guards',
-      staff: def.faction === 'staff',
-      accent: def.accent,
+      guard: isGuard,
+      staff: isStaff,
+      accent: accent as any,
       showRing: true,
       ringColor: f.color
     });
-    // leaders slightly distinct: gold ring tint stays faction; scale handled by height
   }
 
   setPos(x: number, z: number) { this.x = x; this.z = z; this.rig.group.position.set(x, 0, z); }
@@ -116,7 +162,7 @@ export class NPC {
       return;
     }
 
-    const speedBase = this.isGuard ? 4.2 : 3.4 + this.def.base.strength * 0.05;
+    const speedBase = this.isGuard ? 4.2 : 3.4 + this.base.strength * 0.05;
 
     // FIGHT
     if (this.ai === 'fight' && this.combatTarget === 'player') {
@@ -129,7 +175,7 @@ export class NPC {
         this.vx = this.vz = 0;
         if (this.attackCd <= 0 && !this.rig.isBusy()) {
           this.rig.setState('punch');
-          this.attackCd = 1.1 - this.def.base.aggression * 0.4;
+          this.attackCd = 1.1 - this.base.aggression * 0.4;
           (this as any)._didAttack = true;
         }
       }

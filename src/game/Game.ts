@@ -29,7 +29,7 @@ import { InventoryUI } from '../ui/InventoryUI';
 
 type Mode = 'menu' | 'playing' | 'paused' | 'dialogue' | 'inventory' | 'event' | 'activity';
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 const INTERACT_RANGE = 2.4;
 
 export class Game {
@@ -242,7 +242,7 @@ export class Game {
 
     this.combat.onKO = (npc) => {
       const s = this.state.stats;
-      s.respect += 3 + Math.round(npc.def.base.respect * 6);
+      s.respect += 3 + Math.round(npc.base.respect * 6);
       s.reputation += 2;
       s.fear += 5;
       this.state.changeFactionRep(npc.def.faction, -15);

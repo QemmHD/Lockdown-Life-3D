@@ -313,12 +313,25 @@ export class Menus {
     ];
     const sel = { name: this.state.playerName === 'Inmate' ? '' : this.state.playerName, build: 1, skin: 2, hair: 0, style: 0, suit: 0, backstory: 'bruiser' };
     const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
+    const NICKS = ['Spike', 'Diesel', 'Razor', 'Tank', 'Snake', 'Ace', 'Bishop', 'Cyrus', 'Mako', 'Vega', 'Knox', 'Rook', 'Slim', 'Tex', 'Grim', 'Blaze'];
+    const ri = (n: number) => Math.floor(Math.random() * n);
+    const randomize = () => {
+      sel.name = NICKS[ri(NICKS.length)];
+      sel.build = ri(builds.length);
+      sel.skin = ri(skins.length);
+      sel.hair = ri(hairs.length);
+      sel.style = ri(styles.length);
+      sel.suit = ri(suits.length);
+      sel.backstory = backstories[ri(backstories.length)].id;
+      render();
+    };
 
     const render = () => {
       const sw = (arr: number[], key: 'skin' | 'hair' | 'suit') =>
         arr.map((c, i) => `<button class="swatch ${sel[key] === i ? 'on' : ''}" data-k="${key}" data-i="${i}" style="background:${hex(c)}"></button>`).join('');
       this.wrap(`<div class="menu-bg"></div><div class="menu-panel scroll creator">
         <h2>🧍 Create Your Inmate</h2>
+        <button id="cc-rand" class="cc-rand">🎲 Randomize Everything</button>
         <label class="cc-row"><span>Name</span><input id="cc-name" type="text" maxlength="16" placeholder="e.g. Spike" value="${sel.name}"></label>
         <div class="cc-row"><span>Build</span><div class="cc-opts">${builds.map((b, i) => `<button class="cc-opt ${sel.build === i ? 'on' : ''}" data-k="build" data-i="${i}">${b.n}</button>`).join('')}</div></div>
         <div class="cc-row"><span>Skin</span><div class="cc-swatches">${sw(skins, 'skin')}</div></div>
@@ -331,6 +344,7 @@ export class Menus {
 
       const nameEl = this.overlay.querySelector('#cc-name') as HTMLInputElement;
       nameEl.oninput = () => { sel.name = nameEl.value; };
+      (this.overlay.querySelector('#cc-rand') as HTMLElement).onclick = () => randomize();
       this.overlay.querySelectorAll('[data-k]').forEach((b) => {
         (b as HTMLElement).onclick = () => {
           const k = (b as HTMLElement).dataset.k as any;
