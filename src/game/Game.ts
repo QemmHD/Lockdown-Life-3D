@@ -26,7 +26,7 @@ import { InventoryUI } from '../ui/InventoryUI';
 
 type Mode = 'menu' | 'playing' | 'paused' | 'dialogue' | 'inventory' | 'event' | 'activity';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const INTERACT_RANGE = 2.4;
 
 export class Game {
@@ -37,6 +37,7 @@ export class Game {
   private map: PrisonMap;
   private clock = new THREE.Clock();
   private dirLight!: THREE.DirectionalLight;
+  private followLight!: THREE.SpotLight;
 
   state = new GameState();
   private input = new Input();
@@ -74,6 +75,9 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.scene.background = new THREE.Color(0x0b0d10);
     this.scene.fog = new THREE.Fog(0x0b0d10, 80, 160);
 
@@ -142,9 +146,9 @@ export class Game {
   }
 
   private setupLights() {
-    const amb = new THREE.AmbientLight(0x9aa0b0, 0.65);
+    const amb = new THREE.AmbientLight(0x8a90a4, 0.55);
     this.scene.add(amb);
-    const dir = new THREE.DirectionalLight(0xfff0d8, 0.95);
+    const dir = new THREE.DirectionalLight(0xfff0d8, 1.15);
     dir.position.set(40, 70, 30);
     dir.castShadow = true;
     dir.shadow.mapSize.set(2048, 2048);
@@ -155,8 +159,21 @@ export class Game {
     dir.shadow.bias = -0.0004;
     this.scene.add(dir);
     this.dirLight = dir;
-    const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x3a3a30, 0.3);
+    const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x3a3a30, 0.32);
     this.scene.add(hemi);
+
+    // warm follow spotlight that keeps a focused pool of light on the player
+    const spot = new THREE.SpotLight(0xffe6c0, 6, 22, Math.PI / 4.5, 0.6, 1.2);
+    spot.position.set(0, 12, 0);
+    spot.target.position.set(0, 0, 0);
+    this.scene.add(spot);
+    this.scene.add(spot.target);
+    this.followLight = spot;
+  }
+
+  private updateFollowLight() {
+    this.followLight.position.set(this.player.x, 12, this.player.z + 2);
+    this.followLight.target.position.set(this.player.x, 0.5, this.player.z);
   }
 
   private spawnNPCs() {
@@ -564,7 +581,9 @@ export class Game {
     this.map.update(dt, t, this.state.lockdown);
     this.fx.update(dt);
     this.player.rig.update(dt, 0);
+    this.cam.setFocus(1.4);
     this.cam.update(this.player.x, this.player.z, dt);
+    this.updateFollowLight();
     if (frac >= 1) this.finishActivity();
   }
 
@@ -633,7 +652,14 @@ export class Game {
     // effects + world + camera + hud
     this.fx.update(dt);
     this.map.update(dt, t, this.state.lockdown);
-    this.cam.update(this.player.x, this.player.z, dt);
+    // dynamic focus: push in during fights / when hostiles loom
+    const hostileNear = this.npcs.some((n) => n.hostile && !n.ko && n.distTo(this.player.x, this.player.z) < 10);
+    this.cam.setFocus(hostileNear ? 2 : 0);
+    // look-ahead toward movement keeps the inmate the focal point
+    const leadX = THREE.MathUtils.clamp(this.player.vx * 0.35, -3, 3);
+    const leadZ = THREE.MathUtils.clamp(this.player.vz * 0.35, -3, 3);
+    this.cam.update(this.player.x, this.player.z, dt, leadX, leadZ);
+    this.updateFollowLight();
     this.hud.update();
     this.updatePromptUI();
     this.updateRoomLabels();

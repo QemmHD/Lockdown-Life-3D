@@ -22,6 +22,17 @@ function mat(color: number, flat = true): THREE.Material {
   return new THREE.MeshLambertMaterial({ color, flatShading: flat });
 }
 
+// Shared toon outline material (rendered on the back faces of a slightly enlarged shell)
+const OUTLINE_MAT = new THREE.MeshBasicMaterial({ color: 0x0a0a0c, side: THREE.BackSide });
+
+// Attach a black back-face shell to a mesh so it reads with a thick silhouette.
+function shell(mesh: THREE.Mesh, scale = 1.1) {
+  const s = new THREE.Mesh(mesh.geometry, OUTLINE_MAT);
+  s.scale.setScalar(scale);
+  mesh.add(s);
+  return mesh;
+}
+
 export class CharacterRig {
   group = new THREE.Group();
   private parts: Record<string, THREE.Object3D> = {};
@@ -96,6 +107,7 @@ export class CharacterRig {
     const torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(0.52 * h, 0.66 * h, 0.32 * h), uni);
     torsoMesh.position.y = 0.33 * h;
     torsoMesh.castShadow = true;
+    shell(torsoMesh, 1.07);
     this.torso.add(torsoMesh);
 
     // faction armband
@@ -127,6 +139,7 @@ export class CharacterRig {
     this.head.position.y = 0.72 * h;
     const headMesh = new THREE.Mesh(new THREE.BoxGeometry(0.34 * h, 0.36 * h, 0.34 * h), skinMat);
     headMesh.castShadow = true;
+    shell(headMesh, 1.08);
     this.head.add(headMesh);
     // eyes
     const eyeGeo = new THREE.BoxGeometry(0.05 * h, 0.05 * h, 0.02 * h);
@@ -200,6 +213,7 @@ export class CharacterRig {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, d), m);
     mesh.position.y = -hgt / 2;
     mesh.castShadow = true;
+    shell(mesh, 1.12);
     g.add(mesh);
     if (handMat) {
       const hand = new THREE.Mesh(new THREE.BoxGeometry(w * 1.1, w * 1.1, d * 1.1), handMat);
