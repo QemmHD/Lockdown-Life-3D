@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.2.0 — "Hard Light" (Graphics Overhaul)
+A full visual overhaul of the rendering pipeline:
+- **PBR materials**: the whole world and all characters moved from flat Lambert shading to
+  physically-based MeshStandard materials with tuned roughness/metalness.
+- **Image-based lighting (IBL)**: a generated room environment gives soft, baked-looking ambient
+  light and subtle reflections on every surface.
+- **Post-processing pipeline** (on "High" quality): bloom on highlights, a gritty brightness/contrast
+  **color grade**, a screen-space **vignette**, ACES tone mapping (OutputPass) and **SMAA** anti-aliasing.
+- **Film-grain + vignette overlay** layered over the 3D view for a cinematic, gritty feel.
+- Rebalanced lighting (lower ambient, warmer key, softer fill) tuned for the new materials so the
+  scene reads with real contrast and depth.
+- The **Settings → Graphics Quality** toggle now switches the post-processing/shadow stack on/off
+  for lower-end devices (Simple) while keeping IBL.
+
 ## v1.1.1 — Scene backdrops & tighter framing
 - Camera pulled in further (orthographic view size 8.5 → **7**, min 5) for an even more
   character-focused frame.

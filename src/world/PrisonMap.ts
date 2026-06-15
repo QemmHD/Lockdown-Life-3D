@@ -71,13 +71,13 @@ export class PrisonMap {
     // far ground extending to the horizon
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(700, 700),
-      new THREE.MeshLambertMaterial({ color: 0x4a5240 })
+      new THREE.MeshStandardMaterial({ color: 0x4a5240 })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.position.y = -0.12;
     this.skyline.add(ground);
 
-    const cityMat = new THREE.MeshLambertMaterial({ color: 0x2c3e57, flatShading: true });
+    const cityMat = new THREE.MeshStandardMaterial({ color: 0x2c3e57, flatShading: true });
     const addBuilding = (x: number, z: number) => {
       const w = 6 + Math.random() * 10;
       const h = 10 + Math.random() * 26;
@@ -91,8 +91,8 @@ export class PrisonMap {
     for (let z = -90; z <= 60; z += 12 + Math.random() * 8) addBuilding(-80 - Math.random() * 30, z);
 
     // a few trees near the yard fence for a touch of freedom-green
-    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5a3a22 });
-    const leafMat = new THREE.MeshLambertMaterial({ color: 0x3a6b3a, flatShading: true });
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a3a22 });
+    const leafMat = new THREE.MeshStandardMaterial({ color: 0x3a6b3a, flatShading: true });
     for (let i = 0; i < 8; i++) {
       const tx = -120 + Math.random() * 240, tz = -40 - Math.random() * 20;
       const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 3, 6), trunkMat);
@@ -149,7 +149,7 @@ export class PrisonMap {
 
   private buildFloor() {
     const geo = new THREE.PlaneGeometry(130, 56);
-    const mat = new THREE.MeshLambertMaterial({ map: this.grungeTexture() });
+    const mat = new THREE.MeshStandardMaterial({ map: this.grungeTexture(), roughness: 0.92, metalness: 0.02 });
     const floor = new THREE.Mesh(geo, mat);
     floor.rotation.x = -Math.PI / 2;
     floor.receiveShadow = true;
@@ -160,7 +160,7 @@ export class PrisonMap {
     for (const r of ROOMS) {
       const isYard = r.id === 'yard';
       const geo = new THREE.PlaneGeometry(r.w - 0.4, r.d - 0.4);
-      const mat = new THREE.MeshLambertMaterial({ color: r.floor, transparent: true, opacity: isYard ? 0.55 : 0.45 });
+      const mat = new THREE.MeshStandardMaterial({ color: r.floor, transparent: true, opacity: isYard ? 0.55 : 0.45 });
       const zone = new THREE.Mesh(geo, mat);
       zone.rotation.x = -Math.PI / 2;
       zone.position.set(r.x, 0.03, r.z);
@@ -186,7 +186,7 @@ export class PrisonMap {
   }
 
   private addWall(x: number, z: number, w: number, d: number, color = 0x6f6f78, h = WALL_H, register = true) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color, flatShading: true }));
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color, flatShading: true }));
     mesh.position.set(x, h / 2, z);
     mesh.castShadow = true; mesh.receiveShadow = true;
     this.root.add(mesh);
@@ -229,13 +229,13 @@ export class PrisonMap {
   private addDoor(x: number, z: number, w: number, room: string) {
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(w, WALL_H - 0.4, 0.3),
-      new THREE.MeshLambertMaterial({ color: 0x9a9a44, flatShading: true })
+      new THREE.MeshStandardMaterial({ color: 0x9a9a44, flatShading: true })
     );
     mesh.position.set(x, (WALL_H - 0.4) / 2, z);
     mesh.castShadow = true;
     // bars look
     for (let i = -1; i <= 1; i++) {
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.08, WALL_H - 0.6, 0.32), new THREE.MeshLambertMaterial({ color: 0x33331a }));
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(0.08, WALL_H - 0.6, 0.32), new THREE.MeshStandardMaterial({ color: 0x33331a }));
       bar.position.set(i * (w / 3.2), 0, 0);
       mesh.add(bar);
     }
@@ -268,7 +268,7 @@ export class PrisonMap {
 
   // ---------- Props ----------
   private box(x: number, z: number, w: number, h: number, d: number, color: number, collide = true, y?: number) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color, flatShading: true }));
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color, flatShading: true }));
     m.position.set(x, y ?? h / 2, z);
     m.castShadow = true; m.receiveShadow = true;
     this.root.add(m);
@@ -277,7 +277,7 @@ export class PrisonMap {
   }
 
   private cyl(x: number, z: number, r: number, h: number, color: number, collide = false) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 12), new THREE.MeshLambertMaterial({ color, flatShading: true }));
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 12), new THREE.MeshStandardMaterial({ color, flatShading: true }));
     m.position.set(x, h / 2, z);
     m.castShadow = true;
     this.root.add(m);

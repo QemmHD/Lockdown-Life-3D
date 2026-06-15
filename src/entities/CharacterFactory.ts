@@ -19,7 +19,7 @@ export interface CharacterOptions {
 }
 
 function mat(color: number, flat = true): THREE.Material {
-  return new THREE.MeshLambertMaterial({ color, flatShading: flat });
+  return new THREE.MeshStandardMaterial({ color, flatShading: flat, roughness: 0.72, metalness: 0.04 });
 }
 
 // Shared toon outline material (rendered on the back faces of a slightly enlarged shell)

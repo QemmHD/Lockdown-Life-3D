@@ -7,6 +7,8 @@ import { SaveSystem } from './SaveSystem';
 import { CollisionWorld } from '../world/Collision';
 import { PrisonMap, Interactable } from '../world/PrisonMap';
 import { Backdrop } from '../world/Backdrop';
+import { PostFX } from './PostFX';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { roomAt, ROOM_MAP } from '../data/rooms';
 import { Player } from '../entities/Player';
 import { NPC } from '../entities/NPC';
@@ -27,7 +29,7 @@ import { InventoryUI } from '../ui/InventoryUI';
 
 type Mode = 'menu' | 'playing' | 'paused' | 'dialogue' | 'inventory' | 'event' | 'activity';
 
-const VERSION = '1.1.1';
+const VERSION = '1.2.0';
 const INTERACT_RANGE = 2.4;
 
 export class Game {
@@ -40,6 +42,8 @@ export class Game {
   private clock = new THREE.Clock();
   private dirLight!: THREE.DirectionalLight;
   private followLight!: THREE.SpotLight;
+  private postfx!: PostFX;
+  private useFX = true;
 
   state = new GameState();
   private input = new Input();
@@ -78,17 +82,28 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.toneMappingExposure = 0.88;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // keep classic light-intensity units so hand-tuned values stay predictable
+    (this.renderer as any).useLegacyLights = true;
     this.scene.background = new THREE.Color(0x0b0d10);
     this.scene.fog = new THREE.Fog(0x0b0d10, 80, 160);
 
     this.cam = new CameraController();
+
+    // image-based lighting for soft, baked-looking PBR shading
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    (this.scene as any).environmentIntensity = 0.1;
+    pmrem.dispose();
+
     this.setupLights();
 
     this.map = new PrisonMap(this.scene, this.collision);
     this.map.build();
     this.backdrop.apply(this.scene, 'indoor', false);
+    this.postfx = new PostFX(this.renderer, this.scene, this.cam.camera);
+    this.useFX = this.state.settings.quality === 'high';
 
     // systems
     this.audio = new AudioSystem(this.state.settings);
@@ -149,9 +164,9 @@ export class Game {
   }
 
   private setupLights() {
-    const amb = new THREE.AmbientLight(0x8a90a4, 0.55);
+    const amb = new THREE.AmbientLight(0x8a90a4, 0.14);
     this.scene.add(amb);
-    const dir = new THREE.DirectionalLight(0xfff0d8, 1.15);
+    const dir = new THREE.DirectionalLight(0xfff0d8, 1.05);
     dir.position.set(40, 70, 30);
     dir.castShadow = true;
     dir.shadow.mapSize.set(2048, 2048);
@@ -166,7 +181,7 @@ export class Game {
     this.scene.add(hemi);
 
     // warm follow spotlight that keeps a focused pool of light on the player
-    const spot = new THREE.SpotLight(0xffe6c0, 6, 22, Math.PI / 4.5, 0.6, 1.2);
+    const spot = new THREE.SpotLight(0xffe6c0, 3.2, 22, Math.PI / 4.5, 0.6, 1.2);
     spot.position.set(0, 12, 0);
     spot.target.position.set(0, 0, 0);
     this.scene.add(spot);
@@ -336,6 +351,7 @@ export class Game {
     const hi = this.state.settings.quality === 'high';
     this.renderer.shadowMap.enabled = hi;
     this.dirLight.castShadow = hi;
+    this.useFX = hi;
   }
 
   private saveGame() {
@@ -547,7 +563,8 @@ export class Game {
       this.map.update(dt, t, this.state.lockdown);
     }
 
-    this.renderer.render(this.scene, this.cam.camera);
+    if (this.useFX) this.postfx.render();
+    else this.renderer.render(this.scene, this.cam.camera);
     this.input.endFrame();
     requestAnimationFrame(this.loop);
   };
@@ -737,5 +754,6 @@ export class Game {
   private onResize() {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.cam.resize();
+    this.postfx?.resize();
   }
 }
