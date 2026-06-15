@@ -29,7 +29,7 @@ import { InventoryUI } from '../ui/InventoryUI';
 
 type Mode = 'menu' | 'playing' | 'paused' | 'dialogue' | 'inventory' | 'event' | 'activity';
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 const INTERACT_RANGE = 2.4;
 
 export class Game {
@@ -73,7 +73,26 @@ export class Game {
   private nearNPC: NPC | null = null;
   private activity: { time: number; dur: number; label: string; cb: () => void } | null = null;
   private activityEl: HTMLDivElement;
-  private dayEarned = { money: 0, rep: 0 };
+  private dayEarned = { money: 0, rep: 0, daysAdded: 0, daysCut: 0 };
+
+  // Hard Time-style sentence adjustment: misbehaving adds time, good behavior cuts it.
+  private addTime(n: number, reason: string) {
+    this.state.sentenceDays += n;
+    this.state.dayCrime = true;
+    this.state.dayClean = false;
+    this.dayEarned.daysAdded += n;
+    this.hud.toast(`+${n} day${n > 1 ? 's' : ''} added: ${reason}`, 'bad');
+    this.fx.floatText(this.player.x, 2.6, this.player.z, `+${n} DAY`, '#ff6655');
+    this.audio.play('fail');
+  }
+  private cutTime(n: number, reason: string) {
+    if (this.state.sentenceDays <= 0) return;
+    this.state.sentenceDays = Math.max(0, this.state.sentenceDays - n);
+    this.dayEarned.daysCut += n;
+    this.hud.toast(`-${n} day${n > 1 ? 's' : ''}: ${reason}`, 'good');
+    this.fx.floatText(this.player.x, 2.6, this.player.z, `-${n} DAY`, '#66ff88');
+    this.audio.play('rep');
+  }
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -130,7 +149,8 @@ export class Game {
       forceLockdown: () => this.forceLockdown(),
       spawnHostile: () => this.spawnHostileNear(),
       startEscapeThread: () => this.startEscapeThread(),
-      notify: (a, b) => this.hud.notify(a, b)
+      notify: (a, b) => this.hud.notify(a, b),
+      addTime: (n, r) => this.addTime(n, r)
     });
     this.menus = new Menus(this.state, this.schedule, {
       onNewGame: () => this.newGame(),
@@ -227,14 +247,14 @@ export class Game {
       s.fear += 5;
       this.state.changeFactionRep(npc.def.faction, -15);
       this.dayEarned.rep += 2;
-      if (npc.isGuard) { this.heat.add(45); this.hud.toast('You downed a guard! Massive heat!', 'bad'); }
+      if (npc.isGuard) { this.heat.add(45); this.addTime(2, 'Assaulted a guard'); }
       else this.hud.toast(`You beat ${npc.def.name}. Respect up.`, 'good');
     };
     this.combat.onPlayerKO = () => this.handlePlayerKO();
     this.combat.onHostile = (npc) => { if (npc.isGuard) this.triggerAlarm(npc.x, npc.z); };
     this.combat.onFightSeen = (x, z, byGuardOnly) => {
       const guardNear = byGuardOnly || this.npcs.some((n) => n.isGuard && !n.ko && n.distTo(x, z) < 13);
-      if (guardNear) { this.heat.add(byGuardOnly ? 18 : 12); this.triggerAlarm(x, z); this.audio.play('whistle'); }
+      if (guardNear) { this.heat.add(byGuardOnly ? 18 : 12); this.triggerAlarm(x, z); this.audio.play('whistle'); this.state.dayClean = false; }
       else this.heat.add(3);
     };
 
@@ -278,6 +298,7 @@ export class Game {
     const c = Game.CRIMES[Math.floor(Math.random() * Game.CRIMES.length)];
     const days = c.min + Math.floor(Math.random() * (c.max - c.min + 1));
     this.state.sentenceDays = days;
+    this.state.crime = c.crime;
     this.resetEntities();
     SaveSystem.clear();
     this.menus.intro(
@@ -288,19 +309,30 @@ export class Game {
         minutesPerDay: this.schedule.realMinutesPerDay(),
         sentenceText: `${days} DAYS`
       },
-      () => {
-        this.startPlaying();
-        this.hud.toast(`${days} days for ${c.crime}. Survive it.`, 'event');
-      }
+      () => this.menus.creator((o) => this.applyCreation(o, c.crime, days))
     );
     // keep the prison rotating behind the cutscene
     this.mode = 'menu';
+  }
+
+  private applyCreation(o: { name: string; height: number; skin: number; hair: number; hairStyle: any; uniform: number; backstory: string }, crime: string, days: number) {
+    this.state.playerName = o.name;
+    this.state.appearance = { height: o.height, skin: o.skin, hair: o.hair, hairStyle: o.hairStyle, uniform: o.uniform };
+    const s = this.state.stats;
+    if (o.backstory === 'bruiser') { s.strength += 2; s.toughness += 1; }
+    else if (o.backstory === 'schemer') { s.intelligence += 3; }
+    else if (o.backstory === 'survivor') { s.agility += 2; s.toughness += 1; }
+    this.state.clampStats();
+    this.player.customize(this.state.appearance, this.scene);
+    this.startPlaying();
+    this.hud.toast(`${o.name}: ${days} days for ${crime}. Survive it.`, 'event');
   }
 
   private continueGame() {
     const data = SaveSystem.load();
     if (!data) { this.newGame(); return; }
     SaveSystem.apply(this.state, data);
+    this.player.customize(this.state.appearance, this.scene);
     this.player.setPos(data.player.x, data.player.z);
     for (const ns of Object.values(data.npcState)) {
       const npc = this.npcs.find((n) => n.def.id === ns.id);
@@ -417,6 +449,7 @@ export class Game {
     this.cam.snapTo(this.player.x, this.player.z);
     this.audio.play('cell_slam');
     this.hud.toast('🔒 SOLITARY: ' + reason, 'bad');
+    this.addTime(1, 'Thrown in solitary');
     for (const n of this.npcs) { if (n.combatTarget === 'player') { n.combatTarget = null; n.ai = 'schedule'; n.hostile = false; } }
   }
 
@@ -454,12 +487,18 @@ export class Game {
       const m = this.state.npcMemory[id];
       m.relationship *= 0.96;
     }
+    // behavior-based sentence adjustment (Hard Time style)
+    if (this.state.dayClean && s.heat < 25) this.cutTime(1, 'Good behavior');
+    else if (s.heat > 70) this.addTime(1, 'High heat at lights-out');
+    this.state.dayCrime = false;
+    this.state.dayClean = true;
+
     this.schedule.advanceDay();
     this.resetNPCPositions();
     this.saveGame();
 
     if (this.state.sentenceDays <= 0) { this.endGameSurvived(); return; }
-    this.menus.daySummary(this.dayEarned, () => { this.mode = 'playing'; this.dayEarned = { money: 0, rep: 0 }; });
+    this.menus.daySummary(this.dayEarned, () => { this.mode = 'playing'; this.dayEarned = { money: 0, rep: 0, daysAdded: 0, daysCut: 0 }; });
     this.mode = 'paused';
   }
 
@@ -499,6 +538,15 @@ export class Game {
     if (!it) return;
     this.player.rig.setState('interact');
     switch (it.type) {
+      case 'pickup':
+        this.player.rig.setState('pickup');
+        if (this.inv.add(it.payload, 1)) {
+          this.audio.play('pickup');
+          this.hud.toast('Grabbed ' + (it.label.replace('Grab ', '')), 'good');
+          this.map.removePickup(it);
+          this.nearInteractable = null;
+        } else { this.hud.toast('Pockets full!', 'bad'); }
+        break;
       case 'bed':
         if (this.state.phase === 'sleep' || this.state.phase === 'lockdown' || this.state.timeOfDay >= 21 || this.schedule.needsSleep) this.sleep();
         else this.hud.toast('Too early to sleep. Wait for Lights Out.', 'info');
@@ -619,6 +667,7 @@ export class Game {
     const talkPressed = this.mobile.consume('talk') || this.input.consumePressed('t');
     const attackPressed = this.input.consumePressed('f') || this.input.mouseAttack || this.mobile.consume('attack');
     const shovePressed = this.input.consumePressed('q') || this.mobile.consume('shove');
+    const throwPressed = this.input.consumePressed('g') || this.mobile.consume('throw');
 
     // block (held)
     this.player.blocking = this.input.blockHeld || this.input.down('r') || this.mobile.blockHeld;
@@ -633,6 +682,7 @@ export class Game {
     // combat
     if (attackPressed) this.combat.playerAttack(false);
     if (shovePressed) this.combat.playerAttack(true);
+    if (throwPressed) this.combat.throwWeapon();
     this.combat.update(dt);
 
     // interactions / talk

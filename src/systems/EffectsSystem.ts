@@ -2,10 +2,12 @@ import * as THREE from 'three';
 
 interface FloatText { el: HTMLDivElement; pos: THREE.Vector3; vy: number; life: number; max: number; }
 interface Particle { mesh: THREE.Object3D; vx: number; vy: number; vz: number; life: number; max: number; spin: number; }
+interface Projectile { mesh: THREE.Mesh; sx: number; sz: number; tx: number; tz: number; t: number; dur: number; onHit: () => void; }
 
 export class EffectsSystem {
   private floats: FloatText[] = [];
   private particles: Particle[] = [];
+  private projectiles: Projectile[] = [];
   private layer: HTMLDivElement;
 
   constructor(private scene: THREE.Scene, private camera: THREE.Camera) {
@@ -65,6 +67,15 @@ export class EffectsSystem {
   dust(x: number, z: number) { this.burst(x, 0.2, z, 0x9a8a6a, 5, 2, 0.1); }
   sweat(x: number, z: number) { this.burst(x, 1.5, z, 0x88bbff, 3, 1.5, 0.06); }
 
+  // a thrown object that arcs to a target then fires its callback
+  projectile(x0: number, z0: number, x1: number, z1: number, onHit: () => void) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.2), new THREE.MeshBasicMaterial({ color: 0xb9b9b9 }));
+    m.position.set(x0, 1.2, z0);
+    this.scene.add(m);
+    const dur = Math.max(0.18, Math.hypot(x1 - x0, z1 - z0) / 22);
+    this.projectiles.push({ mesh: m, sx: x0, sz: z0, tx: x1, tz: z1, t: 0, dur, onHit });
+  }
+
   update(dt: number) {
     // floating text
     for (let i = this.floats.length - 1; i >= 0; i--) {
@@ -101,6 +112,22 @@ export class EffectsSystem {
         this.scene.remove(m);
         (m.material as THREE.Material).dispose?.();
         this.particles.splice(i, 1);
+      }
+    }
+    // projectiles
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const pr = this.projectiles[i];
+      pr.t += dt;
+      const f = Math.min(1, pr.t / pr.dur);
+      pr.mesh.position.x = THREE.MathUtils.lerp(pr.sx, pr.tx, f);
+      pr.mesh.position.z = THREE.MathUtils.lerp(pr.sz, pr.tz, f);
+      pr.mesh.position.y = 1.2 + Math.sin(f * Math.PI) * 1.3;
+      pr.mesh.rotation.x += dt * 12; pr.mesh.rotation.y += dt * 9;
+      if (f >= 1) {
+        this.scene.remove(pr.mesh);
+        (pr.mesh.material as THREE.Material).dispose?.();
+        this.projectiles.splice(i, 1);
+        pr.onHit();
       }
     }
   }

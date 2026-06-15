@@ -40,6 +40,7 @@ export class MobileControls {
         <button class="act-btn big" data-act="attack">👊</button>
         <button class="act-btn big" data-act="block">🛡️</button>
         <button class="act-btn big" data-act="interact">✋</button>
+        <button class="act-btn" data-act="throw">🎯</button>
         <button class="act-btn" data-act="sprint">🏃</button>
         <button class="act-btn" data-act="talk">💬</button>
         <button class="act-btn" data-act="inventory">🎒</button>

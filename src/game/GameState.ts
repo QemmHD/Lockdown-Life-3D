@@ -1,10 +1,10 @@
 import type {
-  PlayerStats, InventoryItem, NPCMemory, GameSettings, SchedulePhaseId, FactionId, RelationshipLevel
+  PlayerStats, InventoryItem, NPCMemory, GameSettings, SchedulePhaseId, FactionId, RelationshipLevel, PlayerAppearance
 } from './types';
 import { PLAYABLE_FACTIONS } from '../data/factions';
 import { NPCS } from '../data/npcs';
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const SAVE_KEY = 'lockdown_life_3d_save';
 
 export function defaultStats(): PlayerStats {
@@ -39,6 +39,11 @@ export class GameState {
   playerFaction: FactionId | null = null;
   currentRoom = 'cellblock';
   lockdown = false;
+  playerName = 'Inmate';
+  crime = 'Unknown Charges';
+  appearance: PlayerAppearance = { height: 1.0, skin: 0xe0ac69, hair: 0x2b1d0e, hairStyle: 'short', uniform: 0xd86a2c };
+  dayCrime = false;        // committed a witnessed crime today (drives sentence growth)
+  dayClean = true;         // stayed out of trouble today (drives "good behavior" cuts)
 
   constructor() {
     this.reset();
@@ -71,6 +76,11 @@ export class GameState {
     this.playerFaction = null;
     this.currentRoom = 'cellblock';
     this.lockdown = false;
+    this.playerName = 'Inmate';
+    this.crime = 'Unknown Charges';
+    this.appearance = { height: 1.0, skin: 0xe0ac69, hair: 0x2b1d0e, hairStyle: 'short', uniform: 0xd86a2c };
+    this.dayCrime = false;
+    this.dayClean = true;
   }
 
   mem(id: string): NPCMemory {

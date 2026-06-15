@@ -97,7 +97,8 @@ export class Menus {
     const s = this.state.stats;
     const row = (l: string, v: number | string) => `<div class="stat-row"><span>${l}</span><b>${v}</b></div>`;
     this.wrap(`<div class="menu-panel scroll">
-      <h2>📊 Inmate Stats</h2>
+      <h2>📊 ${this.state.playerName}</h2>
+      <div class="tagline">Convicted of ${this.state.crime} · ${this.state.sentenceDays} days remaining</div>
       <div class="stat-grid">
         ${row('Health', Math.round(s.health) + '/' + s.maxHealth)}
         ${row('Stamina', Math.round(s.stamina) + '/' + s.maxStamina)}
@@ -197,8 +198,8 @@ export class Menus {
       <div class="controls-grid">
         <div><b>Desktop</b><ul>
           <li>WASD / Arrows — Move</li><li>Shift — Sprint</li>
-          <li>E / Space — Interact</li><li>F / Left-click — Attack</li>
-          <li>R / Right-click — Block</li><li>Q — Shove</li>
+          <li>E / Space — Interact / Grab object</li><li>F / Left-click — Attack</li>
+          <li>R / Right-click — Block</li><li>Q — Shove · G — Throw</li>
           <li>Tab / I — Inventory</li><li>M — Map</li>
           <li>P / Esc — Pause</li><li>+/- — Zoom</li>
         </ul></div>
@@ -297,12 +298,71 @@ export class Menus {
     go.onclick = () => { if (!go.disabled) { this.hide(); cb(); } };
   }
 
+  // ---------- Character creation ----------
+  creator(cb: (o: { name: string; height: number; skin: number; hair: number; hairStyle: any; uniform: number; backstory: string }) => void) {
+    this.pausedScreen = false;
+    const skins = [0xffdbac, 0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0x6b4423];
+    const hairs = [0x2b1d0e, 0x000000, 0x5a3a1a, 0x888888, 0xd9b382, 0xb33a2a];
+    const suits = [0xd86a2c, 0xb8a85a, 0x7f8a93, 0x35506e, 0xe2e2e2, 0x3a6b3a];
+    const styles = ['short', 'bald', 'mohawk', 'cap', 'beanie', 'long'];
+    const builds = [{ n: 'Slim', h: 0.9 }, { n: 'Average', h: 1.0 }, { n: 'Heavy', h: 1.12 }];
+    const backstories = [
+      { id: 'bruiser', n: 'Bruiser', d: '+2 Strength, +1 Toughness. Born to brawl.' },
+      { id: 'schemer', n: 'Schemer', d: '+3 Intelligence. Outsmart the system.' },
+      { id: 'survivor', n: 'Survivor', d: '+2 Agility, +1 Toughness. Slippery and tough.' }
+    ];
+    const sel = { name: this.state.playerName === 'Inmate' ? '' : this.state.playerName, build: 1, skin: 2, hair: 0, style: 0, suit: 0, backstory: 'bruiser' };
+    const hex = (n: number) => '#' + n.toString(16).padStart(6, '0');
+
+    const render = () => {
+      const sw = (arr: number[], key: 'skin' | 'hair' | 'suit') =>
+        arr.map((c, i) => `<button class="swatch ${sel[key] === i ? 'on' : ''}" data-k="${key}" data-i="${i}" style="background:${hex(c)}"></button>`).join('');
+      this.wrap(`<div class="menu-bg"></div><div class="menu-panel scroll creator">
+        <h2>🧍 Create Your Inmate</h2>
+        <label class="cc-row"><span>Name</span><input id="cc-name" type="text" maxlength="16" placeholder="e.g. Spike" value="${sel.name}"></label>
+        <div class="cc-row"><span>Build</span><div class="cc-opts">${builds.map((b, i) => `<button class="cc-opt ${sel.build === i ? 'on' : ''}" data-k="build" data-i="${i}">${b.n}</button>`).join('')}</div></div>
+        <div class="cc-row"><span>Skin</span><div class="cc-swatches">${sw(skins, 'skin')}</div></div>
+        <div class="cc-row"><span>Hair style</span><div class="cc-opts">${styles.map((s, i) => `<button class="cc-opt ${sel.style === i ? 'on' : ''}" data-k="style" data-i="${i}">${s}</button>`).join('')}</div></div>
+        <div class="cc-row"><span>Hair color</span><div class="cc-swatches">${sw(hairs, 'hair')}</div></div>
+        <div class="cc-row"><span>Jumpsuit</span><div class="cc-swatches">${sw(suits, 'suit')}</div></div>
+        <div class="cc-row col"><span>Backstory</span><div class="cc-stories">${backstories.map((b) => `<button class="cc-story ${sel.backstory === b.id ? 'on' : ''}" data-story="${b.id}"><b>${b.n}</b><i>${b.d}</i></button>`).join('')}</div></div>
+        <button id="cc-go" class="menu-big">▶ Enter the Prison</button>
+      </div>`);
+
+      const nameEl = this.overlay.querySelector('#cc-name') as HTMLInputElement;
+      nameEl.oninput = () => { sel.name = nameEl.value; };
+      this.overlay.querySelectorAll('[data-k]').forEach((b) => {
+        (b as HTMLElement).onclick = () => {
+          const k = (b as HTMLElement).dataset.k as any;
+          const i = parseInt((b as HTMLElement).dataset.i!);
+          (sel as any)[k] = i;
+          sel.name = nameEl.value;
+          render();
+        };
+      });
+      this.overlay.querySelectorAll('[data-story]').forEach((b) => {
+        (b as HTMLElement).onclick = () => { sel.backstory = (b as HTMLElement).dataset.story!; sel.name = nameEl.value; render(); };
+      });
+      (this.overlay.querySelector('#cc-go') as HTMLElement).onclick = () => {
+        const nm = (sel.name || '').trim() || 'Spike';
+        this.hide();
+        cb({ name: nm, height: builds[sel.build].h, skin: skins[sel.skin], hair: hairs[sel.hair], hairStyle: styles[sel.style], uniform: suits[sel.suit], backstory: sel.backstory });
+      };
+    };
+    render();
+  }
+
   // ---------- Day summary ----------
-  daySummary(earned: { money: number; rep: number }, cb: () => void) {
+  daySummary(earned: { money: number; rep: number; daysAdded: number; daysCut: number }, cb: () => void) {
     const s = this.state.stats;
+    const timeLine = earned.daysAdded || earned.daysCut
+      ? `<div class="stat-row"><span>Time adjustment</span><b>${earned.daysCut ? `<span style="color:#66ff88">-${earned.daysCut}</span>` : ''}${earned.daysAdded ? ` <span style="color:#ff6655">+${earned.daysAdded}</span>` : ''} days</b></div>`
+      : `<div class="stat-row"><span>Behavior</span><b>No change</b></div>`;
     this.wrap(`<div class="menu-panel"><h2>🌅 Day ${this.state.day - 1} Complete</h2>
       <div class="summary">
         <p>You survived another day inside.</p>
+        ${timeLine}
+        <div class="stat-row"><span>Money earned</span><b>$${earned.money}</b></div>
         <div class="stat-row"><span>Sentence remaining</span><b>${this.state.sentenceDays} days</b></div>
         <div class="stat-row"><span>Reputation</span><b>${Math.round(s.reputation)}</b></div>
         <div class="stat-row"><span>Respect</span><b>${Math.round(s.respect)}</b></div>

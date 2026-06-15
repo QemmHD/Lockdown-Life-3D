@@ -204,12 +204,23 @@ export interface SerializedNPC {
   koTimer: number;
 }
 
+export interface PlayerAppearance {
+  height: number;
+  skin: number;
+  hair: number;
+  hairStyle: 'short' | 'bald' | 'mohawk' | 'cap' | 'beanie' | 'long';
+  uniform: number;
+}
+
 export interface SaveData {
   version: number;
   day: number;
   timeOfDay: number; // 0-24
   phase: SchedulePhaseId;
   sentenceDays: number;
+  playerName: string;
+  crime: string;
+  appearance: PlayerAppearance;
   stats: PlayerStats;
   player: { x: number; z: number };
   inventory: InventoryItem[];

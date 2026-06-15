@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CharacterRig } from './CharacterFactory';
 import { CollisionWorld } from '../world/Collision';
 import { GameState } from '../game/GameState';
+import type { PlayerAppearance } from '../game/types';
 
 export class Player {
   rig: CharacterRig;
@@ -29,6 +30,24 @@ export class Player {
   setPos(x: number, z: number) {
     this.x = x; this.z = z;
     this.rig.group.position.set(x, 0, z);
+  }
+
+  // Rebuild the player model from chosen appearance (character creation / load).
+  customize(a: PlayerAppearance, scene: THREE.Scene) {
+    scene.remove(this.rig.group);
+    this.rig.dispose();
+    this.rig = new CharacterRig({
+      height: a.height,
+      skin: a.skin,
+      hair: a.hair,
+      hairStyle: a.hairStyle,
+      uniform: a.uniform,
+      accentColor: 0xffffff,
+      showRing: true,
+      ringColor: 0x55ff77
+    });
+    this.rig.group.position.set(this.x, 0, this.z);
+    scene.add(this.rig.group);
   }
 
   knockout(seconds: number) {

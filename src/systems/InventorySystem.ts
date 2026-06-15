@@ -63,6 +63,15 @@ export class InventorySystem {
     return n;
   }
 
+  bestWeapon(): { id: string; damage: number } | null {
+    let best: { id: string; damage: number } | null = null;
+    for (const it of this.state.inventory) {
+      const d = ITEMS[it.itemId];
+      if (d?.damage && (!best || d.damage > best.damage)) best = { id: it.itemId, damage: d.damage };
+    }
+    return best;
+  }
+
   bestWeaponDamage(): number {
     let best = 0;
     for (const it of this.state.inventory) {

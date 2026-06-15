@@ -10,6 +10,7 @@ export interface EventHooks {
   spawnHostile: () => void;
   startEscapeThread: () => void;
   notify: (title: string, body: string) => void;
+  addTime: (n: number, reason: string) => void;
 }
 
 export class EventSystem {
@@ -84,7 +85,7 @@ export class EventSystem {
         else t('Nothing to hide. You stay cool.'); break;
       }
       case 'comply': s.heat = clamp(s.heat - 5, 0, 100); t('You comply. Heat eases a little.'); break;
-      case 'slip_away': if (Math.random() < 0.4 + s.agility * 0.04) { t('You slipped the search.', 'good'); } else { s.heat += 15; this.inv.confiscateContraband(); t('Caught dodging — contraband seized!', 'bad'); } break;
+      case 'slip_away': if (Math.random() < 0.4 + s.agility * 0.04) { t('You slipped the search.', 'good'); } else { s.heat += 15; const seized = this.inv.confiscateContraband(); if (seized) this.hooks.addTime(1, 'Contraband seized'); t('Caught dodging — contraband seized!', 'bad'); } break;
       case 'rumor_invest': s.intelligence += Math.random() < 0.3 ? 1 : 0; this.inv.add('betting_slip'); t('You dig up a lead and a betting slip.', 'good'); break;
       case 'help_sick': s.reputation += 4; this.state.changeFactionRep('yard_saints', 6); s.mood += 5; t('You help them to medical. Saints respect that.', 'good'); break;
       case 'deny_theft': if (s.intelligence > 5 || Math.random() < 0.5) { t('They believe you. Crisis averted.', 'good'); } else { this.hooks.spawnHostile(); t('They don\'t buy it — here come fists!', 'bad'); } break;
@@ -97,7 +98,7 @@ export class EventSystem {
       case 'refuse_protection': if (s.strength + s.respect * 0.1 > 8) { s.respect += 4; t('You stand your ground. Respect up.', 'good'); } else { this.hooks.spawnHostile(); t('The bully makes good on his threat!', 'bad'); } break;
       case 'force_lockdown': this.hooks.forceLockdown(); t('EMERGENCY LOCKDOWN!', 'bad'); break;
       case 'help_new': s.reputation += 3; this.state.changeFactionRep('yard_saints', 4); t('You show the new fish the ropes. Rep up.', 'good'); break;
-      case 'rob_new': if (Math.random() < 0.6) { s.money += 8; s.reputation -= 4; this.state.changeFactionRep('yard_saints', -6); t('You shake them down. +$8, but rep drops.', 'bad'); } else { s.heat += 12; t('A guard saw it — heat up!', 'bad'); } break;
+      case 'rob_new': if (Math.random() < 0.6) { s.money += 8; s.reputation -= 4; this.state.changeFactionRep('yard_saints', -6); t('You shake them down. +$8, but rep drops.', 'bad'); } else { s.heat += 12; this.hooks.addTime(1, 'Caught robbing an inmate'); t('A guard saw it — heat up!', 'bad'); } break;
       case 'bribe_guard': if (s.money >= 20) { s.money -= 20; s.heat = clamp(s.heat - 50, 0, 100); t('Heat cleared via bribe.', 'good'); } else t('Not enough cash.'); break;
       case 'confront_snitch': this.hooks.spawnHostile(); s.respect += 2; t('You confront the snitch — it gets physical.', 'bad'); break;
       case 'lay_low': s.heat = clamp(s.heat - 8, 0, 100); s.mood -= 4; t('You keep your head down. Heat eases.'); break;

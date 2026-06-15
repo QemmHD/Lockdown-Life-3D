@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.3.0 — "Hard Time" (deeper sim systems)
+Leans the sim toward the Hard Time prison-sandbox feel:
+- **Character creation**: after intake, build your inmate — name, body build, skin tone, hair
+  style & colour, jumpsuit colour, and a **backstory** that biases your starting stats
+  (Bruiser / Schemer / Survivor). Your custom model is rebuilt live and saved.
+- **Behaviour-driven sentence**: misbehaving **adds days** to your time (assaulting guards,
+  getting thrown in solitary, contraband seized, caught robbing), while **good behaviour cuts it**
+  (a clean day with low heat at lights-out shaves a day). Floating "+1 DAY / -1 DAY" feedback and a
+  day-summary breakdown make the consequence loop tangible.
+- **Grab & throw objects**: loose items (broom, bottle, soap, sharp spoon, smokes…) are scattered
+  around the prison — grab them (Interact), then **throw your weapon** (G / 🎯) at a target for big
+  ranged damage and knockback.
+- Player name & charge shown on the stats screen; new throw control on desktop and mobile.
+
 ## v1.2.0 — "Hard Light" (Graphics Overhaul)
 A full visual overhaul of the rendering pipeline:
 - **PBR materials**: the whole world and all characters moved from flat Lambert shading to

@@ -7,7 +7,7 @@ export type InteractType =
   | 'bed' | 'toilet' | 'stash' | 'serving' | 'table' | 'trash'
   | 'weights' | 'bag' | 'track' | 'pullup' | 'books' | 'shower'
   | 'medbed' | 'workbench' | 'cleanstation' | 'laundrystation'
-  | 'kitchenstation' | 'phone' | 'desk' | 'door';
+  | 'kitchenstation' | 'phone' | 'desk' | 'door' | 'pickup';
 
 export interface Interactable {
   id: string;
@@ -442,6 +442,33 @@ export class PrisonMap {
 
     // scattered trash / grunge props in hallway and yard
     this.scatterTrash();
+    // loose grabbable objects (Hard Time style — grab & throw)
+    this.buildPickups();
+  }
+
+  private addPickup(x: number, z: number, itemId: string, label: string, color: number) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.3, 0.35), new THREE.MeshStandardMaterial({ color, flatShading: true }));
+    m.position.set(x, 0.25, z);
+    m.castShadow = true;
+    this.root.add(m);
+    this.addInteractable({ id: 'pickup_' + itemId + '_' + Math.round(x) + '_' + Math.round(z), type: 'pickup', label: 'Grab ' + label, x, z, room: '', payload: itemId, mesh: m });
+  }
+
+  removePickup(it: Interactable) {
+    if (it.mesh) { this.root.remove(it.mesh); }
+    const i = this.interactables.indexOf(it);
+    if (i >= 0) this.interactables.splice(i, 1);
+  }
+
+  private buildPickups() {
+    this.addPickup(-22, 2, 'broom', 'broom', 0xb08a4a);
+    this.addPickup(-10, 4.5, 'water_bottle', 'bottle', 0x6fa8d8);
+    this.addPickup(ROOM_MAP['shower'].x + 2, ROOM_MAP['shower'].z + 2, 'soap', 'soap', 0xeef0e0);
+    this.addPickup(ROOM_MAP['gym'].x - 4, ROOM_MAP['gym'].z + 4, 'workout_gloves', 'gloves', 0x333333);
+    this.addPickup(ROOM_MAP['yard'].x - 5, ROOM_MAP['yard'].z + 4.5, 'snack', 'snack', 0xd86a8a);
+    this.addPickup(ROOM_MAP['kitchen'].x + 4, ROOM_MAP['kitchen'].z - 2, 'sharp_spoon', 'sharp spoon', 0xc0c0c8);
+    this.addPickup(ROOM_MAP['workshop'].x - 4, ROOM_MAP['workshop'].z + 4, 'broom', 'mop', 0x9a7a3a);
+    this.addPickup(40, -2, 'cigarettes', 'smokes', 0xddccaa);
   }
 
   private scatterTrash() {

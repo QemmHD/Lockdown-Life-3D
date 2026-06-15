@@ -33,8 +33,14 @@ npm run typecheck  # type-check only
 
 ## How to play
 
-You start in your cell with **14 days** on your sentence. Survive each day, build a reputation,
+After booking, you **create your inmate** (name, build, looks, jumpsuit and a backstory that biases
+your starting stats), then begin your randomly-rolled sentence. Survive each day, build a reputation,
 manage your needs, deal with the gangs, and earn your way out.
+
+**Your sentence is not fixed** (Hard Time style): misbehaving in front of guards — fighting,
+contraband, assaulting officers, solitary trips — **adds days**, while clean days with low heat
+**cut your time**. You can also **grab loose objects** around the prison and **throw** them (`G`/🎯)
+as improvised weapons.
 
 ### Desktop controls
 | Action | Key |
@@ -45,6 +51,8 @@ manage your needs, deal with the gangs, and earn your way out.
 | Attack | `F` or **Left-click** |
 | Block | `R` or **Right-click** (hold) |
 | Shove | `Q` |
+| Throw weapon | `G` |
+| Grab object | `E` (near a loose object) |
 | Inventory | `I` or `Tab` |
 | Map | `M` |
 | Pause | `P` or `Esc` |

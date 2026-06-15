@@ -85,6 +85,34 @@ export class CombatSystem {
     }
   }
 
+  // Throw your best weapon at the faced target (Hard Time style)
+  throwWeapon() {
+    if (this.player.ko) return;
+    const w = this.inv.bestWeapon();
+    if (!w) { this.fx.floatText(this.player.x, 1.9, this.player.z, 'Nothing to throw', '#ccc'); return; }
+    const target = this.nearestTarget(13);
+    this.inv.remove(w.id, 1);
+    this.player.rig.setState('shove');
+    this.audio.play('swing');
+    const tx = target ? target.x : this.player.x + Math.sin(this.player.rig.facing) * 9;
+    const tz = target ? target.z : this.player.z + Math.cos(this.player.rig.facing) * 9;
+    this.fx.projectile(this.player.x, this.player.z, tx, tz, () => {
+      if (!target || target.ko) { this.fx.dust(tx, tz); return; }
+      const dmg = Math.round(w.damage + this.state.stats.strength * 0.6);
+      target.health -= dmg;
+      target.takeHit();
+      this.fx.damageNumber(target.x, target.z, dmg, true);
+      this.fx.impact(target.x, target.z);
+      this.audio.play('hit');
+      this.camera.shake(0.35);
+      const ang = Math.atan2(target.x - this.player.x, target.z - this.player.z);
+      target.x += Math.sin(ang) * 1.6; target.z += Math.cos(ang) * 1.6; target.setPos(target.x, target.z);
+      this.makeReaction(target);
+      this.onFightSeen?.(target.x, target.z, false);
+      if (target.health <= 0) { target.knockout(20 + Math.random() * 15); this.fx.crowd(target.x, target.z); this.onKO?.(target); }
+    });
+  }
+
   // Decide how a hit NPC reacts
   private makeReaction(npc: NPC) {
     const mem = this.state.mem(npc.def.id);
