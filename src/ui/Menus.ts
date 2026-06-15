@@ -1,0 +1,278 @@
+import { GameState, relLevel, clamp } from '../game/GameState';
+import { ScheduleSystem } from '../systems/ScheduleSystem';
+import { FACTIONS, PLAYABLE_FACTIONS } from '../data/factions';
+import { ROOMS, ROOM_MAP } from '../data/rooms';
+import { NPCS } from '../data/npcs';
+import type { GameSettings } from '../game/types';
+
+export interface MenuHooks {
+  onNewGame: () => void;
+  onContinue: () => void;
+  onResume: () => void;
+  onSave: () => void;
+  onQuitToMenu: () => void;
+  onSettingsChange: (s: GameSettings) => void;
+  hasSave: () => boolean;
+  playerPos: () => { x: number; z: number };
+  targetRoom: () => string;
+  version: string;
+}
+
+export class Menus {
+  private overlay: HTMLDivElement;
+  visible = false;
+  pausedScreen = false;
+
+  constructor(private state: GameState, private schedule: ScheduleSystem, private hooks: MenuHooks) {
+    this.overlay = document.createElement('div');
+    this.overlay.id = 'menu';
+    this.overlay.style.display = 'none';
+    document.getElementById('ui-root')!.appendChild(this.overlay);
+  }
+
+  hide() { this.overlay.style.display = 'none'; this.visible = false; this.pausedScreen = false; }
+  private wrap(inner: string) { this.overlay.style.display = 'flex'; this.visible = true; this.overlay.innerHTML = inner; }
+
+  // ---------- Main menu ----------
+  mainMenu() {
+    this.pausedScreen = false;
+    const has = this.hooks.hasSave();
+    this.wrap(`
+      <div class="menu-bg"></div>
+      <div class="menu-panel main-menu">
+        <h1 class="game-title">LOCKDOWN<span>LIFE 3D</span></h1>
+        <p class="tagline">Survive the yard. Run the block. Earn your freedom.</p>
+        <div class="menu-btns">
+          <button id="m-new" class="menu-big">▶ New Game</button>
+          <button id="m-cont" class="menu-big" ${has ? '' : 'disabled'}>⏵ Continue</button>
+          <button id="m-controls" class="menu-big">🎮 Controls</button>
+          <button id="m-settings" class="menu-big">⚙ Settings</button>
+          <button id="m-credits" class="menu-big">ℹ Credits</button>
+        </div>
+        <div class="version">v${this.hooks.version}</div>
+      </div>`);
+    this.bind('#m-new', () => this.hooks.onNewGame());
+    this.bind('#m-cont', () => { if (has) this.hooks.onContinue(); });
+    this.bind('#m-controls', () => this.controls(true));
+    this.bind('#m-settings', () => this.settings(true));
+    this.bind('#m-credits', () => this.credits());
+  }
+
+  // ---------- Pause ----------
+  pause() {
+    this.pausedScreen = true;
+    this.wrap(`
+      <div class="menu-panel">
+        <h2>⏸ Paused</h2>
+        <div class="menu-btns">
+          <button id="p-resume" class="menu-big">▶ Resume</button>
+          <button id="p-stats" class="menu-big">📊 Stats</button>
+          <button id="p-factions" class="menu-big">⚔️ Factions</button>
+          <button id="p-rel" class="menu-big">👥 Relationships</button>
+          <button id="p-map" class="menu-big">🗺️ Map</button>
+          <button id="p-save" class="menu-big">💾 Save Game</button>
+          <button id="p-controls" class="menu-big">🎮 Controls</button>
+          <button id="p-settings" class="menu-big">⚙ Settings</button>
+          <button id="p-quit" class="menu-big danger">⏏ Quit to Menu</button>
+        </div>
+      </div>`);
+    this.bind('#p-resume', () => this.hooks.onResume());
+    this.bind('#p-stats', () => this.stats());
+    this.bind('#p-factions', () => this.factions());
+    this.bind('#p-rel', () => this.relationships());
+    this.bind('#p-map', () => this.map());
+    this.bind('#p-save', () => { this.hooks.onSave(); });
+    this.bind('#p-controls', () => this.controls(false));
+    this.bind('#p-settings', () => this.settings(false));
+    this.bind('#p-quit', () => this.hooks.onQuitToMenu());
+  }
+
+  private backBtn() {
+    return `<button id="back" class="menu-big">⬅ Back</button>`;
+  }
+  private goBack() { this.pausedScreen ? this.pause() : this.mainMenu(); }
+
+  // ---------- Stats ----------
+  stats() {
+    const s = this.state.stats;
+    const row = (l: string, v: number | string) => `<div class="stat-row"><span>${l}</span><b>${v}</b></div>`;
+    this.wrap(`<div class="menu-panel scroll">
+      <h2>📊 Inmate Stats</h2>
+      <div class="stat-grid">
+        ${row('Health', Math.round(s.health) + '/' + s.maxHealth)}
+        ${row('Stamina', Math.round(s.stamina) + '/' + s.maxStamina)}
+        ${row('Hunger', Math.round(s.hunger))}
+        ${row('Mood', Math.round(s.mood))}
+        ${row('Strength', s.strength)}
+        ${row('Agility', s.agility)}
+        ${row('Toughness', s.toughness)}
+        ${row('Intelligence', s.intelligence)}
+        ${row('Reputation', Math.round(s.reputation))}
+        ${row('Respect', Math.round(s.respect))}
+        ${row('Fear factor', Math.round(s.fear))}
+        ${row('Gang influence', Math.round(s.influence))}
+        ${row('Heat / Suspicion', Math.round(s.heat))}
+        ${row('Injury', Math.round(s.injury))}
+        ${row('Money', '$' + s.money)}
+        ${row('Sentence', this.state.sentenceDays + ' days')}
+      </div>
+      ${this.backBtn()}</div>`);
+    this.bind('#back', () => this.goBack());
+  }
+
+  // ---------- Factions ----------
+  factions() {
+    let rows = '';
+    for (const id of PLAYABLE_FACTIONS) {
+      const f = FACTIONS[id];
+      const rep = Math.round(this.state.factionRep[id] ?? 0);
+      const standing = rep <= -40 ? 'Hostile' : rep < -10 ? 'Unfriendly' : rep < 20 ? 'Neutral' : rep < 60 ? 'Friendly' : 'Allied';
+      const joined = this.state.playerFaction === id ? ' <span class="joined">★ MEMBER</span>' : '';
+      rows += `<div class="faction-row" style="border-left:6px solid ${f.cssColor}">
+        <div class="faction-top"><b style="color:${f.cssColor}">${f.name}</b>${joined} <span class="faction-standing">${standing} (${rep})</span></div>
+        <div class="faction-desc">${f.description}</div>
+        <div class="faction-meta">Values: ${f.values} · Territory: ${f.territory.map((t) => ROOM_MAP[t]?.name ?? t).join(', ') || 'None'} · Behavior: ${f.behavior}</div>
+      </div>`;
+    }
+    this.wrap(`<div class="menu-panel scroll"><h2>⚔️ Factions</h2>${rows}${this.backBtn()}</div>`);
+    this.bind('#back', () => this.goBack());
+  }
+
+  // ---------- Relationships ----------
+  relationships() {
+    const list = NPCS.filter((n) => n.faction !== 'staff')
+      .map((n) => ({ n, m: this.state.mem(n.id) }))
+      .sort((a, b) => b.m.relationship - a.m.relationship);
+    let rows = '';
+    for (const { n, m } of list) {
+      const f = FACTIONS[n.faction];
+      const lvl = relLevel(m.relationship);
+      const notes: string[] = [];
+      if (m.attacked) notes.push('you fought');
+      if (m.helped) notes.push('you helped');
+      if (m.traded) notes.push('traded');
+      if (m.robbed) notes.push('robbed');
+      if (m.insulted) notes.push('insulted');
+      if (m.bribed) notes.push('bribed');
+      const threat = n.base.aggression > 0.7 ? '🔴 High' : n.base.aggression > 0.4 ? '🟡 Med' : '🟢 Low';
+      rows += `<div class="rel-row">
+        <div><b>${n.name}</b> <span style="color:${f.cssColor}">${f.name}</span> · ${n.role}</div>
+        <div class="rel-line"><span class="rel-${lvl}">${lvl}</span> (${Math.round(m.relationship)}) · Threat ${threat} ${notes.length ? '· ' + notes.join(', ') : ''}</div>
+      </div>`;
+    }
+    this.wrap(`<div class="menu-panel scroll"><h2>👥 Relationships</h2>${rows}${this.backBtn()}</div>`);
+    this.bind('#back', () => this.goBack());
+  }
+
+  // ---------- Map ----------
+  map() {
+    const W = 360, H = 170;
+    const sx = W / 130, sz = H / 56;
+    const tx = (x: number) => (x + 65) * sx;
+    const tz = (z: number) => (z + 28) * sz;
+    let svg = `<svg viewBox="0 0 ${W} ${H}" class="map-svg">`;
+    for (const r of ROOMS) {
+      if (r.id === 'hallway') continue;
+      const fill = '#' + r.floor.toString(16).padStart(6, '0');
+      const target = this.hooks.targetRoom() === r.id;
+      svg += `<rect x="${tx(r.x - r.w / 2)}" y="${tz(r.z - r.d / 2)}" width="${r.w * sx}" height="${r.d * sz}"
+        fill="${fill}" stroke="${target ? '#ffe066' : r.restricted ? '#e74c3c' : '#222'}" stroke-width="${target ? 2 : 1}" opacity="0.9"/>`;
+      svg += `<text x="${tx(r.x)}" y="${tz(r.z)}" font-size="5" fill="#fff" text-anchor="middle">${r.name}</text>`;
+      if (r.faction && FACTIONS[r.faction]) {
+        svg += `<circle cx="${tx(r.x - r.w / 2) + 5}" cy="${tz(r.z - r.d / 2) + 5}" r="3" fill="${FACTIONS[r.faction].cssColor}"/>`;
+      }
+    }
+    const p = this.hooks.playerPos();
+    svg += `<circle cx="${tx(p.x)}" cy="${tz(p.z)}" r="4" fill="#55ff77" stroke="#000"/>`;
+    svg += `</svg>`;
+    this.wrap(`<div class="menu-panel"><h2>🗺️ Prison Map</h2>${svg}
+      <div class="map-legend"><span style="color:#55ff77">● You</span> <span style="color:#ffe066">▢ Schedule target</span> <span style="color:#e74c3c">▢ Restricted</span></div>
+      ${this.backBtn()}</div>`);
+    this.bind('#back', () => this.goBack());
+  }
+
+  // ---------- Controls ----------
+  controls(fromMain: boolean) {
+    this.wrap(`<div class="menu-panel scroll"><h2>🎮 Controls</h2>
+      <div class="controls-grid">
+        <div><b>Desktop</b><ul>
+          <li>WASD / Arrows — Move</li><li>Shift — Sprint</li>
+          <li>E / Space — Interact</li><li>F / Left-click — Attack</li>
+          <li>R / Right-click — Block</li><li>Q — Shove</li>
+          <li>Tab / I — Inventory</li><li>M — Map</li>
+          <li>P / Esc — Pause</li><li>+/- — Zoom</li>
+        </ul></div>
+        <div><b>Mobile</b><ul>
+          <li>Left joystick — Move</li><li>👊 Attack · 🛡️ Block · ✋ Interact</li>
+          <li>🏃 Sprint · 💬 Talk · 🎒 Inventory</li>
+          <li>Pinch / HUD buttons — menus & zoom</li>
+          <li>Best played in landscape</li>
+        </ul></div>
+      </div>${this.backBtn()}</div>`);
+    this.bind('#back', () => fromMain ? this.mainMenu() : this.goBack());
+  }
+
+  credits() {
+    this.wrap(`<div class="menu-panel"><h2>ℹ Credits</h2>
+      <p>Lockdown Life 3D</p>
+      <p>A system-driven 3D isometric prison sandbox.</p>
+      <p>Built with Three.js + TypeScript + Vite.</p>
+      <p>All art is procedurally generated low-poly geometry.</p>
+      <p class="version">v${this.hooks.version}</p>
+      ${this.backBtn()}</div>`);
+    this.bind('#back', () => this.mainMenu());
+  }
+
+  // ---------- Settings ----------
+  settings(fromMain: boolean) {
+    const s = this.state.settings;
+    this.wrap(`<div class="menu-panel scroll"><h2>⚙ Settings</h2>
+      <div class="settings-grid">
+        <label class="set-row"><span>Master Audio</span><input type="checkbox" id="set-master" ${s.master ? 'checked' : ''}></label>
+        <label class="set-row"><span>SFX Volume</span><input type="range" id="set-vol" min="0" max="1" step="0.05" value="${s.sfxVolume}"></label>
+        <label class="set-row"><span>Camera Shake</span><input type="checkbox" id="set-shake" ${s.cameraShake ? 'checked' : ''}></label>
+        <label class="set-row"><span>Mobile Control Opacity</span><input type="range" id="set-op" min="0.2" max="1" step="0.05" value="${s.controlOpacity}"></label>
+        <label class="set-row"><span>Graphics Quality</span>
+          <select id="set-q"><option value="high" ${s.quality === 'high' ? 'selected' : ''}>High</option><option value="simple" ${s.quality === 'simple' ? 'selected' : ''}>Simple</option></select></label>
+      </div>${this.backBtn()}</div>`);
+    const apply = () => {
+      s.master = (this.overlay.querySelector('#set-master') as HTMLInputElement).checked;
+      s.sfxVolume = parseFloat((this.overlay.querySelector('#set-vol') as HTMLInputElement).value);
+      s.cameraShake = (this.overlay.querySelector('#set-shake') as HTMLInputElement).checked;
+      s.controlOpacity = parseFloat((this.overlay.querySelector('#set-op') as HTMLInputElement).value);
+      s.quality = (this.overlay.querySelector('#set-q') as HTMLSelectElement).value as any;
+      this.hooks.onSettingsChange(s);
+    };
+    this.overlay.querySelectorAll('input,select').forEach((el) => el.addEventListener('change', apply));
+    this.bind('#back', () => fromMain ? this.mainMenu() : this.goBack());
+  }
+
+  // ---------- Day summary ----------
+  daySummary(earned: { money: number; rep: number }, cb: () => void) {
+    const s = this.state.stats;
+    this.wrap(`<div class="menu-panel"><h2>🌅 Day ${this.state.day - 1} Complete</h2>
+      <div class="summary">
+        <p>You survived another day inside.</p>
+        <div class="stat-row"><span>Sentence remaining</span><b>${this.state.sentenceDays} days</b></div>
+        <div class="stat-row"><span>Reputation</span><b>${Math.round(s.reputation)}</b></div>
+        <div class="stat-row"><span>Respect</span><b>${Math.round(s.respect)}</b></div>
+        <div class="stat-row"><span>Money</span><b>$${s.money}</b></div>
+        <div class="stat-row"><span>Heat</span><b>${Math.round(s.heat)}</b></div>
+      </div>
+      <button id="sum-next" class="menu-big">▶ Begin Day ${this.state.day}</button></div>`);
+    this.bind('#sum-next', () => { this.hide(); cb(); });
+  }
+
+  // ---------- Game over / ending ----------
+  ending(title: string, body: string, cb: () => void) {
+    this.wrap(`<div class="menu-panel"><h2>${title}</h2>
+      <p class="ending-body">${body}</p>
+      <button id="end-btn" class="menu-big">▶ Main Menu</button></div>`);
+    this.bind('#end-btn', () => { this.hide(); cb(); });
+  }
+
+  private bind(sel: string, fn: () => void) {
+    const el = this.overlay.querySelector(sel) as HTMLElement | null;
+    if (el) el.onclick = fn;
+  }
+}

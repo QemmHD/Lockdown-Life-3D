@@ -1,0 +1,20 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# build / native wrappers
+ios/
+android/
+.capacitor/
+
+# logs & test artifacts
+*.log
+screenshot-*.png
+smoke.mjs
+probe.mjs
+shot.mjs
