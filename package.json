@@ -1,0 +1,21 @@
+{
+  "name": "lockdown-life-3d",
+  "private": true,
+  "version": "2.3.0-interaction",
+  "type": "module",
+  "description": "Lockdown Life 3D - a gritty 3D isometric prison-life sandbox simulator",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/three": "^0.160.0",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  }
+}
