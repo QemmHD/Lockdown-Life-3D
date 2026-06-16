@@ -9,6 +9,7 @@ export class CameraController {
   private maxZoom = 34;
   private focus = 0;           // dynamic zoom-in bias (combat/tension)
   private focusTarget = 0;
+  private punchAmt = 0;        // transient zoom-punch on impacts
   private shakeAmt = 0;
   private shakeEnabled = true;
   // isometric offset direction (45deg yaw, ~35deg pitch)
@@ -22,7 +23,9 @@ export class CameraController {
   setShakeEnabled(v: boolean) { this.shakeEnabled = v; }
   resize() { this.updateProjection(); }
 
-  private effectiveZoom() { return THREE.MathUtils.clamp(this.baseZoom - this.focus, this.minZoom * 0.7, this.maxZoom); }
+  private effectiveZoom() { return THREE.MathUtils.clamp(this.baseZoom - this.focus - this.punchAmt, this.minZoom * 0.5, this.maxZoom); }
+
+  punch(amount: number) { this.punchAmt = Math.min(2.2, this.punchAmt + amount); }
 
   private updateProjection() {
     const aspect = window.innerWidth / window.innerHeight;
@@ -54,9 +57,10 @@ export class CameraController {
     this.target.set(x + leadX, 0, z + leadZ);
     this.current.lerp(this.target, Math.min(1, dt * 6));
     // smooth dynamic focus zoom
-    const prevFocus = this.focus;
+    const prevZoom = this.focus + this.punchAmt;
     this.focus = THREE.MathUtils.lerp(this.focus, this.focusTarget, Math.min(1, dt * 3));
-    if (Math.abs(this.focus - prevFocus) > 0.001) this.updateProjection();
+    this.punchAmt = Math.max(0, this.punchAmt - dt * 6);   // fast snap-back
+    if (Math.abs(this.focus + this.punchAmt - prevZoom) > 0.001) this.updateProjection();
     this.apply();
     this.shakeAmt *= Math.max(0, 1 - dt * 5);
   }

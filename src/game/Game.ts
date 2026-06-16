@@ -35,7 +35,7 @@ import { InventoryUI } from '../ui/InventoryUI';
 
 type Mode = 'menu' | 'playing' | 'paused' | 'dialogue' | 'inventory' | 'event' | 'activity';
 
-const VERSION = '1.6.0';
+const VERSION = '1.7.0';
 const INTERACT_RANGE = 2.4;
 const SCHEDULE_IDS = SCHEDULE.map((p) => p.id);
 const PHASE_START: Record<string, number> = Object.fromEntries(SCHEDULE.map((p) => [p.id, p.startHour]));
@@ -415,6 +415,7 @@ export class Game {
       else this.hud.toast(`You beat ${npc.name}. Respect up.`, 'good');
     };
     this.combat.onDeath = (npc, byPlayer) => this.handleDeath(npc, byPlayer);
+    this.combat.onImpact = (heavy) => { this.hitStop = Math.max(this.hitStop, heavy ? 0.07 : 0.04); };
     this.combat.onPlayerKO = () => this.handlePlayerKO();
     this.combat.onHostile = (npc) => { if (npc.isGuard) this.triggerAlarm(npc.x, npc.z); };
     this.combat.onFightSeen = (x, z, byGuardOnly) => {
@@ -600,7 +601,9 @@ export class Game {
   private handleDeath(npc: NPC, byPlayer: boolean) {
     if (!this.state.deadNPCs.includes(npc.def.id)) this.state.deadNPCs.push(npc.def.id);
     const fac = FACTIONS[npc.def.faction];
-    this.cam.shake(0.8);
+    this.cam.shake(0.9);
+    this.cam.punch(1.8);
+    this.slowmo = 0.5;   // brief cinematic slow-mo on a kill
     this.audio.play('siren');
     if (byPlayer) {
       const s = this.state.stats;
@@ -854,9 +857,22 @@ export class Game {
   }
 
   // ---------------- Main loop ----------------
+  private hitStop = 0;
+  private slowmo = 0;
   private loop = () => {
-    const dt = Math.min(0.05, this.clock.getDelta());
+    const realDt = Math.min(0.05, this.clock.getDelta());
     const t = this.clock.elapsedTime;
+
+    // hit-stop: freeze the sim for a few ms on impact, but keep rendering (juice)
+    if (this.hitStop > 0 && this.mode === 'playing') {
+      this.hitStop -= realDt;
+      if (this.useFX) this.postfx.render(); else this.renderer.render(this.scene, this.cam.camera);
+      requestAnimationFrame(this.loop);
+      return;
+    }
+    // slow-mo on kills for a brief cinematic beat
+    let dt = realDt;
+    if (this.slowmo > 0 && this.mode === 'playing') { this.slowmo -= realDt; dt = realDt * 0.35; }
 
     if (this.mode === 'menu') this.updateMenu(dt, t);
     else if (this.mode === 'playing') this.updatePlaying(dt, t);

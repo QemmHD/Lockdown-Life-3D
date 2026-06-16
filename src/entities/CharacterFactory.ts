@@ -52,6 +52,10 @@ export class CharacterRig {
   private walkPhase = 0;
   facing = 0; // radians
   private h: number;
+  private squashT = 0;   // hit-reaction squash timer (1 -> 0)
+  lean = 0;              // movement lean amount (set by controller)
+
+  hitReact() { this.squashT = 1; }
 
   constructor(opts: CharacterOptions) {
     this.h = opts.height;
@@ -60,8 +64,8 @@ export class CharacterRig {
 
   private build(o: CharacterOptions) {
     const h = o.height;
-    const skinMat = mat(o.skin);
-    const uni = mat(o.uniform);
+    const skinMat = mat(o.skin, false);   // smooth shading for skin
+    const uni = mat(o.uniform, false);    // smooth shading for the jumpsuit
     const dark = mat(0x222222);
 
     // contact shadow (cheap fake)
@@ -104,11 +108,23 @@ export class CharacterRig {
     // Torso
     this.torso = new THREE.Group();
     this.torso.position.set(0, 0.62 * h, 0);
-    const torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(0.52 * h, 0.66 * h, 0.32 * h), uni);
-    torsoMesh.position.y = 0.33 * h;
+    const torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(0.5 * h, 0.5 * h, 0.3 * h), uni);
+    torsoMesh.position.y = 0.26 * h;
     torsoMesh.castShadow = true;
     shell(torsoMesh, 1.07);
     this.torso.add(torsoMesh);
+    // tapered chest + shoulders for a less boxy build
+    const chest = new THREE.Mesh(new THREE.SphereGeometry(0.3 * h, 10, 8), uni);
+    chest.scale.set(1, 0.7, 0.7);
+    chest.position.y = 0.5 * h;
+    chest.castShadow = true; shell(chest, 1.06);
+    this.torso.add(chest);
+    for (const sx of [-1, 1]) {
+      const sh = new THREE.Mesh(new THREE.SphereGeometry(0.13 * h, 8, 6), uni);
+      sh.position.set(sx * 0.32 * h, 0.55 * h, 0);
+      sh.castShadow = true; shell(sh, 1.12);
+      this.torso.add(sh);
+    }
 
     // faction armband
     const band = new THREE.Mesh(new THREE.BoxGeometry(0.16 * h, 0.16 * h, 0.34 * h), mat(o.accentColor));
@@ -137,10 +153,18 @@ export class CharacterRig {
     // Head
     this.head = new THREE.Group();
     this.head.position.y = 0.72 * h;
-    const headMesh = new THREE.Mesh(new THREE.BoxGeometry(0.34 * h, 0.36 * h, 0.34 * h), skinMat);
+    const headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.2 * h, 12, 10), skinMat);
+    headMesh.scale.set(1, 1.08, 1);
     headMesh.castShadow = true;
-    shell(headMesh, 1.08);
+    shell(headMesh, 1.07);
     this.head.add(headMesh);
+    // jaw + ears for a rounder, more characterful head
+    const jaw = new THREE.Mesh(new THREE.SphereGeometry(0.15 * h, 8, 6), skinMat);
+    jaw.scale.set(1, 0.7, 0.9); jaw.position.y = -0.12 * h; this.head.add(jaw);
+    for (const ex of [-1, 1]) {
+      const ear = new THREE.Mesh(new THREE.SphereGeometry(0.05 * h, 6, 5), skinMat);
+      ear.position.set(ex * 0.2 * h, 0, 0); this.head.add(ear);
+    }
     // eyes
     const eyeGeo = new THREE.BoxGeometry(0.05 * h, 0.05 * h, 0.02 * h);
     const eyeMat = mat(0x111111);
@@ -266,6 +290,15 @@ export class CharacterRig {
     this.group.rotation.y = this.facing;
     const h = this.h;
 
+    // hit-reaction squash & stretch (juice)
+    if (this.squashT > 0) {
+      this.squashT = Math.max(0, this.squashT - dt / 0.18);
+      const sq = Math.sin(this.squashT * Math.PI);
+      this.body.scale.set(1 + sq * 0.14, 1 - sq * 0.18, 1 + sq * 0.14);
+    } else {
+      this.body.scale.set(1, 1, 1);
+    }
+
     // reset
     let alBob = 0, legSwing = 0, armSwing = 0, headBob = 0;
 
@@ -335,7 +368,7 @@ export class CharacterRig {
       this.armR.rotation.x = THREE.MathUtils.lerp(this.armR.rotation.x, -armSwing, 0.3);
       this.armL.rotation.z = THREE.MathUtils.lerp(this.armL.rotation.z, 0.08, 0.2);
       this.armR.rotation.z = THREE.MathUtils.lerp(this.armR.rotation.z, -0.08, 0.2);
-      this.body.rotation.x = THREE.MathUtils.lerp(this.body.rotation.x, 0, 0.2);
+      this.body.rotation.x = THREE.MathUtils.lerp(this.body.rotation.x, this.lean, 0.2);
     }
   }
 

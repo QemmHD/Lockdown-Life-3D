@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.7.0 — "Impact" (character models + game feel)
+- **Character models overhauled again**: smooth-shaded bodies with **shoulders, a tapered chest, a
+  rounded head with jaw & ears**, capsule limbs and sphere hands — properly humanoid silhouettes
+  instead of stacked boxes.
+- **Game feel / juice**:
+  - **Hit-stop** — the action freezes for a few ms on every solid blow for weighty impacts.
+  - **Camera punch** — a quick zoom-snap on hits (bigger on crits/kills).
+  - **Squash & stretch** — characters pop/recoil when struck.
+  - **Attack lunge** — the player steps into each strike; heavier knockback.
+  - **Kill slow-mo** — a brief cinematic slowdown when an inmate goes down for good.
+  - **Movement lean** — characters tilt into their motion for weightier locomotion.
+  - More impact particles + a hit flash when you take damage.
+
 ## v1.6.0 — "Sharper Steel" (graphics overhaul II)
 - **Rebuilt character models**: blocky box limbs replaced with rounded **capsule** arms/legs,
   **sphere hands**, and a **neck** for a softer, more anatomical low-poly silhouette (outlines and

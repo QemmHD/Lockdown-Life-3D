@@ -98,13 +98,13 @@ export class Player {
     this.rig.group.position.set(this.x, 0, this.z);
 
     // animation state
+    const movingNow = Math.hypot(this.vx, this.vz) > 0.4;
     if (!this.rig.isBusy()) {
       if (this.blocking) this.rig.setState('block');
-      else {
-        const moving = Math.hypot(this.vx, this.vz) > 0.4;
-        this.rig.setState(moving ? (wantSprint ? 'sprint' : 'walk') : 'idle');
-      }
+      else this.rig.setState(movingNow ? (wantSprint ? 'sprint' : 'walk') : 'idle');
     }
+    // lean into movement for weighty motion
+    this.rig.lean = movingNow ? (wantSprint ? 0.2 : 0.12) : 0;
     this.rig.update(dt, Math.min(1, Math.hypot(this.vx, this.vz) / speed));
   }
 }

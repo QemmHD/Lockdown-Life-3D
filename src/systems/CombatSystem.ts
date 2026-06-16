@@ -14,6 +14,7 @@ export class CombatSystem {
   camera!: CameraController;
 
   onKO?: (npc: NPC) => void;
+  onImpact?: (heavy: boolean) => void;
   onDeath?: (npc: NPC, byPlayer: boolean) => void;
   onPlayerKO?: () => void;
   onFightSeen?: (x: number, z: number, byGuardOnly: boolean) => void;
@@ -78,14 +79,20 @@ export class CombatSystem {
 
     target.health -= dmg;
     target.takeHit();
+    target.rig.hitReact();
     this.fx.damageNumber(target.x, target.z, dmg, crit);
     this.fx.impact(target.x, target.z);
     this.audio.play('hit');
-    this.camera.shake(crit ? 0.5 : 0.3);
+    this.camera.shake(crit ? 0.6 : 0.4);
+    this.camera.punch(crit ? 1.6 : 1.1);
+    this.onImpact?.(crit || !shove);
+    // attack lunge — step into the blow
+    this.player.x += Math.sin(this.player.rig.facing) * 0.35;
+    this.player.z += Math.cos(this.player.rig.facing) * 0.35;
 
     // knockback
     const ang = Math.atan2(target.x - this.player.x, target.z - this.player.z);
-    const kb = shove ? 2.4 : 1.2;
+    const kb = shove ? 3.0 : 1.6;
     target.x += Math.sin(ang) * kb;
     target.z += Math.cos(ang) * kb;
     target.setPos(target.x, target.z);
@@ -112,10 +119,13 @@ export class CombatSystem {
       const dmg = Math.round(w.damage + this.state.stats.strength * 0.6);
       target.health -= dmg;
       target.takeHit();
+      target.rig.hitReact();
       this.fx.damageNumber(target.x, target.z, dmg, true);
       this.fx.impact(target.x, target.z);
       this.audio.play('hit');
-      this.camera.shake(0.35);
+      this.camera.shake(0.45);
+      this.camera.punch(1.4);
+      this.onImpact?.(true);
       const ang = Math.atan2(target.x - this.player.x, target.z - this.player.z);
       target.x += Math.sin(ang) * 1.6; target.z += Math.cos(ang) * 1.6; target.setPos(target.x, target.z);
       if (!target.ko) this.makeReaction(target);
@@ -206,8 +216,12 @@ export class CombatSystem {
         dmg = Math.max(1, Math.round(dmg));
         s.health = clamp(s.health - dmg, 0, s.maxHealth);
         s.injury = clamp(s.injury + dmg * 0.4, 0, 100);
+        this.player.rig.hitReact();
         this.fx.damageNumber(this.player.x, this.player.z, dmg);
-        this.camera.shake(0.4);
+        this.fx.impact(this.player.x, this.player.z);
+        this.camera.shake(0.5);
+        this.camera.punch(this.player.blocking ? 0.6 : 1.2);
+        this.onImpact?.(!this.player.blocking);
         // knockback player
         const ang = Math.atan2(this.player.x - n.x, this.player.z - n.z);
         this.player.x += Math.sin(ang) * 0.8;
