@@ -134,10 +134,12 @@ Gangs are purely fictional game data. Joining gangs is **not** implemented yet (
 
 - **Guard AI v2**: roles (patrol/checkpoint/response/escort/search/desk/lockdown/riot) + patrol routes + coordinated response (no pile-on)
 - **Prisoner AI**: intent scoring (schedule/socialize/group/avoid/flee/watch/return-cell/hide/comply) + decaying memory + group clustering + standoffs
+- **Combat feel**: phased fights (squareUp/windup/strike/block/dodge/hitReact/stumble/down/recover), attack types, knockback, knockdown, player combat panel, guard interruption, crowd reactions
 
 **Partial**
 - Guard AI (roles + routes + checkpoints, but no formal squad tactics / dynamic routes)
 - Prisoner AI (lightweight intent scoring + memory, not a full GOAP planner)
+- Combat (phased + defensive + non-lethal knockdown; no grapples/combos/weapon-specific animations)
 - Riot event (small controlled flare-up, not a full riot-warfare sim)
 - NPC object use (schedule-anchor driven, no deep daily planning)
 - Door permissions (open/closed/locked/restricted/guard-pass; `broken/jammed` & finer roles are placeholders)
@@ -231,7 +233,7 @@ versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARC
 - **Tuning (3.1)**: eased Heat that decays when calm, smoothed riot pressure with hysteresis + cooldowns, lockdown re-entry cooldown, deduped alerts, contextual player panel, and `?debug` playtest telemetry (`sim.metrics`).
 
 ## Planned next
-Combat/animation feel, economy/contraband depth, or UI/menu/progression — then iOS (Capacitor) packaging prep.
+UI/menu/progression, economy/contraband depth, or audio/polish — then iOS (Capacitor) packaging prep.
 
 ---
 

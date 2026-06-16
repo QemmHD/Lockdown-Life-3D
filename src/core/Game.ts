@@ -248,6 +248,9 @@ export class Game {
   // reachable the sim returns a clear reason ("Find a bed.", "No reachable shower.", …).
   private playerActions(_e: Entity): PanelAction[] {
     const a: PanelAction[] = [];
+    // mid-fight the panel becomes a combat panel (Strike / Heavy / Shove / Block / Back Off)
+    const combat = this.sim.playerCombatActions();
+    if (combat.length) { for (const c of combat) a.push({ key: c.key, label: c.label, kind: 'risky', danger: c.key === 'heavy' }); return a; }
     const chaos = this.sim.playerChaosActions();
     // during a lockdown the needs stations are out of reach — lead with the chaos actions only
     if (!this.sim.lockdown.active) {
@@ -274,6 +277,7 @@ export class Game {
   }
   private static SELF_KEYS = ['rest', 'wash', 'eat', 'train', 'work'];
   private static CHAOS_KEYS = ['comply', 'returncell', 'hide', 'calm', 'helpguard'];
+  private static COMBAT_KEYS = ['strike', 'heavy', 'shove', 'block'];
   private doAction(key: string) {
     this.panelDirty = true;
     if (this.selectedObj) {
@@ -284,12 +288,14 @@ export class Game {
     }
     const sel = this.selected ?? this.playerEntity;
     const isPlayerSel = sel === this.playerEntity || !!this.sim.ecs.get<Brain>(sel, 'Brain')?.isPlayer;
+    const fighting = isPlayerSel && this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.state === 'fight';
     let status: string;
-    if (isPlayerSel && key === 'escape') status = this.sim.requestEscape();
+    if (fighting && (Game.COMBAT_KEYS.includes(key) || key === 'backoff')) status = this.sim.requestCombatAction(key);
+    else if (isPlayerSel && key === 'escape') status = this.sim.requestEscape();
     else if (isPlayerSel && Game.CHAOS_KEYS.includes(key)) status = this.sim.requestChaosAction(key);
     // player "convenience" needs actions route to the nearest reachable real object (not room shortcuts)
     else if (isPlayerSel && Game.SELF_KEYS.includes(key)) status = this.sim.requestNearestObjectAction(key);
-    else status = this.sim.requestAction(sel, key as InteractAction);
+    else { status = this.sim.requestAction(sel, key as InteractAction); if (key === 'fight') this.select(this.playerEntity); }   // show combat panel
     if (status) this.hud.alert(status, key === 'fight' || key === 'escape' ? 'fight' : 'info');
     this.refreshPanel();
   }
@@ -382,6 +388,9 @@ export class Game {
       this.cam.setFollow(w.x + (pos ? Math.sin(pos.facing) * lead : 0), w.z + (pos ? Math.cos(pos.facing) * lead : 0));
     }
     this.cam.tick(dt);
+
+    // while the player is fighting, force the combat panel (so combat buttons are reachable)
+    if (!this.selectedObj && this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.state === 'fight' && this.selected !== this.playerEntity) { this.selected = this.playerEntity; this.panelDirty = true; }
 
     // panel: refresh on demand (selection/action/inventory) or a few times a second — never every frame
     this.panelTimer -= dt;

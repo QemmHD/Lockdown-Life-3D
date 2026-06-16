@@ -54,7 +54,7 @@ export class RenderSync {
       v.group.position.z = THREE.MathUtils.lerp(v.group.position.z, p.z, Math.min(1, dt * 12));
       v.group.rotation.y = THREE.MathUtils.lerp(v.group.rotation.y, p.facing, Math.min(1, dt * 10));
 
-      this.animate(v, b?.state ?? 'idle', moving, dt, time, e);
+      this.animate(v, b?.state ?? 'idle', b?.cphase, moving, dt, time, e);
 
       const isPlayer = !!b?.isPlayer;
       v.ring.visible = isPlayer || e === selected;
@@ -67,7 +67,7 @@ export class RenderSync {
     }
   }
 
-  private animate(v: CharView, state: string, moving: boolean, dt: number, time: number, e: Entity) {
+  private animate(v: CharView, state: string, cphase: string | undefined, moving: boolean, dt: number, time: number, e: Entity) {
     // reset body transform that 'down' may have set
     if (state === 'down') {
       v.rig.rotation.z = THREE.MathUtils.lerp(v.rig.rotation.z, Math.PI / 2.1, 0.15);
@@ -84,10 +84,25 @@ export class RenderSync {
       v.rig.position.y = Math.abs(Math.sin(v.walkPhase)) * 0.05;
       v.rig.rotation.x = THREE.MathUtils.lerp(v.rig.rotation.x, 0.1, 0.2); // lean into movement
     } else if (state === 'fight') {
-      const j = Math.sin(time * 16 + e) * 1.1;
-      v.armR.rotation.x = -1.4 - Math.abs(j) * 0.4; v.armL.rotation.x = -0.6;
-      v.legL.rotation.x = 0.2; v.legR.rotation.x = -0.2;
-      v.rig.position.y = 0; v.rig.rotation.x = 0;
+      // read the sim's combat phase and pose accordingly (read-only)
+      const k = Math.min(1, dt * 16);
+      let aL = -0.6, aR = -1.0, lL = 0.18, lR = -0.18, leanX = 0, leanZ = 0, lift = 0;
+      switch (cphase) {
+        case 'windup': aR = 0.9; aL = -0.4; leanX = -0.12; leanZ = -0.15; break;     // pull back
+        case 'strike': aR = -2.1; aL = -0.3; leanX = 0.3; lift = 0.04; break;          // snap forward
+        case 'block': aL = -1.5; aR = -1.5; leanX = -0.18; break;                       // arms up
+        case 'dodge': aL = -0.5; aR = -0.5; leanZ = 0.35; break;                        // shift aside
+        case 'hitReact': aL = -0.2; aR = -0.2; leanX = -0.35; break;                    // jerk back
+        case 'stumble': aL = -0.1; aR = -0.1; leanX = -0.3; leanZ = Math.sin(time * 18 + e) * 0.18; break;
+        default: { const j = Math.abs(Math.sin(time * 7 + e)) * 0.25; aR = -1.0 - j; aL = -0.6; }   // squareUp bob
+      }
+      v.armR.rotation.x = THREE.MathUtils.lerp(v.armR.rotation.x, aR, k);
+      v.armL.rotation.x = THREE.MathUtils.lerp(v.armL.rotation.x, aL, k);
+      v.legL.rotation.x = THREE.MathUtils.lerp(v.legL.rotation.x, lL, k);
+      v.legR.rotation.x = THREE.MathUtils.lerp(v.legR.rotation.x, lR, k);
+      v.rig.rotation.x = THREE.MathUtils.lerp(v.rig.rotation.x, leanX, k);
+      v.rig.rotation.z = THREE.MathUtils.lerp(v.rig.rotation.z, leanZ, k);
+      v.rig.position.y = THREE.MathUtils.lerp(v.rig.position.y, lift, k);
     } else {
       // idle breathing + slight arm sway; guards stand alert (arms slightly out)
       const breathe = Math.sin(time * 2 + e) * 0.02;

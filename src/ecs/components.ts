@@ -51,6 +51,13 @@ export interface Brain {
   intent?: string;         // prisoner: current high-level intent (AIIntent.PrisonerIntent)
   intentCd?: number;       // prisoner: time left before re-evaluating intent
   mem?: import('../sim/AIMemorySystem').AIMemory;  // prisoner: lightweight memory
+  // ---- Stage 3.3 combat feel ----
+  cphase?: string;         // current combat phase (CombatSystem.CombatPhase)
+  cTimer?: number;         // time left in the current combat phase
+  cResult?: string;        // last combat result text (panel/feedback)
+  blockT?: number;         // active block window (player Block)
+  pendingAtk?: string;     // player-queued attack type (strike/heavy/shove)
+  lastAttacker?: Entity;   // who last struck this character
 }
 
 // Reputation / standing / suspicion. On the player: reputation+respect drive the loop;
