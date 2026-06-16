@@ -984,29 +984,39 @@ export class Simulation {
     return { version: 4, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs };
   }
   hydrate(data: any) {
-    if (!data?.ents) return;
+    // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
+    if (!data || !Array.isArray(data.ents) || !data.ents.length) return;
     this.ecs = new ECS();
-    this.act = null;
-    this.day = data.day ?? 1; this.hour = data.hour ?? 6; this.phaseId = data.phaseId ?? 'wake';
+    this.act = null; this.fightCd = 6; this.suspTimer = 0;
+    this.day = (typeof data.day === 'number' && data.day > 0) ? data.day : 1;
+    this.hour = (typeof data.hour === 'number' && isFinite(data.hour)) ? data.hour : 6;
+    this.phaseId = typeof data.phaseId === 'string' ? data.phaseId : 'wake';
     this.playerId = 0;
+    const num = (v: any, d: number) => (typeof v === 'number' && isFinite(v) ? v : d);
     const safeState = (s: string) => (s === 'solitary' ? 'solitary' : 'idle');
     for (const r of data.ents) {
-      if (!r.pos || !r.brain || !r.render) continue;
+      if (!r || !r.pos || !r.brain || !r.render) continue;   // skip malformed records
       const e = this.ecs.create();
-      this.ecs.set(e, 'Position', r.pos);
-      this.ecs.set(e, 'Render', r.render);
-      this.ecs.set(e, 'Agent', r.agent ?? { speed: 2, path: null, step: 0, repathCd: 0 });
-      this.ecs.set(e, 'Needs', r.needs ?? { hunger: 0, sleep: 0, hygiene: 0, energy: 1, anger: 0, fear: 0, health: 1 });
-      this.ecs.set(e, 'Brain', { ...r.brain, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle' });
-      this.ecs.set(e, 'Social', r.social ?? { reputation: 0, respect: 20, suspicion: 0, rel: 0 });
-      this.ecs.set(e, 'Inventory', r.inv ?? { items: [], money: 0 });
+      this.ecs.set<Position>(e, 'Position', { x: num(r.pos.x, 0), z: num(r.pos.z, 0), facing: num(r.pos.facing, 0) });
+      this.ecs.set<Render>(e, 'Render', { kind: r.render.kind === 'guard' ? 'guard' : 'prisoner', color: num(r.render.color, 0xc98a3a), meshId: e });
+      this.ecs.set<Agent>(e, 'Agent', { speed: num(r.agent?.speed, 2), path: null, step: 0, repathCd: 0 });
+      this.ecs.set<Needs>(e, 'Needs', r.needs ?? { hunger: 0, sleep: 0, hygiene: 0, energy: 1, anger: 0, fear: 0, health: 1 });
+      this.ecs.set<Brain>(e, 'Brain', { ...r.brain, role: r.brain.role === 'guard' ? 'guard' : 'prisoner', traits: Array.isArray(r.brain.traits) ? r.brain.traits : [], targetRoom: r.brain.targetRoom ?? 'cellblock', attackCd: 0, timer: 0, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle' });
+      this.ecs.set<Social>(e, 'Social', r.social ?? { reputation: 0, respect: 20, suspicion: 0, rel: 0 });
+      this.ecs.set<Inventory>(e, 'Inventory', { items: Array.isArray(r.inv?.items) ? r.inv.items.filter((id: any) => typeof id === 'string') : [], money: num(r.inv?.money, 0) });
       if (r.isPlayer || r.brain.isPlayer) this.playerId = e;
     }
     if (!this.playerId) this.playerId = this.ecs.query('Brain').find((e) => this.ecs.get<Brain>(e, 'Brain')!.role === 'prisoner') ?? 0;
     // reset object reservations, derive door states for the loaded phase, then restore saved overrides
     for (const o of this.objs.values()) { o.reservedBy = 0; o.reservedUntil = 0; o.stash = []; o.open = !o.restricted; o.locked = false; }
     this.applyDoorSchedule();
-    if (data.objs) for (const id in data.objs) { const o = this.objs.get(id); if (o) { o.stash = data.objs[id].stash ?? []; if ('open' in data.objs[id]) o.open = data.objs[id].open; if ('locked' in data.objs[id]) o.locked = data.objs[id].locked; } }
+    if (data.objs && typeof data.objs === 'object') for (const id in data.objs) {
+      const o = this.objs.get(id); const s = data.objs[id];          // invalid/removed object ids are ignored safely
+      if (!o || !s || typeof s !== 'object') continue;
+      o.stash = Array.isArray(s.stash) ? s.stash.filter((x: any) => typeof x === 'string') : [];
+      if (typeof s.open === 'boolean') o.open = s.open;
+      if (typeof s.locked === 'boolean') o.locked = s.locked;
+    }
   }
 }
 

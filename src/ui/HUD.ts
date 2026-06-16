@@ -89,9 +89,32 @@ export class HUD {
     setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 600); }, 5000);
   }
 
+  // identity of the panel's *structure* (buttons / inventory / which entity). When this is
+  // unchanged we only update the volatile values in place instead of rebuilding innerHTML —
+  // the loop calls showPanel every frame, and recreating the action buttons each frame both
+  // wastes work and can drop a tap that lands between pointerdown and the rebuild.
+  private panelSig = '';
+  private sigOf(info: PanelInfo): string {
+    return [info.player ? 'P' : '', info.object ? 'O' : '', info.name, info.role,
+      info.actions.map((a) => a.key + (a.disabled ? '0' : '1')).join(','),
+      info.items.map((i) => i.key).join(','), info.needs.length].join('|');
+  }
+  // refresh only the changing numbers/text without touching the buttons (which keep their handlers)
+  private softUpdate(info: PanelInfo, p: HTMLElement) {
+    const chipsEl = p.querySelector('.panel-chips'); if (chipsEl) chipsEl.innerHTML = info.meta.map((m) => `<span class="chip">${m}</span>`).join('');
+    const roomEl = p.querySelector('.panel-room'); if (roomEl) roomEl.textContent = '📍 ' + info.room;
+    if (info.object) { const sub = p.querySelector('.panel-sub'); if (sub) sub.textContent = `Object · ${info.state}`; }
+    else { const st = p.querySelector('.state'); if (st) st.textContent = info.state; }
+    const fills = p.querySelectorAll('.need-fill');
+    info.needs.forEach((n, i) => { const f = fills[i] as HTMLElement; if (f) { f.style.width = Math.round(n.value * 100) + '%'; f.style.background = n.color; } });
+  }
+
   showPanel(info: PanelInfo | null) {
     const p = this.els['panel'];
-    if (!info) { p.classList.add('hidden'); return; }
+    if (!info) { p.classList.add('hidden'); this.panelSig = ''; return; }
+    const sig = this.sigOf(info);
+    if (sig === this.panelSig && !p.classList.contains('hidden')) { this.softUpdate(info, p); return; }
+    this.panelSig = sig;
     p.classList.remove('hidden');
     p.classList.toggle('is-player', info.player);
     if (info.object) {

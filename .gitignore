@@ -12,9 +12,9 @@ ios/
 android/
 .capacitor/
 
-# logs & test artifacts
+# logs & ad-hoc test/QA artifacts (headless screenshot harnesses, captures)
 *.log
-screenshot-*.png
+*.png
+shot*.mjs
 smoke.mjs
 probe.mjs
-shot.mjs
