@@ -12,6 +12,35 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v3.6.0-factions — Stage Gang Joining / Faction Progression 3.6
+Turns gang **lean** into real, joinable factions. Sim authoritative, RenderSync read-only, build
+passes, 0 runtime errors. New pure module `FactionSystem.ts`; the Simulation owns one `PlayerGangState`.
+- **Standing** per gang (−100..100) with labels (Hated→Allied); rises from talking/favours/trades with
+  members + completing crew goals; nudges rivals the other way. Joining/attacking a crew shifts it.
+- **Invitations**: when standing + respect are high enough (and a member is around), a crew **invites**
+  you — alert + "Come see me." bubble + a "Decide whether to join …" objective; invites expire on a timer.
+- **Joining via an NPC**: inspect a crew member → **Ask About Gang / Accept Invite / Decline** (also from
+  the Gangs menu). Joining sets the player's gang so all existing gang systems (ally clustering, rival
+  avoidance/standoffs, turf) treat you as a member; rivals turn cold, allies warm.
+- **Ranks**: Associate → Member → Trusted → Enforcer → Shot Caller, derived from standing + respect +
+  completed crew goals; rank-ups are announced.
+- **Crew goals**: 2 abstract gang objectives on join (talk to crew / train / earn respect / pull a
+  shift / defuse a standoff) tracked alongside daily objectives.
+- **Perks** (small, by rank): crew trades/favours more readily, allies cluster + watch you, easier
+  calming, rivals wary (but guards watch high ranks). **Tradeoffs**, not free power.
+- **Player now starts unaffiliated** (the promoted player no longer inherits a random spawn gang); the
+  character-creation **gang lean** seeds initial standing (Gang Associate starts closer to an invite).
+- **Gangs menu** shows membership, rank, perks, an invite card (Accept/Decline), per-gang standing +
+  labels + ally/rival, crew goals, and a Leave Gang button. **NPC panels** show gang standing +
+  ally/rival/invite and the gang actions.
+- **Save/load v10**: persists membership/rank/standing/goals/cooldowns (invites reset on load);
+  backward-compatible with v9–v4 (old saves → unaffiliated, standing seeded from lean).
+- **?debug self-test+** (gang state, rank derivation, faction in snapshot) + telemetry (invites
+  generated/accepted/declined/expired, rank-ups, gang joined, standing changes, ally help).
+- **Docs preflight**: fixed stale README/ARCHITECTURE notes (save was "v4", "no character creation",
+  "gang joining not implemented") to match the real current build.
+- Limitations: no gang economy, no deep hierarchy/squad commands, fictional/abstract only.
+
 ## v3.5.0-newgame — Stage Character Creation / New Game Setup 3.5 (run identity)
 Makes **New Game** a real character/run setup. Sim authoritative, RenderSync read-only, build passes,
 0 runtime errors. New pure module `NewGameSetup.ts` + a setup flow in `ui/Menus.ts`.

@@ -21,6 +21,7 @@ import { routeFor } from './GuardAISystem';
 import { AttackType, CombatOutcome, ATTACKS, COMBAT_SPACING, SQUARE_UP, HITREACT, STUMBLE, DOWN_TIME, RECOVER, chooseAttack, resolveDefense, OUTCOME_TEXT } from './CombatSystem';
 import { Progression, Objective, newProgression, sanitizeProgression, repTier, rollObjectives, objectivesByIds, DailyStats, newDaily, dayRating } from './Progression';
 import { NewGameSetup, sanitizeSetup, defaultSetup, randomSetup, traitSimTokens, backstoryDef, diffDef } from './NewGameSetup';
+import { PlayerGangState, newGangState, sanitizeGangState, RANKS, standingLabel, rankFromState, perksForRank, rollGangGoals, INVITE_STANDING, INVITE_RESPECT, INVITE_LIFE, INVITE_CD } from './FactionSystem';
 
 const SECONDS_PER_HOUR = 5;
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
@@ -100,9 +101,10 @@ export class Simulation {
   pendingSummary: any = null;          // built at a day rollover; the UI shows + clears it
   setup: NewGameSetup = defaultSetup();
   diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1 };
+  gang: PlayerGangState = newGangState();
 
   // lightweight playtest telemetry (?debug)
-  metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0, newGameStarted: 0, setupRandomized: 0, setupCompleted: 0 };
+  metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0, newGameStarted: 0, setupRandomized: 0, setupCompleted: 0, invitesGenerated: 0, invitesAccepted: 0, invitesDeclined: 0, invitesExpired: 0, rankUps: 0, gangJoined: 0, gangStandingChanges: 0, allyHelp: 0 };
 
   constructor(public bus: EventBus, seed = Math.floor(Math.random() * 1e9)) { this.rng = new Random(seed); }
 
@@ -123,6 +125,7 @@ export class Simulation {
     this.heat = 0; this.riotPressure = 0; this.riotLevel = 'calm'; this.riotEventTimer = 0; this.escape = newEscape();
     this.tension = {}; this.progression = newProgression(); this.objectives = []; this.pendingSummary = null; this.lastSummaryDay = 0;
     this.fightCd = 6; this.suspTimer = 0; this.diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1 };
+    this.gang = newGangState();
     const layout = generatePrison();
     this.map = layout.map;
     this.rooms = layout.rooms;
@@ -131,7 +134,7 @@ export class Simulation {
     // promote the first prisoner to the directly-controlled player
     this.playerId = this.ecs.query('Brain').find((e) => this.ecs.get<Brain>(e, 'Brain')!.role === 'prisoner')!;
     const pb = this.ecs.get<Brain>(this.playerId, 'Brain')!;
-    pb.isPlayer = true; pb.name = 'You'; pb.action = 'Idle';
+    pb.isPlayer = true; pb.name = 'You'; pb.action = 'Idle'; pb.gang = undefined;   // player starts unaffiliated (join a crew in-game)
     const ps = this.ecs.get<Social>(this.playerId, 'Social')!; ps.reputation = 0; ps.respect = 8; ps.suspicion = 0;
     this.ecs.get<Render>(this.playerId, 'Render')!.color = 0xef7a22;
     this.checkpoints = buildCheckpoints(this.rooms as any, (i) => this.map.tileXY(i), (x, y) => this.map.toWorld(x, y));
@@ -167,6 +170,9 @@ export class Simulation {
     if (back.gangBias === 'auto' && lean === 'none') lean = this.rng.pick(GANGS).id;
     if (lean && lean !== 'none' && GANG_MAP[lean]) {
       for (const e of this.ecs.query('Brain', 'Social')) { const b = this.brain(e)!; if (b.isPlayer || b.role !== 'prisoner') continue; const sc = this.social(e)!; if (b.gang === lean) sc.rel = clamp(sc.rel + 25, -100, 100); else if (areEnemies(b.gang, lean)) sc.rel = clamp(sc.rel - 22, -100, 100); }
+      // seed faction standing from the lean (Gang Associate starts closer to an invite)
+      this.gang.lean = lean; this.gang.standing[lean] = (back.id === 'associate' ? 28 : 18);
+      for (const g of GANGS) if (areEnemies(g.id, lean)) this.gang.standing[g.id] = -15;
     }
     if (pb.traits.includes('hated')) for (const e of this.ecs.query('Brain', 'Social')) { if (e === pl) continue; const sc = this.social(e); if (sc) sc.rel = clamp(sc.rel - 12, -100, 100); }
     // first objectives from the backstory + a fresh daily
@@ -289,6 +295,7 @@ export class Simulation {
     this.needsSystem(dt);
     this.sweepReservations(dt);
     this.chaosSystem(dt);
+    this.factionSystem(dt);
     this.prisonerAI(dt);
     this.guardAI(dt);
     this.combatSystem(dt);
@@ -604,6 +611,7 @@ export class Simulation {
   }
   private completeObjective(o: Objective) {
     o.done = true; this.progression.objectivesCompleted++; this.daily.objectivesDone++;
+    if (o.gang && this.gang.membership) { this.gang.goalsDone++; this.gangStanding(this.gang.membership, 6); }
     const ps = this.social(this.playerId); const pinv = this.inv(this.playerId);
     if (ps && o.reward.rep) ps.reputation = clamp(ps.reputation + o.reward.rep, -100, 100);
     if (ps && o.reward.respect) ps.respect = clamp(ps.respect + o.reward.respect, 0, 100);
@@ -655,6 +663,99 @@ export class Simulation {
   takeSummary() { const s = this.pendingSummary; this.pendingSummary = null; return s; }
   tier() { const ps = this.social(this.playerId)!; return repTier(ps.reputation, ps.respect); }
 
+  // ---------- faction / gang membership (Stage 3.6) ----------
+  private factionSystem(dt: number) {
+    const g = this.gang;
+    g.cd.invite = Math.max(0, g.cd.invite - dt); g.cd.rival = Math.max(0, g.cd.rival - dt); g.cd.task = Math.max(0, g.cd.task - dt);
+    if (g.invite) { g.invite.expires -= dt; if (g.invite.expires <= 0) { this.bus.emit('alert', { type: 'info', text: `The ${GANG_MAP[g.invite.gang]?.name ?? 'crew'} offer cooled off.` }); g.invite = null; this.metrics.invitesExpired++; this.objectives = this.objectives.filter((o) => o.id !== 'decidegang'); } }
+    if (!g.membership && !g.invite && g.cd.invite <= 0 && this.rng.chance(dt * 0.05)) this.tryGangInvite();
+    if (g.membership) {
+      const ps = this.social(this.playerId)!; const st = g.standing[g.membership] ?? 0;
+      const nr = rankFromState(g.membership, st, ps.respect, g.goalsDone);
+      if (nr !== g.rank) { if (nr > g.rank) { this.metrics.rankUps++; this.bus.emit('alert', { type: 'player', text: `Rank up — ${RANKS[nr]} of the ${GANG_MAP[g.membership].name}.` }); } g.rank = nr; }
+    }
+  }
+  private tryGangInvite() {
+    const ps = this.social(this.playerId)!; if (ps.respect < INVITE_RESPECT || this.heat > 70 || ps.suspicion > 70) return;
+    let best = '', bs = INVITE_STANDING;
+    for (const id in this.gang.standing) { const v = this.gang.standing[id]; if (v >= bs && GANG_MAP[id]) { bs = v; best = id; } }
+    if (!best) return;
+    const member = this.ecs.query('Brain', 'Position').find((e) => { const b = this.brain(e)!; return b.gang === best && b.role === 'prisoner' && b.state !== 'down' && b.state !== 'solitary'; });
+    if (member == null) return;
+    this.openInvite(best, member);
+  }
+  private openInvite(gangId: string, by: Entity) {
+    this.gang.invite = { gang: gangId, by, expires: INVITE_LIFE }; this.gang.cd.invite = INVITE_CD; this.metrics.invitesGenerated++;
+    this.bus.emit('alert', { type: 'player', text: `The ${GANG_MAP[gangId].name} are watching you — talk to ${this.brain(by)?.name ?? 'their crew'}.` });
+    this.bubble(by, 'Come see me.', 'trade', 1.6);
+    if (!this.objectives.find((o) => o.id === 'decidegang')) this.objectives.push({ id: 'decidegang', text: `Decide whether to join the ${GANG_MAP[gangId].name}`, kind: '__decide', goal: 1, progress: 0, done: false, reward: {}, gang: true });
+  }
+  // adjust standing with a gang (+ nudges its rivals the other way), clamped
+  private gangStanding(id: string, delta: number) {
+    if (!id || !GANG_MAP[id] || !delta) return;
+    this.gang.standing[id] = clamp((this.gang.standing[id] ?? 0) + delta, -100, 100);
+    this.metrics.gangStandingChanges++;
+    for (const g of GANGS) if (areEnemies(g.id, id)) this.gang.standing[g.id] = clamp((this.gang.standing[g.id] ?? 0) - delta * 0.5, -100, 100);
+  }
+  // gang interactions via an NPC member (asked from the inspect panel)
+  requestGangAction(target: Entity, key: string): string {
+    const g = this.gang; const tb = this.brain(target); if (!tb || !tb.gang) return '';
+    const gangId = tb.gang;
+    switch (key) {
+      case 'askgang': {
+        if (g.membership === gangId) return `You already run with the ${GANG_MAP[gangId].name}.`;
+        if (g.membership) return `You're already with the ${GANG_MAP[g.membership].name}.`;
+        if (g.invite && g.invite.gang === gangId) return `${tb.name}: "We'll have you — say the word."`;
+        const st = g.standing[gangId] ?? 0; const ps = this.social(this.playerId)!;
+        if (st >= INVITE_STANDING && ps.respect >= INVITE_RESPECT) { this.openInvite(gangId, target); return `${tb.name}: "Maybe there's a place for you with us."`; }
+        this.gangStanding(gangId, 3); return `${tb.name}: "Earn it first, fish."`;
+      }
+      case 'acceptinvite': {
+        if (!g.invite || g.invite.gang !== gangId) return 'No offer from them right now.';
+        this.joinGang(gangId); return `You're in with the ${GANG_MAP[gangId].name}.`;
+      }
+      case 'declineinvite': {
+        if (!g.invite || g.invite.gang !== gangId) return '';
+        g.invite = null; this.gangStanding(gangId, -8); g.cd.invite = INVITE_CD; this.metrics.invitesDeclined++;
+        this.objectives = this.objectives.filter((o) => o.id !== 'decidegang');
+        this.bus.emit('alert', { type: 'info', text: `You turned down the ${GANG_MAP[gangId].name}.` });
+        return 'You decline.';
+      }
+      case 'helpmember': {
+        if (g.membership !== gangId) return '';
+        this.gangStanding(gangId, 4); const ps = this.social(this.playerId)!; ps.respect = clamp(ps.respect + 1, 0, 100);
+        this.metrics.allyHelp++; this.bubble(this.playerId, 'I got you.', 'talk', 1.0); return `You back up ${tb.name}.`;
+      }
+    }
+    return '';
+  }
+  private joinGang(gangId: string) {
+    const g = this.gang; g.membership = gangId; g.rank = 1; g.joinedDay = this.day; g.invite = null; g.goalsDone = 0;
+    g.standing[gangId] = Math.max(g.standing[gangId] ?? 0, 42);
+    const pb = this.brain(this.playerId)!; pb.gang = gangId;   // existing gang systems now treat the player as a member
+    this.metrics.invitesAccepted++; this.metrics.gangJoined++;
+    for (const e of this.ecs.query('Brain', 'Social')) { const b = this.brain(e)!; if (b.isPlayer || b.role !== 'prisoner') continue; const sc = this.social(e)!; if (b.gang === gangId) sc.rel = clamp(sc.rel + 15, -100, 100); else if (areEnemies(b.gang, gangId)) sc.rel = clamp(sc.rel - 18, -100, 100); }
+    for (const gg of GANGS) if (areEnemies(gg.id, gangId)) this.gang.standing[gg.id] = clamp((this.gang.standing[gg.id] ?? 0) - 15, -100, 100);
+    this.objectives = this.objectives.filter((o) => o.id !== 'decidegang' && !o.gang);
+    this.objectives.push(...rollGangGoals(() => this.rng.float()));
+    this.bus.emit('alert', { type: 'player', text: `You've joined the ${GANG_MAP[gangId].name}.` });
+  }
+  leaveGang(): string {
+    const g = this.gang; if (!g.membership) return '';
+    const name = GANG_MAP[g.membership].name; this.gangStanding(g.membership, -25);
+    this.brain(this.playerId)!.gang = undefined; g.membership = ''; g.rank = 0; g.goalsDone = 0;
+    this.objectives = this.objectives.filter((o) => !o.gang);
+    this.bus.emit('alert', { type: 'info', text: `You walked away from the ${name}.` });
+    return `Left the ${name}.`;
+  }
+  // info for the inspect panel about a prisoner's gang vs the player
+  gangInfoFor(e: Entity): { gang: string; gangId: string; standing: number; label: string; relation: string; inviteActive: boolean; canAsk: boolean } | null {
+    const b = this.brain(e); if (!b || !b.gang || !GANG_MAP[b.gang]) return null;
+    const g = this.gang; const st = Math.round(g.standing[b.gang] ?? 0);
+    const relation = g.membership ? (b.gang === g.membership ? 'ally' : areEnemies(b.gang, g.membership) ? 'rival' : 'neutral') : 'neutral';
+    return { gang: GANG_MAP[b.gang].name, gangId: b.gang, standing: st, label: standingLabel(st), relation, inviteActive: !!(g.invite && g.invite.gang === b.gang), canAsk: !g.membership && st >= INVITE_STANDING - 12 };
+  }
+
   // one structured snapshot for the menus (stats / relationships / inventory / gangs / objectives)
   uiSnapshot() {
     const pl = this.playerId; const pb = this.brain(pl)!; const n = this.ecs.get<Needs>(pl, 'Needs')!; const ps = this.social(pl)!; const inv = this.inv(pl)!;
@@ -679,7 +780,15 @@ export class Simulation {
       const avg = members.length ? members.reduce((s, e) => s + this.social(e)!.rel, 0) / members.length : 0;
       return { id: g.id, name: g.name, color: g.color, territory: g.territory, allies: g.allies.map((a) => GANG_MAP[a]?.name ?? a), enemies: g.enemies.map((a) => GANG_MAP[a]?.name ?? a), members: members.length, standing: this.standingWord(avg) };
     });
-    return { stats, tier, progression: this.progression, objectives: this.objectives, relationships, inventory, gangs, contrabandCarried: inv.items.some(isContraband) };
+    const g = this.gang;
+    const faction = {
+      membership: g.membership ? GANG_MAP[g.membership].name : '', membershipId: g.membership,
+      rank: RANKS[g.rank], rankIndex: g.rank, perks: perksForRank(g.rank), goalsDone: g.goalsDone,
+      invite: g.invite ? { gang: GANG_MAP[g.invite.gang]?.name ?? '', gangId: g.invite.gang } : null,
+      standings: GANGS.map((gg) => ({ id: gg.id, name: gg.name, color: gg.color, territory: gg.territory, value: Math.round(g.standing[gg.id] ?? 0), label: standingLabel(g.standing[gg.id] ?? 0), ally: g.membership ? gg.id === g.membership : false, rival: g.membership ? areEnemies(gg.id, g.membership) : false })),
+      goals: this.objectives.filter((o) => o.gang).map((o) => ({ text: o.text, progress: o.progress, goal: o.goal, done: o.done }))
+    };
+    return { stats, tier, progression: this.progression, objectives: this.objectives, relationships, inventory, gangs, faction, contrabandCarried: inv.items.some(isContraband) };
   }
   private relWordSim(v: number) { return v <= -50 ? 'enemy' : v <= -15 ? 'dislikes you' : v < 15 ? 'neutral' : v < 50 ? 'friendly' : 'ally'; }
   private standingWord(v: number) { return v <= -30 ? 'threatened' : v <= -10 ? 'disliked' : v < 12 ? 'neutral' : v < 40 ? 'respected' : 'watched'; }
@@ -1425,6 +1534,7 @@ export class Simulation {
         const power = (6 + ps.respect * 0.2 + ps.reputation * 0.05) * (this.playerHas('talker') || this.playerHas('calm') ? 1.4 : 1);
         if (rid) this.tension[rid] = Math.max(0, (this.tension[rid] ?? 0) - power);
         this.riotPressure = clamp01(this.riotPressure - 0.03);
+        this.bumpObjective('defuse');
         this.bubble(pl, 'Easy, everyone.', 'talk', 1.2); return 'You try to calm the area down.';
       }
       case 'helpguard': {
@@ -1736,6 +1846,9 @@ export class Simulation {
     if (lb.isPlayer && ls) { ls.reputation = clamp(ls.reputation - 6, -100, 100); this.bus.emit('alert', { type: 'rep', text: `You were beaten by ${wb.name}.` }); this.escortLoserToInfirmaryOrSolitary(); }
     if (ls) ls.respect = clamp(ls.respect - 4, 0, 100);
     if (wb.isPlayer) this.prog('fightWin'); else if (lb.isPlayer) this.prog('fightLoss');
+    // attacking a crew costs you standing with them
+    if (wb.isPlayer && lb.gang) this.gangStanding(lb.gang, -8);
+    if (lb.isPlayer && wb.gang) this.gangStanding(wb.gang, -5);
     // a fight always draws suspicion + a chance of being searched (winner especially)
     if (ws) ws.suspicion = clamp(ws.suspicion + 14, 0, 100);
     if (ls) ls.suspicion = clamp(ls.suspicion + 6, 0, 100);
@@ -1772,7 +1885,7 @@ export class Simulation {
     switch (action) {
       case 'talk':
         if (ts) ts.rel = clamp(ts.rel + 6, -100, 100);
-        this.prog('talk'); if (ts) this.prog('relUp');
+        this.prog('talk'); if (ts) this.prog('relUp'); if (tb.gang) this.gangStanding(tb.gang, 1.5);
         return tb.role === 'guard' ? `${tb.name}: "Keep moving, inmate."` : `${tb.name}: "${this.smalltalk(tb)}"`;
       case 'comply':
         ps.suspicion = clamp(ps.suspicion - 15, 0, 100); return `${tb.name}: "Smart choice."`;
@@ -1796,8 +1909,9 @@ export class Simulation {
       }
       case 'favor': {
         // higher standing tiers make inmates more willing to help
-        const ok = (ts ? ts.rel : 0) > 10 || this.rng.chance(0.4 + ps.reputation * 0.003 + this.tier().index * 0.05 + (this.playerHas('talker') ? 0.12 : 0) + (this.playerHas('clever') ? 0.06 : 0));
-        if (ok) { const pinv = this.inv(pl)!; if (this.rng.chance(0.5)) pinv.items.push(this.rng.pick(ITEM_IDS)); else { const m = this.rng.int(2, 6); pinv.money += m; this.prog('earn', m); } if (ts) ts.rel = clamp(ts.rel + 4, -100, 100); this.prog('relUp'); return `${tb.name} does you a favor.`; }
+        const crew = this.gang.membership && tb.gang === this.gang.membership ? 0.12 + this.gang.rank * 0.03 : 0;   // perk: your crew helps you out
+        const ok = (ts ? ts.rel : 0) > 10 || this.rng.chance(0.4 + ps.reputation * 0.003 + this.tier().index * 0.05 + (this.playerHas('talker') ? 0.12 : 0) + (this.playerHas('clever') ? 0.06 : 0) + crew);
+        if (ok) { const pinv = this.inv(pl)!; if (this.rng.chance(0.5)) pinv.items.push(this.rng.pick(ITEM_IDS)); else { const m = this.rng.int(2, 6); pinv.money += m; this.prog('earn', m); } if (ts) ts.rel = clamp(ts.rel + 4, -100, 100); this.prog('relUp'); if (tb.gang) this.gangStanding(tb.gang, 3); return `${tb.name} does you a favor.`; }
         return `${tb.name} refuses.`;
       }
       case 'trade': {
@@ -1808,7 +1922,7 @@ export class Simulation {
         if (pinv.money < price) return `You can't afford ${ITEMS[item].name} ($${price}).`;
         pinv.money -= price; tinv.money += price; tinv.items.shift(); pinv.items.push(item);
         if (ts) ts.rel = clamp(ts.rel + 5, -100, 100);
-        this.prog('spend', price); this.prog('relUp');
+        this.prog('spend', price); this.prog('relUp'); if (tb.gang) this.gangStanding(tb.gang, 2);
         this.bus.emit('alert', { type: 'trade', text: `Traded for ${ITEMS[item].name} ($${price})` });
         return `Bought ${ITEMS[item].name} from ${tb.name}.`;
       }
@@ -1930,6 +2044,9 @@ export class Simulation {
       snapshotOk: (() => { try { const s = this.uiSnapshot(); return !!s.stats && Array.isArray(s.objectives) && Array.isArray(s.relationships); } catch { return false; } })(),
       setupOk: (() => { try { const rs = randomSetup(() => Math.random()); return !!rs.name && rs.traits.length === 2 && typeof rs.weakness === 'string'; } catch { return false; } })(),
       nameInSnapshot: this.uiSnapshot().stats.name === this.brain(this.playerId)?.name,
+      gangStateOk: !!this.gang && typeof this.gang.standing === 'object',
+      rankDerivesOk: rankFromState('iron_block', 50, 40, 2) >= 2 && rankFromState('', 50, 40, 2) === 0,
+      factionInSnapshot: (() => { try { return Array.isArray(this.uiSnapshot().faction.standings); } catch { return false; } })(),
       metrics: this.metrics
     };
   }
@@ -1957,8 +2074,8 @@ export class Simulation {
       riotPressure: this.riotPressure,
       tension: this.tension
     };
-    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup };
-    return { version: 9, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
+    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang };
+    return { version: 10, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -2012,6 +2129,10 @@ export class Simulation {
     this.pendingSummary = null;
     // character setup + derived difficulty (old saves get a sensible default)
     this.setup = sanitizeSetup(data.setup);
+    // faction / gang state (old saves: default; derive a little standing from the lean)
+    this.gang = sanitizeGangState(data.gang);
+    if (!data.gang) { this.gang.lean = this.setup.gangLean === 'none' ? '' : this.setup.gangLean; if (this.gang.lean) this.gang.standing[this.gang.lean] = 18; }
+    if (this.gang.membership && this.brain(this.playerId)) this.brain(this.playerId)!.gang = this.gang.membership;   // re-link player to crew
     const dd = diffDef(this.setup.difficulty);
     this.diff = { heatMul: dd.heatMul, searchAt: dd.searchAt, riotMul: dd.riotMul, rewardMul: dd.rewardMul, decayMul: dd.decayMul };
     if (this.setup.chaosIntensity === 'low') this.diff.riotMul *= 0.8; else if (this.setup.chaosIntensity === 'high') this.diff.riotMul *= 1.25;

@@ -32,7 +32,7 @@ refactored as it grows. This describes the **current ECS-lite game** (`src/` exc
    the right entities (guards pass everything; prisoners are stopped by locked/restricted). All
    NPC/guard/player routing goes through `Simulation.path(...)`.
 
-7. **Save/load owns persistence.** `Simulation.serialize()` snapshots state (versioned, currently v4);
+7. **Save/load owns persistence.** `Simulation.serialize()` snapshots state (versioned, currently v9 before this stage);
    `Simulation.hydrate()` restores it defensively (defaults for missing/garbage fields, transient
    action/reservation state reset, invalid object ids ignored, bad data → keep a fresh world).
    `core/SaveManager.ts` is just the `localStorage` read/write.
@@ -71,6 +71,7 @@ input (tap/drag/pinch)
 | Combat | `sim/CombatSystem.ts` | pure attack tables (windup/recovery/hit-chance/damage/knockback), attack selection, and hit/block/dodge/miss resolution; the Simulation runs the per-fighter phase machine, RenderSync animates the phases read-only |
 | Progression | `sim/Progression.ts` | pure reputation tiers, objective templates/roll, daily-summary rating; the Simulation owns live progression/objectives/daily state and a `prog()` event hook |
 | Setup | `sim/NewGameSetup.ts` | pure character-creation model: appearance/traits/backstory/gang-lean/difficulty defs + randomize/sanitize; `Simulation.applySetup()` writes it onto the player |
+| Factions | `sim/FactionSystem.ts` | pure gang state/ranks/standing-labels/invite thresholds/crew-goal templates/perks; the Simulation owns one `PlayerGangState` and drives invites/joining/ranks |
 | Menus | `ui/Menus.ts` | title screen, **new-game setup flow**, tabbed pause overlay (Stats/People/Inventory/Objectives/Gangs/Help), and daily-summary modal — reads `Simulation.uiSnapshot()`, never writes |
 | World | `world/TileMap.ts`, `Pathfinding.ts`, `WorldGen.ts`, `Interactable.ts` | grid, A*, floorplan, object model |
 | Render | `render/ThreeApp.ts`, `IsoCamera.ts`, `WorldRenderer.ts`, `PropRenderer.ts`, `CharacterFactory.ts`, `RenderSync.ts`, `Feedback.ts`, `VisualTheme.ts`, `textures/` | rendering (read-only) |
@@ -109,6 +110,14 @@ cluster/separation geometry so crowds read as loose groups. All of it is pure he
 integration; transient AI (intent, memory refs) resets on load. Still **partial**: no full GOAP
 planner, no formal squad tactics, group clustering is geometric (not negotiated), and guard routes are
 fixed tables rather than learned/dynamic.
+
+**Factions (Stage 3.6).** `FactionSystem.ts` is pure (ranks/standing labels/invite thresholds/crew-goal
+templates/perks). The Simulation owns one `PlayerGangState` and runs `factionSystem(dt)` (invite
+lifecycle + rank update). Joining sets the player's `Brain.gang`, so all existing gang behaviour
+(ally clustering, rival avoidance, standoffs, turf) applies for free. Standing accrues at social/fight
+hooks; the player starts **unaffiliated** (the promoted player's random spawn-gang is cleared in
+`generate()`). Save v10 persists membership/rank/standing; invites are transient. Still **partial**:
+no gang economy, no hierarchy/squad commands.
 
 **Character creation (Stage 3.5).** `NewGameSetup.ts` is pure data (appearance/traits/backstory/
 gang-lean/difficulty + randomize/sanitize). `ui/Menus.ts` runs the setup flow and calls

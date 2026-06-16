@@ -49,7 +49,7 @@ export function repTier(reputation: number, respect: number) {
 }
 
 // ---------- objectives ----------
-export interface Objective { id: string; text: string; kind: string; goal: number; progress: number; done: boolean; reward: { money?: number; rep?: number; respect?: number }; }
+export interface Objective { id: string; text: string; kind: string; goal: number; progress: number; done: boolean; reward: { money?: number; rep?: number; respect?: number }; gang?: boolean; }
 interface ObjTemplate { id: string; text: string; kind: string; goal: number; reward: { money?: number; rep?: number; respect?: number }; }
 // `kind` matches the event the Simulation bumps; "survive*" kinds resolve at day end.
 const POOL: ObjTemplate[] = [
