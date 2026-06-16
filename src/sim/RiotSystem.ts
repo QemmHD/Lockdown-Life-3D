@@ -6,6 +6,23 @@ export type RiotLevel = 'calm' | 'warning' | 'event';
 
 export const RIOT_WARN = 0.5;    // pressure at which a riot warning begins
 export const RIOT_CRIT = 0.82;   // pressure at which a riot event can break out
+// hysteresis: a level only drops once pressure falls well below its trigger, so it doesn't flicker
+export const RIOT_WARN_OFF = 0.38;
+export const RIOT_CRIT_OFF = 0.62;
+// cooldowns (sim-seconds) before the same escalation can re-fire
+export const RIOT_WARN_CD = 20;
+export const RIOT_EVENT_CD = 45;
+
+// level with hysteresis — needs the current level to know which threshold applies
+export function riotLevelHyst(pressure: number, current: RiotLevel): RiotLevel {
+  if (current === 'event') return pressure < RIOT_CRIT_OFF ? (pressure < RIOT_WARN_OFF ? 'calm' : 'warning') : 'event';
+  if (current === 'warning') {
+    if (pressure >= RIOT_CRIT) return 'event';
+    return pressure < RIOT_WARN_OFF ? 'calm' : 'warning';
+  }
+  if (pressure >= RIOT_CRIT) return 'event';
+  return pressure >= RIOT_WARN ? 'warning' : 'calm';
+}
 
 export interface RiotInputs {
   count: number;          // prisoner count

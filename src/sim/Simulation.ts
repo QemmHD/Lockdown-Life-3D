@@ -9,10 +9,10 @@ import { GANGS, GANG_MAP, areEnemies, NAME_POOL, GUARD_NAMES, PRISONER_TRAITS, p
 import { ITEMS, CONTRABAND_IDS, ITEM_IDS, isContraband } from '../data/items';
 import { JOB_BY_ROOM } from '../data/jobs';
 import { Interactable, InteractableDef, OBJ_ACTIONS, OBJ_ACTION_LABEL, isExclusive } from '../world/Interactable';
-import { LockdownState, newLockdown, LOCKDOWN_SECONDS, lockdownLocks, sanitizeLockdown } from './LockdownSystem';
-import { RiotLevel, computeRiotTarget, riotLevel, RIOT_WARN, tensionLabel } from './RiotSystem';
+import { LockdownState, newLockdown, LOCKDOWN_SECONDS, LOCKDOWN_COOLDOWN, lockdownLocks, sanitizeLockdown } from './LockdownSystem';
+import { RiotLevel, computeRiotTarget, riotLevelHyst, tensionLabel, RIOT_WARN_CD, RIOT_EVENT_CD } from './RiotSystem';
 import { Checkpoint, buildCheckpoints } from './GuardCheckpointSystem';
-import { EscapeState, newEscape, ESCAPE_OPPORTUNITY_ROOMS, rollEscapeOutcome } from './EscapeSystem';
+import { EscapeState, newEscape, ESCAPE_OPPORTUNITY_ROOMS, ESCAPE_COOLDOWN, rollEscapeOutcome } from './EscapeSystem';
 
 const SECONDS_PER_HOUR = 5;
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
@@ -68,6 +68,7 @@ export class Simulation {
   // ---------- chaos layer (Stage 3.0): lockdown / alarm / riot / tension / escape ----------
   lockdown: LockdownState = newLockdown();
   alarm = { active: false, timer: 0, reason: '' };
+  heat = 0;                                     // 0..100 facility heat (eased, decays when calm)
   riotPressure = 0;
   riotLevel: RiotLevel = 'calm';
   riotEventTimer = 0;
@@ -78,6 +79,13 @@ export class Simulation {
   private fightsRecent = 0;
   private searchesRecent = 0;
   private blockedCount = 0;                      // prisoners blocked from schedule this tick
+  private lockdownCd = 0;                        // quiet window after a lockdown lifts
+  private riotWarnCd = 0;                        // cooldown before another riot warning
+  private riotEventCd = 0;                       // cooldown before another riot event
+  private escapeCd = 0;                          // cooldown between escape attempts
+  private heatEventTimer = 0;                    // recent-heat-event timer (slows decay briefly)
+  // lightweight playtest telemetry (?debug)
+  metrics: Record<string, number> = { fightsStarted: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0 };
 
   constructor(public bus: EventBus, seed = Math.floor(Math.random() * 1e9)) { this.rng = new Random(seed); }
 
@@ -235,9 +243,18 @@ export class Simulation {
   // TODO(refactor): promote these into standalone *System classes once the surface settles.
 
   private chaosSystem(dt: number) {
-    // decay "recent incident" tallies
+    // decay "recent incident" tallies + cooldowns
     this.fightsRecent = Math.max(0, this.fightsRecent - dt * 0.06);
     this.searchesRecent = Math.max(0, this.searchesRecent - dt * 0.05);
+    this.lockdownCd = Math.max(0, this.lockdownCd - dt);
+    this.riotWarnCd = Math.max(0, this.riotWarnCd - dt);
+    this.riotEventCd = Math.max(0, this.riotEventCd - dt);
+    this.escapeCd = Math.max(0, this.escapeCd - dt);
+    this.heatEventTimer = Math.max(0, this.heatEventTimer - dt);
+
+    // heat eases downward when calm (faster once a few seconds pass since the last event)
+    const heatDecay = (this.heatEventTimer > 0 ? 0.6 : 2.2) * dt;
+    this.heat = Math.max(0, this.heat - heatDecay);
 
     // lockdown timer + fatigue
     if (this.lockdown.active) {
@@ -247,20 +264,23 @@ export class Simulation {
     } else if (this.lockdown.fatigue > 0) {
       this.lockdown.fatigue = Math.max(0, this.lockdown.fatigue - dt * 0.02);
     }
-    if (this.alarm.active) { this.alarm.timer -= dt; if (this.alarm.timer <= 0) { this.alarm.active = false; this.alarm.reason = ''; } }
+    if (this.alarm.active) { this.alarm.timer -= dt; if (this.alarm.timer <= 0) { this.alarm.active = false; this.alarm.reason = ''; this.bus.emit('alert', { type: 'guard', text: 'Alarm cleared.' }); } }
 
-    // riot pressure eases toward a target computed from prisoner mood + incidents
+    // riot pressure eases toward a target computed from prisoner mood + incidents (smooth, no jumps)
     const target = computeRiotTarget(this.riotInputs());
-    this.riotPressure += (target - this.riotPressure) * Math.min(1, dt * 0.12);
+    this.riotPressure += (target - this.riotPressure) * Math.min(1, dt * 0.1);
     this.riotPressure = clamp01(this.riotPressure);
-    const lvl = riotLevel(this.riotPressure);
+    const lvl = riotLevelHyst(this.riotPressure, this.riotLevel);  // hysteresis avoids flicker
     if (lvl !== this.riotLevel) this.onRiotLevel(lvl);
-    if (this.riotEventTimer > 0) { this.riotEventTimer -= dt; }
+    if (this.riotEventTimer > 0) this.riotEventTimer -= dt;
 
     this.updateTension(dt);
     this.maybeNpcEscape(dt);
     this.updatePlayerObjective();
   }
+
+  // raise facility heat by a discrete amount (eased decay handled in chaosSystem)
+  private addHeat(amount: number) { this.heat = clamp(this.heat + amount, 0, 100); this.heatEventTimer = 6; }
 
   private riotInputs() {
     let anger = 0, hunger = 0, hygiene = 0, sleep = 0, n = 0;
@@ -270,6 +290,7 @@ export class Simulation {
       anger += nd.anger; hunger += nd.hunger; hygiene += nd.hygiene; sleep += nd.sleep; n++;
     }
     const blocked = this.blockedCount; this.blockedCount = 0;
+    this.metrics.stuckPrisoners = Math.max(this.metrics.stuckPrisoners, blocked);  // peak blocked-at-once
     return n ? {
       count: n, anger: anger / n, hunger: hunger / n, hygiene: hygiene / n, sleep: sleep / n,
       fightsRecent: this.fightsRecent, blocked, searchesRecent: this.searchesRecent,
@@ -278,23 +299,29 @@ export class Simulation {
   }
 
   private onRiotLevel(lvl: RiotLevel) {
-    const prev = this.riotLevel; this.riotLevel = lvl;
+    const prev = this.riotLevel;
+    // gate escalations behind cooldowns so warnings/events can't re-fire instantly
+    if (lvl === 'event' && this.riotEventCd > 0) { this.riotLevel = 'warning'; return; }
+    if (lvl === 'warning' && prev === 'calm' && this.riotWarnCd > 0) return;   // stay calm until cooldown elapses
+    this.riotLevel = lvl;
     if (lvl === 'warning' && prev === 'calm') {
-      this.bus.emit('alert', { type: 'lockdown', text: 'Tension rising — guards on alert.' });
+      this.riotWarnCd = RIOT_WARN_CD; this.metrics.riotWarnings++;
+      this.bus.emit('alert', { type: 'warning', text: 'RIOT WARNING — tension rising' });
       this.assignGuardCheckpoints();
       const room = this.hottestRoom();          // a couple of anger bubbles in the tensest room
       if (room) this.prisonersInRoom(room).slice(0, 2).forEach((e) => this.bubble(e, '😠', 'insult', 1.4));
     } else if (lvl === 'event' && prev !== 'event') {
       this.startRiotEvent();
     } else if (lvl === 'calm' && prev !== 'calm') {
-      this.bus.emit('alert', { type: 'guard', text: 'Tension settling down.' });
+      this.bus.emit('alert', { type: 'info', text: 'Tension settling down.' });
     }
   }
 
   // small, controlled riot event: alarm + soft lockdown + a few prisoners flare up + guards respond
   private startRiotEvent() {
-    this.riotEventTimer = 24;
-    this.bus.emit('alert', { type: 'fight', text: 'RIOT BREAKING OUT — guards responding!' });
+    this.riotLevel = 'event'; this.riotEventTimer = 24; this.riotEventCd = RIOT_EVENT_CD; this.metrics.riotEvents++;
+    this.bus.emit('alert', { type: 'critical', text: 'RIOT — guards responding!' });
+    this.addHeat(25);
     this.triggerAlarm('riot', 2);
     const room = this.hottestRoom();
     const crowd = room ? this.prisonersInRoom(room) : [];
@@ -310,21 +337,28 @@ export class Simulation {
 
   // ---------- lockdown ----------
   startLockdown(reason: string, severity = 2, sourceRoom?: string) {
-    if (this.lockdown.active) {   // escalate / refresh an existing lockdown
-      this.lockdown.severity = Math.max(this.lockdown.severity, severity);
+    if (this.lockdown.active) {   // escalate / refresh an existing lockdown instead of duplicating
+      if (severity > this.lockdown.severity) { this.lockdown.severity = severity; this.lockdown.reason = reason; }
       this.lockdown.timer = Math.max(this.lockdown.timer, LOCKDOWN_SECONDS[severity] ?? 40);
+      this.bus.emit('alert', { type: 'warning', text: `Lockdown extended — ${this.lockdownReasonText(reason)}` });
+      this.triggerAlarm(reason, severity);
       return;
     }
+    // cooldown after a recent lockdown — only a severe (sev 3) event may break it
+    if (this.lockdownCd > 0 && severity < 3) return;
     this.lockdown = { active: true, reason, severity, timer: LOCKDOWN_SECONDS[severity] ?? 40, startedAtHour: this.hour, scheduleOverride: true, sourceRoom: sourceRoom ?? '', fatigue: 0 };
+    this.metrics.lockdownsStarted++; this.addHeat(8 + severity * 3);
     this.triggerAlarm(reason, severity);
     this.applyDoorSchedule();
     this.orderPrisonersToCells();
     this.assignGuardCheckpoints();
-    this.bus.emit('alert', { type: 'lockdown', text: `LOCKDOWN — ${this.lockdownReasonText(reason)}` });
+    this.bus.emit('alert', { type: 'critical', text: `LOCKDOWN STARTED — ${this.lockdownReasonText(reason)}` });
   }
   private endLockdown() {
     if (!this.lockdown.active) return;
     this.lockdown.active = false; this.lockdown.scheduleOverride = false;
+    this.lockdownCd = LOCKDOWN_COOLDOWN; this.metrics.lockdownsEnded++;
+    this.heat = Math.max(0, this.heat - 8);
     this.applyDoorSchedule();                       // re-derive normal door states for the current phase
     // release any stale reservations / targets and re-route prisoners onto the current phase
     const ph = phaseAt(this.hour);
@@ -335,8 +369,8 @@ export class Simulation {
       b.targetRoom = ph.room; b.state = 'goto'; this.ecs.get<Agent>(e, 'Agent')!.path = null;
     }
     // guards drop checkpoint posts back to patrol
-    for (const e of this.ecs.query('Brain')) { const b = this.brain(e)!; if (b.role === 'guard' && b.state === 'idle') b.checkpoint = undefined; }
-    this.bus.emit('alert', { type: 'lockdown', text: 'Lockdown lifted — resuming schedule.' });
+    for (const e of this.ecs.query('Brain')) { const b = this.brain(e)!; if (b.role === 'guard') b.checkpoint = undefined; }
+    this.bus.emit('alert', { type: 'info', text: 'LOCKDOWN LIFTED — schedule resumed' });
   }
   private lockdownReasonText(r: string) {
     return ({ fight: 'fighting on the block', contraband: 'contraband found', riot: 'unrest', escape: 'escape attempt', breach: 'restricted-area breach', suspicion: 'security alert', manual: 'security drill' } as Record<string, string>)[r] ?? r;
@@ -353,17 +387,22 @@ export class Simulation {
 
   // a fight just started — bump the recent-fight tally + local tension; repeated brawls → lockdown
   private registerFight(at: Entity) {
-    this.fightsRecent += 1;
+    this.fightsRecent += 1; this.metrics.fightsStarted++;
     this.riotPressure = clamp01(this.riotPressure + 0.05);
+    this.addHeat(this.brain(at)?.isPlayer ? 12 : 6);
     const room = this.roomIdAt(this.pos(at)!);
     if (room) this.tension[room] = Math.min(100, (this.tension[room] ?? 0) + 20);
     if (this.fightsRecent >= 3 && !this.lockdown.active) this.startLockdown('fight', 2, room || undefined);
   }
 
   // ---------- alarm ----------
+  // Activating updates the reason + extends the timer; the alert only fires on the transition
+  // into the alarm state (no per-event spam while it's already ringing).
   triggerAlarm(reason: string, severity = 1) {
-    this.alarm.active = true; this.alarm.reason = reason; this.alarm.timer = Math.max(this.alarm.timer, 8 + severity * 4);
-    this.bus.emit('alert', { type: 'fight', text: `ALARM — ${this.lockdownReasonText(reason)}` });
+    const wasActive = this.alarm.active;
+    this.alarm.active = true; this.alarm.reason = reason; this.alarm.timer = Math.max(this.alarm.timer, 10 + severity * 5);
+    this.addHeat(severity >= 2 ? 10 : 4);
+    if (!wasActive) { this.metrics.alarms++; this.bus.emit('alert', { type: 'critical', text: 'ALARM ACTIVE' }); }
   }
 
   // ---------- area tension ----------
@@ -417,9 +456,9 @@ export class Simulation {
 
   // ---------- abstract NPC escape (rare) ----------
   private maybeNpcEscape(dt: number) {
-    if (this.escape.active) return;
-    // only occasionally, and only when it makes sense (yard time or chaos, low guard presence)
-    if (!this.rng.chance(dt * 0.01)) return;
+    if (this.escape.active || this.escapeCd > 0) return;
+    // rare, and only when it makes sense (yard time or chaos)
+    if (!this.rng.chance(dt * 0.006)) return;
     const yardish = this.phaseId === 'yard' || this.phaseId === 'free' || this.riotLevel !== 'calm';
     if (!yardish) return;
     // a desperate prisoner near an opportunity zone
@@ -431,22 +470,26 @@ export class Simulation {
     });
     if (cand == null) return;
     const b = this.brain(cand)!;
-    this.bus.emit('alert', { type: 'fight', text: `${b.name} is making a break for it!` });
+    this.escapeCd = ESCAPE_COOLDOWN; this.metrics.escapeAttempts++;
+    this.bus.emit('alert', { type: 'critical', text: `ESCAPE ATTEMPT — ${b.name} rushed the gate!` });
     this.bubble(cand, '🏃', 'insult', 2);
-    this.triggerAlarm('escape', 2);
-    if (!this.lockdown.active) this.startLockdown('escape', 2, this.roomIdAt(this.pos(cand)!));
+    this.startLockdown('escape', 2, this.roomIdAt(this.pos(cand)!));     // triggerAlarm runs inside startLockdown
     const g = this.nearestGuard(cand, 30);     // a guard runs them down → solitary
     if (g != null) this.beginEscort(g, cand, 'attempted escape'); else this.sendToSolitary(this.playerId, cand, 'attempted escape');
   }
 
   private updatePlayerObjective() {
-    const pb = this.brain(this.playerId);
+    const pb = this.brain(this.playerId); const pp = this.pos(this.playerId);
     if (!pb) { this.playerObjective = ''; return; }
-    if (pb.state === 'solitary') this.playerObjective = 'In solitary';
-    else if (this.escape.active && this.escape.by === this.playerId) this.playerObjective = 'Escape attempt in progress';
-    else if (this.lockdown.active) this.playerObjective = 'Lockdown — return to your cell';
-    else if (this.riotLevel === 'event') this.playerObjective = 'Riot — comply or take cover';
-    else if (this.riotLevel === 'warning') this.playerObjective = 'Tension high — stay out of trouble';
+    const inRestricted = pp ? RESTRICTED.includes(this.roomTypeAt(pp)) : false;
+    if (pb.state === 'solitary') this.playerObjective = 'In solitary — wait it out.';
+    else if (this.escape.active && this.escape.by === this.playerId) this.playerObjective = 'Escape attempt in progress…';
+    else if (pb.action === 'ESCAPED') this.playerObjective = 'You escaped. (Prototype ending)';
+    else if (this.lockdown.active) this.playerObjective = inRestricted ? 'Leave the restricted area!' : 'Lockdown — return to your cell.';
+    else if (this.riotLevel === 'event') this.playerObjective = 'Riot! Comply or take cover.';
+    else if (this.alarm.active) this.playerObjective = 'Alarm active — guards are responding.';
+    else if (this.riotLevel === 'warning') this.playerObjective = 'Tension rising — stay clear of crowds.';
+    else if (inRestricted) this.playerObjective = 'Restricted area — you shouldn\'t be here.';
     else this.playerObjective = '';
   }
 
@@ -484,6 +527,7 @@ export class Simulation {
         continue;
       }
       ag.repathCd -= dt;
+      if (b.bubbleCd) b.bubbleCd = Math.max(0, b.bubbleCd - dt);
       // walking to a claimed schedule object
       if (b.objTarget) {
         const o = this.objs.get(b.objTarget);
@@ -504,10 +548,10 @@ export class Simulation {
         if (!this.lockdown.active && ag.repathCd <= 0 && this.assignScheduleTarget(e, b, p)) { ag.repathCd = 1.2; continue; }
         if (here !== b.targetRoom && ag.repathCd <= 0) {
           this.gotoRoom(e, b.targetRoom); ag.repathCd = 1.2; b.state = 'goto';
-          if (!ag.path) {   // destination blocked (locked door / lockdown) → wait, complain, stew
-            this.blockedCount++;
-            if (this.rng.chance(0.12)) this.bubble(e, this.rng.pick(['Locked!', 'Open up!', '😠', 'Let us through!']), 'insult', 1.2);
-            const nd = this.ecs.get<Needs>(e, 'Needs'); if (nd) nd.anger = clamp01(nd.anger + dt * 0.04);
+          if (!ag.path) {   // destination blocked (locked door / lockdown) → wait, complain (throttled), stew
+            this.blockedCount++; this.metrics.blockedFallbacks++;
+            if (!b.bubbleCd) { this.bubble(e, this.rng.pick(['Locked!', 'Open up!', '😠', 'Let us through!']), 'insult', 1.2); b.bubbleCd = this.rng.range(5, 9); }
+            const nd = this.ecs.get<Needs>(e, 'Needs'); if (nd) nd.anger = clamp01(nd.anger + dt * 0.03);
             b.state = 'wander';
           }
         } else {
@@ -613,7 +657,7 @@ export class Simulation {
           ag.repathCd = 0.8;
           const path = this.path(this.map.worldToIdx(p.x, p.z), this.map.worldToIdx(dest.x, dest.z), e);
           if (path && path.length) { ag.path = path; ag.step = 0; b.action = 'To checkpoint'; }
-          else b.checkpoint = ((b.checkpoint ?? 0) + 1) % this.checkpoints.length;   // post unreachable → try another
+          else { this.metrics.guardCheckpointFails++; b.checkpoint = ((b.checkpoint ?? 0) + 1) % this.checkpoints.length; }   // post unreachable → try another
         }
         continue;
       }
@@ -751,6 +795,7 @@ export class Simulation {
         const n = this.ecs.get<Needs>(e, 'Needs')!; n.anger = clamp01(n.anger - 0.4); n.fear = clamp01(n.fear + 0.2);
       }
     }
+    this.metrics.fightsBrokenUp++;
     this.bus.emit('alert', { type: 'guard', text: `${this.name(guard)} broke up the fight` });
   }
 
@@ -987,13 +1032,15 @@ export class Simulation {
   requestEscape(): string {
     const pl = this.playerId; const pb = this.brain(pl)!;
     if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down') return 'You can\'t act right now.';
+    if (this.escapeCd > 0) return 'Too risky right now — lay low.';
     const spot = this.escapeOpportunity(); if (!spot) return 'No opportunity here.';
     if (this.act && this.act.phase === 'perform') return 'Finish what you\'re doing first.';
     this.escape = { active: true, by: pl, timer: ACTION_DUR.escape, spot, noticed: false };
+    this.metrics.escapeAttempts++; this.escapeCd = ESCAPE_COOLDOWN;
     this.act = { action: 'escape', target: pl, phase: 'perform', timer: ACTION_DUR.escape, dur: ACTION_DUR.escape, applied: false, approachT: 0 };
     this.beginPerform();
     this.social(pl)!.suspicion = clamp(this.social(pl)!.suspicion + 20, 0, 100);
-    this.bus.emit('alert', { type: 'fight', text: 'You make your move…' });
+    this.bus.emit('alert', { type: 'warning', text: 'You make your move…' });
     return 'Attempting escape — stay unseen!';
   }
   private resolveEscape() {
@@ -1227,15 +1274,16 @@ export class Simulation {
   private doSearchResult(guard: Entity, target: Entity) {
     const inv = this.inv(target); const ps = this.social(target); const tb = this.brain(target);
     if (!inv || !ps || !tb) return;
-    this.searchesRecent += 1;                    // searches add a little prison-wide tension
+    this.searchesRecent += 1; this.metrics.searches++;   // searches add a little prison-wide tension
     const contraband = inv.items.filter(isContraband);
     let found: string | null = null;
     for (const id of contraband) { if (this.rng.float() < 0.78 - ITEMS[id].concealment * 0.6) { found = id; break; } }
     if (found) {
-      inv.items.splice(inv.items.indexOf(found), 1);
+      inv.items.splice(inv.items.indexOf(found), 1); this.metrics.contrabandFound++;
       this.bus.emit('alert', { type: 'search', text: `Contraband found on ${tb.name}: ${ITEMS[found].name} — confiscated!` });
       this.bubble(guard, 'Found it.', 'search', 1.4); this.floatBy(target, 'Contraband!', '#ff7a6a');
       if (tb.isPlayer) ps.reputation = clamp(ps.reputation + 4, -100, 100);
+      this.addHeat(ITEMS[found].risk >= 0.7 ? 18 : 8);
       if (ITEMS[found].risk >= 0.7) { this.beginEscort(guard, target, 'serious contraband'); this.startLockdown('contraband', 2, this.roomIdAt(this.pos(target)!) || undefined); return; }
       ps.suspicion = clamp(ps.suspicion - 30, 0, 100);
     } else {
@@ -1434,6 +1482,7 @@ export class Simulation {
     const chaos = {
       lockdown: this.lockdown,
       alarm: this.alarm,
+      heat: this.heat,
       riotPressure: this.riotPressure,
       tension: this.tension
     };
@@ -1471,10 +1520,12 @@ export class Simulation {
     // restore chaos state defensively (escape is always reset to a stable state on load)
     this.lockdown = sanitizeLockdown(data.lockdown);
     this.alarm = { active: !!data.alarm?.active, timer: num(data.alarm?.timer, 0), reason: typeof data.alarm?.reason === 'string' ? data.alarm.reason : '' };
+    this.heat = clamp(num(data.heat, 0), 0, 100);
     this.riotPressure = clamp01(num(data.riotPressure, 0));
-    this.riotLevel = riotLevel(this.riotPressure);
+    this.riotLevel = riotLevelHyst(this.riotPressure, 'calm');
     this.riotEventTimer = 0; this.escape = newEscape();
     this.fightsRecent = 0; this.searchesRecent = 0; this.blockedCount = 0;
+    this.lockdownCd = 0; this.riotWarnCd = 0; this.riotEventCd = 0; this.escapeCd = 0; this.heatEventTimer = 0;
     this.tension = {}; for (const r of this.rooms) this.tension[r.id] = (data.tension && typeof data.tension[r.id] === 'number') ? clamp(data.tension[r.id], 0, 100) : 0;
     if (!this.checkpoints.length) this.checkpoints = buildCheckpoints(this.rooms as any, (i) => this.map.tileXY(i), (x, y) => this.map.toWorld(x, y));
 

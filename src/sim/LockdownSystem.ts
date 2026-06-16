@@ -18,6 +18,8 @@ export function newLockdown(): LockdownState {
 
 // how long a lockdown of a given severity lasts (sim-seconds; 1 sim-hour = 5s)
 export const LOCKDOWN_SECONDS: Record<number, number> = { 1: 35, 2: 60, 3: 90 };
+// quiet window after a lockdown lifts before a non-severe one can start again (no rapid loops)
+export const LOCKDOWN_COOLDOWN = 40;
 
 // Recreational areas lock during any lockdown; cell blocks stay reachable so prisoners can
 // actually return to them. Restricted (staff-only) areas are handled by their own flag.

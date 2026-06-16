@@ -12,6 +12,36 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v3.1.0-chaos.tuning — Stage Chaos 3.1 (balance, readability, alert cleanup, feel)
+Tuning + game-feel pass over the chaos layer — no new systems. Sim authoritative, RenderSync
+read-only, build passes, 0 runtime errors. Accelerated 1-day playtest: peak Heat **5** / peak Riot
+**28%** with 0 lockdowns under no player trouble (Heat spikes to ~50 when the player fights).
+- **Alert cleanup**: deduped (same line suppressed for ~4.5s, never duplicated as the top line) with
+  new categories (critical/warning/info/player/system). Clear transitions only — "LOCKDOWN STARTED",
+  "LOCKDOWN LIFTED — schedule resumed", "ALARM ACTIVE", "RIOT WARNING", "ESCAPE ATTEMPT". No more
+  stacked `LOCKDOWN — x` / `ALARM — x` spam.
+- **Heat is now a real eased 0–100 value** (was a crude alarm+lockdown sum that pinned to 100): rises
+  from discrete events (fight 6, player fight 12, contraband 8/18, lockdown 8–17, alarm 4–10, riot 25)
+  and **decays when calm** (faster after a few quiet seconds). Stays low in normal play.
+- **Riot pressure tuning**: slower easing + **hysteresis** (separate on/off thresholds, no flicker) +
+  **cooldowns** before another warning (20s) or event (45s). Warnings are common-ish, full events rare.
+- **Lockdown hysteresis**: a **cooldown** after a lockdown lifts blocks a new one unless a *severe*
+  (sev-3) event occurs; concurrent events **extend** the active lockdown instead of duplicating it.
+- **Alarm cleanup**: activating updates the reason + extends the timer but only alerts on the
+  transition in; gentler vignette (max ~0.42 opacity, smooth) and calmer door-lamp flash.
+- **Player panel** is contextual: during a lockdown the needs buttons (out of reach) are hidden and
+  chaos actions lead; otherwise needs → chaos → escape, grouped.
+- **Clearer objective** text (return to cell / comply / restricted-area / alarm / riot-warning / escaped).
+- **Prisoner reactions** throttled: complaint/panic bubbles have a 5–9s per-NPC cooldown; prisoners
+  recover to normal schedules after chaos ends.
+- **Escape** stays rare: NPC attempt chance lowered + a 60s cooldown between any attempts; player
+  Attempt Escape blocked during the cooldown.
+- **Playtest telemetry** (`sim.metrics`, surfaced via `?debug`): fights started/broken-up, searches,
+  contraband found, lockdowns started/ended, alarms, riot warnings/events, escape attempts, blocked
+  fallbacks, peak stuck prisoners, guard checkpoint failures.
+- Save/load v5 unchanged but now persists **heat**; cooldowns/telemetry reset safely on load; alert
+  feed cleared on load (no stale lines).
+
 ## v3.0.0-chaos — Stage Chaos 3.0 (lockdowns, alarm, riot pressure, checkpoints, abstract escape)
 First prison-wide chaos layer — a playable vertical slice. Sim authoritative, RenderSync read-only,
 build passes, 0 runtime errors. New pure modules: `LockdownSystem.ts`, `RiotSystem.ts`,

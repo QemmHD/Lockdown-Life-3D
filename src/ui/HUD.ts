@@ -72,7 +72,7 @@ export class HUD {
     this.els['chip-heat'].className = 'tb-chip ' + (heat > 66 ? 'sev-high' : heat > 33 ? 'sev-mid' : '');
   }
   setSpeed(label: string) { this.els['speed-x'].textContent = label; }
-  setAlarm(level: number) { this.els['alarm'].style.opacity = level > 0.7 ? String((level - 0.7) * 2) : '0'; }
+  setAlarm(level: number) { this.els['alarm'].style.opacity = level > 0.6 ? String(Math.min(0.42, (level - 0.6) * 1.05)) : '0'; }
   // chaos banner + lockdown chip. info.level: 'calm' | 'warning' | 'event'
   setChaos(info: { lockdown: boolean; lockdownTimer: number; lockdownReason: string; alarm: boolean; level: string; objective: string }) {
     const lock = this.els['chip-lock'];
@@ -96,8 +96,17 @@ export class HUD {
     (bar.querySelector('.ab-fill') as HTMLElement).style.width = Math.round(progress * 100) + '%';
   }
 
+  clearAlerts() { this.els['alert-feed'].innerHTML = ''; this.alertSeen.clear(); }
+  private alertSeen = new Map<string, number>();   // text -> last-shown timestamp (dedupe)
   alert(text: string, type = 'info') {
+    const now = performance.now();
+    // dedupe: drop the exact same message within a short window, and never duplicate the top line
+    const last = this.alertSeen.get(text);
+    if (last != null && now - last < 4500) return;
+    this.alertSeen.set(text, now);
+    if (this.alertSeen.size > 40) for (const [k, t] of this.alertSeen) if (now - t > 8000) this.alertSeen.delete(k);
     const feed = this.els['alert-feed'];
+    if ((feed.firstChild as HTMLElement | null)?.textContent === text) return;
     const el = document.createElement('div');
     el.className = 'alert alert-' + type;
     el.textContent = text;
