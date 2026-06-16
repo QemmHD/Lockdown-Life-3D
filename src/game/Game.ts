@@ -35,7 +35,7 @@ import { InventoryUI } from '../ui/InventoryUI';
 
 type Mode = 'menu' | 'playing' | 'paused' | 'dialogue' | 'inventory' | 'event' | 'activity';
 
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 const INTERACT_RANGE = 2.4;
 const SCHEDULE_IDS = SCHEDULE.map((p) => p.id);
 const PHASE_START: Record<string, number> = Object.fromEntries(SCHEDULE.map((p) => [p.id, p.startHour]));
@@ -109,7 +109,7 @@ export class Game {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.88;
+    this.renderer.toneMappingExposure = 0.98;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     // keep classic light-intensity units so hand-tuned values stay predictable
     (this.renderer as any).useLegacyLights = true;

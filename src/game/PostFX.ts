@@ -30,20 +30,20 @@ export class PostFX {
 
     this.bloom = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.3,   // strength
-      0.6,   // radius
-      0.86   // threshold — only bright lights/highlights bloom
+      0.16,  // strength — subtle glow, no haze
+      0.4,   // radius
+      0.9    // threshold — only the brightest lamps bloom
     );
     this.composer.addPass(this.bloom);
 
     const grade = new ShaderPass(BrightnessContrastShader);
-    grade.uniforms['brightness'].value = -0.06;
-    grade.uniforms['contrast'].value = 0.26;
+    grade.uniforms['brightness'].value = -0.02;
+    grade.uniforms['contrast'].value = 0.2;
     this.composer.addPass(grade);
 
     const vignette = new ShaderPass(VignetteShader);
-    vignette.uniforms['offset'].value = 0.95;
-    vignette.uniforms['darkness'].value = 0.8;
+    vignette.uniforms['offset'].value = 1.05;
+    vignette.uniforms['darkness'].value = 0.6;
     this.composer.addPass(vignette);
 
     this.composer.addPass(new OutputPass());
