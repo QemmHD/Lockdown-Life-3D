@@ -56,8 +56,12 @@ export class RenderSync {
 
       this.animate(v, b?.state ?? 'idle', moving, dt, time, e);
 
-      v.ring.visible = e === selected;
-      if (v.ring.visible) { const s = 1 + Math.sin(time * 5) * 0.09; v.ring.scale.set(s, s, s); }
+      const isPlayer = !!b?.isPlayer;
+      v.ring.visible = isPlayer || e === selected;
+      if (v.ring.visible) {
+        (v.ring.material as THREE.MeshBasicMaterial).color.setHex(isPlayer ? 0xffd24a : 0x6dff9e);
+        const s = (isPlayer ? 1.05 : 1) + Math.sin(time * 5) * 0.09; v.ring.scale.set(s, s, s);
+      }
       const n = this.ecs.get<Needs>(e, 'Needs');
       if (b && n) { setIcon(v, this.icon(b, n)); if (v.icon.visible) v.icon.position.y = 1.85 + Math.sin(time * 4 + e) * 0.06; }
     }

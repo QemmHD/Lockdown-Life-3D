@@ -18,7 +18,7 @@ export interface Needs {
   anger: number; fear: number; health: number;
 }
 
-export type BrainState = 'idle' | 'goto' | 'wander' | 'fight' | 'respond' | 'down';
+export type BrainState = 'idle' | 'goto' | 'wander' | 'fight' | 'respond' | 'down' | 'solitary';
 
 export interface Brain {
   role: 'prisoner' | 'guard';
@@ -31,6 +31,22 @@ export interface Brain {
   foe?: Entity;            // combat / response target
   homeTile?: number;       // guard patrol anchor / prisoner cell
   attackCd: number;
+  isPlayer?: boolean;      // the directly-controlled prisoner
+  action?: string;         // human-readable current action (UI)
+  discipline?: 'none' | 'solitary';
+  discTimer?: number;      // seconds left in solitary
+  escortTarget?: Entity;   // guard escorting this prisoner
 }
+
+// Reputation / standing / suspicion. On the player: reputation+respect drive the loop;
+// on NPCs: respect = innate standing, rel = relationship toward the player.
+export interface Social {
+  reputation: number;   // -100..100 (player-facing standing)
+  respect: number;      // 0..100 toughness/standing
+  suspicion: number;    // 0..100 guard suspicion
+  rel: number;          // -100..100 relationship toward player (NPCs)
+}
+
+export interface Inventory { items: string[]; money: number; }
 
 export const NEED_KEYS: (keyof Needs)[] = ['hunger', 'sleep', 'hygiene', 'energy', 'anger', 'fear', 'health'];

@@ -1,11 +1,19 @@
 // DOM/overlay UI (lightweight; React + Zustand can replace this later without touching sim).
+export interface PanelAction { key: string; label: string; danger?: boolean; }
+export interface PanelItem { icon: string; name: string; contraband: boolean; key: string; }
 export interface PanelInfo {
-  name: string; role: string; gang?: string; state: string; traits: string[];
+  name: string; role: string; player: boolean; gang?: string; gangColor?: string;
+  state: string; room: string; traits: string[];
+  meta: string[];                  // chips: Rep 5 · Respect 8 · …
   needs: { label: string; value: number; color: string }[];
+  items: PanelItem[];
+  actions: PanelAction[];
 }
 
 export interface HUDHooks {
   onPause: () => void; onSpeed: () => void; onSave: () => void; onLoad: () => void; onDeselect: () => void; hasSave: () => boolean;
+  onAction: (key: string) => void;       // interaction / self-action / job button
+  onItem: (key: string) => void;         // tap an inventory item (drop)
 }
 
 export class HUD {
@@ -77,12 +85,26 @@ export class HUD {
     const p = this.els['panel'];
     if (!info) { p.classList.add('hidden'); return; }
     p.classList.remove('hidden');
+    p.classList.toggle('is-player', info.player);
     const bars = info.needs.map((n) => `<div class="need"><span>${n.label}</span><div class="need-bg"><div class="need-fill" style="width:${Math.round(n.value * 100)}%;background:${n.color}"></div></div></div>`).join('');
+    const chips = info.meta.map((m) => `<span class="chip">${m}</span>`).join('');
+    const gangTag = info.gang ? `<span class="gangtag" style="color:${info.gangColor || '#bbb'}">●</span> ${info.gang}` : 'Unaffiliated';
+    const items = info.items.length
+      ? info.items.map((it) => `<button class="inv-item ${it.contraband ? 'contra' : ''}" data-item="${it.key}" title="tap to drop">${it.icon} ${it.name}${it.contraband ? ' ⚠' : ''}</button>`).join('')
+      : '<span class="inv-empty">empty</span>';
+    const acts = info.actions.map((a) => `<button class="act ${a.danger ? 'danger' : ''}" data-act="${a.key}">${a.label}</button>`).join('');
     p.innerHTML = `
-      <div class="panel-head"><b>${info.name}</b><button id="panel-x">✕</button></div>
-      <div class="panel-sub">${info.role}${info.gang ? ' · ' + info.gang : ''} · <span class="state">${info.state}</span></div>
+      <div class="panel-head"><b>${info.player ? '★ ' : ''}${info.name}</b><button id="panel-x">✕</button></div>
+      <div class="panel-sub">${info.role} · <span class="gangtag-wrap">${gangTag}</span> · <span class="state">${info.state}</span></div>
+      <div class="panel-room">📍 ${info.room}</div>
+      <div class="panel-chips">${chips}</div>
       <div class="panel-traits">${info.traits.map((t) => `<span class="trait">${t}</span>`).join('')}</div>
-      <div class="needs">${bars}</div>`;
+      <div class="needs">${bars}</div>
+      <div class="panel-label">Inventory</div>
+      <div class="inv-row">${items}</div>
+      <div class="panel-actions">${acts}</div>`;
     (p.querySelector('#panel-x') as HTMLElement).onclick = () => this.hooks.onDeselect();
+    p.querySelectorAll('[data-act]').forEach((b) => (b as HTMLElement).onclick = () => this.hooks.onAction((b as HTMLElement).dataset.act!));
+    p.querySelectorAll('[data-item]').forEach((b) => (b as HTMLElement).onclick = () => this.hooks.onItem((b as HTMLElement).dataset.item!));
   }
 }

@@ -8,10 +8,13 @@ import { Simulation } from '../sim/Simulation';
 import { EventBus } from './EventBus';
 import { InputManager } from './InputManager';
 import { SaveManager } from './SaveManager';
-import { HUD, PanelInfo } from '../ui/HUD';
+import { HUD, PanelInfo, PanelAction } from '../ui/HUD';
 import { Entity } from '../ecs/world';
-import { Brain, Needs, Position, Agent } from '../ecs/components';
-import { phaseAt } from '../data/content';
+import { Brain, Needs, Position, Agent, Social, Inventory } from '../ecs/components';
+import { phaseAt, GANG_MAP } from '../data/content';
+import { ITEMS, isContraband } from '../data/items';
+import { JOB_BY_ROOM } from '../data/jobs';
+import { InteractAction } from '../sim/Simulation';
 
 const FIXED = 1 / 30;
 const SPEEDS = [1, 2, 4];
@@ -29,7 +32,7 @@ export class Game {
   private speedIdx = 0;
   private paused = false;
   private selected: Entity | null = null;
-  private playerEntity: Entity | null = null;
+  private playerEntity: Entity = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.app = new ThreeApp(canvas);
@@ -42,10 +45,10 @@ export class Game {
     buildPrison(this.app.scene, this.sim.map, this.sim.rooms);
     dressRooms(this.app.scene, this.sim.map, this.sim.rooms);
     this.sync = new RenderSync(this.app.scene, this.sim.ecs);
-    // character-focused camera: clamp to the prison, follow a prisoner by default
+    // character-focused camera: clamp to the prison, follow the player prisoner
     this.cam.setBounds(this.sim.map.width / 2 - 5, this.sim.map.height / 2 - 5);
-    this.playerEntity = this.pickPlayer();
-    const sp = this.playerEntity != null ? this.sim.ecs.get<Position>(this.playerEntity, 'Position') : null;
+    this.playerEntity = this.sim.player();
+    const sp = this.sim.ecs.get<Position>(this.playerEntity, 'Position');
     this.cam.focus(sp ? sp.x : 0, sp ? sp.z : 0);
 
     this.hud = new HUD({
@@ -53,9 +56,12 @@ export class Game {
       onSpeed: () => { this.speedIdx = (this.speedIdx + 1) % SPEEDS.length; this.paused = false; this.hud.setSpeed(SPEEDS[this.speedIdx] + '×'); },
       onSave: () => { SaveManager.save(this.sim.serialize()); this.hud.alert('Game saved', 'guard'); },
       onLoad: () => this.load(),
-      onDeselect: () => this.select(null),
-      hasSave: () => SaveManager.has()
+      onDeselect: () => this.select(this.playerEntity),
+      hasSave: () => SaveManager.has(),
+      onAction: (key) => this.doAction(key),
+      onItem: (key) => { const r = this.sim.dropItem(key); if (r) this.hud.alert(r, 'trade'); this.refreshPanel(); }
     });
+    this.select(this.playerEntity);   // panel shows the player by default
 
     this.bus.on('pan', ({ dx, dy }) => this.cam.pan(dx, dy));
     this.bus.on('zoom', ({ factor }) => this.cam.zoomBy(factor));
@@ -70,41 +76,72 @@ export class Game {
   private onTap(x: number, y: number) {
     const ray = this.cam.raycaster(x, y);
     const e = this.sync.pick(ray);
-    if (e != null) this.select(e);    // tapping empty space keeps current follow target
+    if (e != null) { this.select(e); return; }
+    // empty floor → walk the player there + drop a destination marker
+    const g = this.cam.screenToGround(x, y);
+    if (g) { const dest = this.sim.playerMoveTo(g.x, g.z); if (dest) this.setMarker(dest.x, dest.z); }
   }
-  // default "player" prisoner the camera falls back to when nothing is selected
-  private pickPlayer(): Entity | null {
-    for (const e of this.sim.ecs.query('Brain')) if (this.sim.ecs.get<Brain>(e, 'Brain')!.role === 'prisoner') return e;
-    return null;
-  }
-  private followTarget(): Entity | null {
-    if (this.selected != null && this.sim.ecs.has(this.selected, 'Position')) return this.selected;
-    if (this.playerEntity != null && this.sim.ecs.has(this.playerEntity, 'Position')) return this.playerEntity;
-    return this.playerEntity = this.pickPlayer();
-  }
+  // camera always follows the player prisoner; selection only changes the inspected panel
+  private followTarget(): Entity { return this.playerEntity; }
   private select(e: Entity | null) {
-    this.selected = e;
-    if (e == null) { this.hud.showPanel(null); return; }
-    this.cam.recenter();              // resume smooth follow toward the newly selected inmate
+    this.selected = e ?? this.playerEntity;
     this.refreshPanel();
   }
+  private hex(n: number) { return '#' + (n >>> 0).toString(16).padStart(6, '0'); }
   private refreshPanel() {
-    if (this.selected == null) return;
-    const b = this.sim.ecs.get<Brain>(this.selected, 'Brain');
-    const n = this.sim.ecs.get<Needs>(this.selected, 'Needs');
-    if (!b || !n) { this.hud.showPanel(null); return; }
+    const e = this.selected ?? this.playerEntity;
+    const b = this.sim.ecs.get<Brain>(e, 'Brain');
+    const n = this.sim.ecs.get<Needs>(e, 'Needs');
+    const s = this.sim.ecs.get<Social>(e, 'Social');
+    const inv = this.sim.ecs.get<Inventory>(e, 'Inventory');
+    if (!b || !n || !s) { this.hud.showPanel(null); return; }
+    const isPlayer = !!b.isPlayer;
+    const gang = b.gang ? GANG_MAP[b.gang] : undefined;
+    const meta = isPlayer
+      ? [`Rep ${Math.round(s.reputation)}`, `Respect ${Math.round(s.respect)}`, `Suspicion ${Math.round(s.suspicion)}`, `$${inv?.money ?? 0}`]
+      : [`Respect ${Math.round(s.respect)}`, `Toward you: ${this.relWord(s.rel)}`];
+    const items = (inv?.items ?? []).map((id) => ({ icon: ITEMS[id]?.icon ?? '▪', name: ITEMS[id]?.name ?? id, contraband: isContraband(id), key: id }));
+    const actions: PanelAction[] = isPlayer ? this.playerActions(e) : this.npcActions(e, b.role);
     const info: PanelInfo = {
-      name: b.name, role: b.role, gang: b.gang, state: b.state, traits: b.traits,
+      name: b.name, role: isPlayer ? 'Player' : b.role, player: isPlayer,
+      gang: gang?.name, gangColor: gang ? this.hex(gang.color) : undefined,
+      state: b.action ?? b.state, room: this.sim.currentRoomName(e), traits: b.traits, meta,
       needs: [
         { label: 'Health', value: n.health, color: '#e74c3c' },
-        { label: 'Hunger', value: 1 - n.hunger, color: '#e67e22' },
         { label: 'Energy', value: n.energy, color: '#2ecc71' },
+        { label: 'Hunger', value: 1 - n.hunger, color: '#e67e22' },
         { label: 'Hygiene', value: 1 - n.hygiene, color: '#3498db' },
         { label: 'Anger', value: n.anger, color: '#c0392b' },
         { label: 'Fear', value: n.fear, color: '#9b59b6' }
-      ]
+      ],
+      items, actions
     };
     this.hud.showPanel(info);
+  }
+  private relWord(v: number) { return v <= -50 ? 'enemy' : v <= -15 ? 'disliked' : v < 15 ? 'neutral' : v < 50 ? 'friendly' : 'ally'; }
+  private playerActions(e: Entity): PanelAction[] {
+    const room = this.sim.roomTypeAt(this.sim.ecs.get<Position>(e, 'Position')!);
+    const a: PanelAction[] = [];
+    if (room === 'cellblock') a.push({ key: 'rest', label: 'Rest' });
+    if (room === 'shower') a.push({ key: 'wash', label: 'Wash' });
+    if (room === 'cafeteria') a.push({ key: 'eat', label: 'Eat' });
+    if (room === 'yard') a.push({ key: 'train', label: 'Train' });
+    if (JOB_BY_ROOM[room]) a.push({ key: 'work', label: JOB_BY_ROOM[room].verb });
+    return a;
+  }
+  private npcActions(_e: Entity, role: string): PanelAction[] {
+    if (role === 'guard') return [{ key: 'talk', label: 'Talk' }, { key: 'comply', label: 'Comply' }, { key: 'argue', label: 'Argue' }];
+    return [{ key: 'talk', label: 'Talk' }, { key: 'trade', label: 'Trade' }, { key: 'favor', label: 'Favor' },
+      { key: 'insult', label: 'Insult' }, { key: 'threaten', label: 'Threaten' }, { key: 'fight', label: 'Fight', danger: true }, { key: 'backoff', label: 'Back Off' }];
+  }
+  private doAction(key: string) {
+    const sel = this.selected ?? this.playerEntity;
+    const selfKeys = ['rest', 'wash', 'eat', 'train', 'work'];
+    let result: string;
+    if (selfKeys.includes(key)) result = this.sim.selfAction(key as InteractAction);
+    else result = this.sim.interact(sel, key as InteractAction);
+    if (result) this.hud.alert(result, key === 'fight' ? 'fight' : 'info');
+    this.refreshPanel();
   }
 
   private load() {
@@ -113,8 +150,25 @@ export class Game {
     this.sim.hydrate(data);
     this.sync.reset();
     this.sync.setEcs(this.sim.ecs);
-    this.select(null);
+    this.playerEntity = this.sim.player();
+    this.select(this.playerEntity);
     this.hud.alert('Game loaded', 'guard');
+  }
+
+  private marker: THREE.Mesh | null = null;
+  private markerLife = 0;
+  private setMarker(x: number, z: number) {
+    if (!this.marker) {
+      this.marker = new THREE.Mesh(new THREE.RingGeometry(0.25, 0.42, 20), new THREE.MeshBasicMaterial({ color: 0x9fe0ff, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
+      this.marker.rotation.x = -Math.PI / 2; this.app.scene.add(this.marker);
+    }
+    this.marker.position.set(x, 0.06, z); this.marker.visible = true; this.markerLife = 1.5;
+  }
+  private updateMarker(dt: number) {
+    if (!this.marker || !this.marker.visible) return;
+    this.markerLife -= dt;
+    const s = 1 + Math.sin(this.clock.elapsedTime * 6) * 0.12; this.marker.scale.set(s, s, s);
+    if (this.markerLife <= 0) this.marker.visible = false;
   }
 
   private fxRings: { mesh: THREE.Mesh; life: number }[] = [];
@@ -154,21 +208,20 @@ export class Game {
 
     this.sync.update(dt, this.selected, t);
     this.updateFx(dt);
+    this.updateMarker(dt);
 
-    // character-focused follow: track selected-or-player prisoner with a small movement lead
+    // character-focused follow: always track the player prisoner with a small movement lead
     const ft = this.followTarget();
-    if (ft != null) {
-      const w = this.sync.worldOf(ft) ?? this.sim.ecs.get<Position>(ft, 'Position');
-      if (w) {
-        const pos = this.sim.ecs.get<Position>(ft, 'Position');
-        const moving = !!this.sim.ecs.get<Agent>(ft, 'Agent')?.path;
-        const lead = moving && pos ? 2 : 0;
-        this.cam.setFollow(w.x + (pos ? Math.sin(pos.facing) * lead : 0), w.z + (pos ? Math.cos(pos.facing) * lead : 0));
-      }
+    const w = this.sync.worldOf(ft) ?? this.sim.ecs.get<Position>(ft, 'Position');
+    if (w) {
+      const pos = this.sim.ecs.get<Position>(ft, 'Position');
+      const moving = !!this.sim.ecs.get<Agent>(ft, 'Agent')?.path;
+      const lead = moving && pos ? 2 : 0;
+      this.cam.setFollow(w.x + (pos ? Math.sin(pos.facing) * lead : 0), w.z + (pos ? Math.cos(pos.facing) * lead : 0));
     }
     this.cam.tick(dt);
 
-    if (this.selected != null) this.refreshPanel();
+    this.refreshPanel();
     const riot = this.riotRisk();
     this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, 0, riot);
     this.hud.setAlarm(riot);

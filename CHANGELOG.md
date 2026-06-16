@@ -1,5 +1,28 @@
 # Changelog
 
+## v2.1.0-gameplay.2 — Stage Gameplay 2.0 (playable prison-life loop)
+First real gameplay layer; sim stays authoritative (interactions mutate sim, RenderSync read-only),
+camera/layout/visuals preserved, build passes, 0 runtime errors.
+- **Player prisoner**: one inmate is the directly-controlled "You" (gold ring, ★ panel). Camera follows
+  the player; NPCs keep their schedules/AI. Player status: gang, reputation, respect, suspicion, money,
+  current action, room, needs, inventory.
+- **Direct control**: tap floor to walk there (A* + destination marker); tap an inmate/guard to inspect.
+- **Context interactions** (panel buttons): prisoners — Talk/Trade/Favor/Insult/Threaten/Fight/Back Off;
+  guards — Talk/Comply/Argue; self/room — Rest/Wash/Eat/Train/Work. Out-of-range actions auto-walk closer.
+- **Reputation + relationships**: reputation/respect shift from fights, threats, favors, jobs, getting caught;
+  NPCs track a relationship-toward-you value (neutral/friendly/enemy…).
+- **Gangs v1**: 6 fictional gangs with turf, enemies/allies, accent colors; gang members drift to turf in
+  free time; rivals fight more; gang shown on prisoners + panel.
+- **Contraband + inventory v1**: abstract items (note, food, medicine, dice, phone, tool, blade, keycard,
+  cigarettes) with risk/concealment/suspicion; player + NPC inventories; trade/drop; carrying raises suspicion.
+- **Search / discipline / solitary**: suspicion rises in restricted zones / with contraband / fighting; nearby
+  guards search, confiscate (concealment vs alertness), and escort to **solitary** (timed) for serious items or fighting.
+- **Jobs v1**: room-based tasks (kitchen/cleaner/laundry/yard/porter) give money/respect/reputation.
+- **Alerts** for fights, guard response, searches, contraband found, solitary, trades, jobs, respect changes, schedule.
+- **UI**: rich player/inspect panel (stats chips, inventory, interaction buttons); **save/load v2** persists
+  player id, reputation, relationships, inventories, suspicion, discipline (with version + fallback).
+- New data: src/data/items.ts, src/data/jobs.ts; expanded src/data/content.ts gangs; new ECS Social + Inventory components.
+
 ## v2.0.0-camera.1 — Stage Camera 1.0 (character-focused follow camera)
 The default view is now a close, Hard Time-style character camera instead of a management overview.
 - **Character Mode (default)**: smoothly follows the selected prisoner, or a chosen "player" prisoner

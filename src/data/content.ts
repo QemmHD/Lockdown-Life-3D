@@ -2,14 +2,26 @@
 
 export interface GangDef {
   id: string; name: string; color: number;
-  preferredZones: string[]; enemies: string[]; aggression: number;
+  territory: string;          // primary room-type turf
+  preferredZones: string[];
+  enemies: string[]; allies: string[];
+  aggression: number; respectThreshold: number;
 }
 
+// Fictional gangs only.
 export const GANGS: GangDef[] = [
-  { id: 'iron_block', name: 'Iron Block', color: 0x9aa0a6, preferredZones: ['yard', 'cellblock'], enemies: ['redline_crew'], aggression: 0.65 },
-  { id: 'redline_crew', name: 'Redline Crew', color: 0xb5413a, preferredZones: ['cafeteria', 'yard'], enemies: ['iron_block'], aggression: 0.7 },
-  { id: 'blue_chain', name: 'Blue Chain', color: 0x3f6fa5, preferredZones: ['shower', 'cellblock'], enemies: [], aggression: 0.4 }
+  { id: 'iron_block', name: 'Iron Block', color: 0x9aa0a6, territory: 'cellblock', preferredZones: ['cellblock', 'yard'], enemies: ['redline_crew'], allies: ['north_hall'], aggression: 0.62, respectThreshold: 30 },
+  { id: 'yard_kings', name: 'Yard Kings', color: 0xd8a72c, territory: 'yard', preferredZones: ['yard'], enemies: ['blue_chain'], allies: [], aggression: 0.68, respectThreshold: 35 },
+  { id: 'blue_chain', name: 'Blue Chain', color: 0x3f6fa5, territory: 'shower', preferredZones: ['shower', 'cellblock'], enemies: ['yard_kings'], allies: ['cell_rats'], aggression: 0.45, respectThreshold: 25 },
+  { id: 'redline_crew', name: 'Redline Crew', color: 0xb5413a, territory: 'cafeteria', preferredZones: ['cafeteria', 'yard'], enemies: ['iron_block'], allies: [], aggression: 0.72, respectThreshold: 38 },
+  { id: 'north_hall', name: 'North Hall', color: 0x6f9a72, territory: 'cellblock', preferredZones: ['cellblock'], enemies: [], allies: ['iron_block'], aggression: 0.5, respectThreshold: 28 },
+  { id: 'cell_rats', name: 'Cell Rats', color: 0x8a7a5a, territory: 'cafeteria', preferredZones: ['cafeteria', 'cellblock'], enemies: [], allies: ['blue_chain'], aggression: 0.4, respectThreshold: 20 }
 ];
+export const GANG_MAP: Record<string, GangDef> = Object.fromEntries(GANGS.map((g) => [g.id, g]));
+export function areEnemies(a?: string, b?: string): boolean {
+  if (!a || !b || a === b) return false;
+  return !!GANG_MAP[a]?.enemies.includes(b) || !!GANG_MAP[b]?.enemies.includes(a);
+}
 
 export const NAME_POOL = ['Rook', 'Mason', 'Knox', 'Diesel', 'Tully', 'Vince', 'Cane', 'Marco', 'Hodge', 'Slim', 'Boone', 'Reyes', 'Gable', 'Otis', 'Wyatt', 'Dane'];
 export const GUARD_NAMES = ['CO Hardy', 'CO Ruiz', 'CO Pike', 'CO Lane', 'Sgt. Kort'];
