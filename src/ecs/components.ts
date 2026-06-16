@@ -40,6 +40,7 @@ export interface Brain {
   escortTarget?: Entity;   // guard escorting this prisoner
   actTimer?: number;       // generic in-progress action timer (guard search etc.)
   objTarget?: string;      // interactable id this NPC is walking to / using (schedule)
+  checkpoint?: number;     // guard: assigned checkpoint index during lockdown/alarm
 }
 
 // Reputation / standing / suspicion. On the player: reputation+respect drive the loop;

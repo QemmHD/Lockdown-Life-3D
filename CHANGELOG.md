@@ -6,10 +6,46 @@
 > follow camera, daily schedule, autonomous prisoners/guards, basic fights, gangs v1,
 > reputation/relationships, inventory/contraband v1, search/discipline/solitary v1, jobs v1,
 > interactable props, doors/gates with schedule-driven locking + NPC schedule anchors, object
-> reservations, and save/load v4. **Not yet built:** lockdowns, riots, escape, audio, character
-> creation, Capacitor/IPA. The `v1.x` entries are **archived legacy history** for the original
+> reservations, save/load (v5), and a **chaos layer** (lockdowns, alarm, riot pressure, area tension,
+> guard checkpoints, abstract escape attempts). **Not yet built:** audio, character creation,
+> Capacitor/IPA, deep riot warfare. The `v1.x` entries are **archived legacy history** for the original
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
+
+## v3.0.0-chaos — Stage Chaos 3.0 (lockdowns, alarm, riot pressure, checkpoints, abstract escape)
+First prison-wide chaos layer — a playable vertical slice. Sim authoritative, RenderSync read-only,
+build passes, 0 runtime errors. New pure modules: `LockdownSystem.ts`, `RiotSystem.ts`,
+`EscapeSystem.ts`, `GuardCheckpointSystem.ts` (types + constants + decision functions); the
+Simulation owns the state and orchestrates them thinly.
+- **Lockdown state**: triggered by repeated/serious fights, serious contraband, riot pressure, NPC
+  escape attempts (or `startLockdown(...)` manually). Locks recreational doors/gates, keeps cell
+  blocks reachable, overrides the schedule to send prisoners back to cells, posts guards at
+  checkpoints, raises heat/alarm, and ends safely on a timer (doors re-derive, reservations clear,
+  prisoners re-route, no stuck NPCs).
+- **Alarm state** (separate from lockdown): escape/riot/serious-fight/contraband trigger a red alarm
+  vignette + flashing door lamps + alert-feed message; decays on a timer.
+- **Riot pressure v1**: the RIOT meter now means something — a slowly-eased 0–100 value driven by
+  anger/hunger/hygiene/sleep, recent fights, blocked prisoners, searches, and lockdown fatigue; eased
+  down by calm time and met needs. Crosses **warning** then (rarely) a small **riot event** (alarm +
+  soft lockdown + a few prisoners flare up + guards converge).
+- **Area tension**: per-room 0–100 (crowding + gang rivalry + riot pressure) with Calm/Tense/
+  Dangerous/Critical labels, surfaced on the object/door panel ("Area: Dangerous").
+- **Guard checkpoints**: checkpoints built from room doors + the main-hall junction; guards man posts
+  during lockdown/alarm and converge on the tensest area during a riot (with unreachable-post fallback,
+  no clumping).
+- **Blocked-prisoner reactions**: prisoners blocked by a locked door wait, complain ("Locked!", 😠),
+  stew (small anger/riot rise), and fall back instead of looping forever.
+- **Abstract escape v1** (fictional only — no real-world methods): rare desperate NPC attempts trigger
+  the alarm and usually end in solitary; the player gets **Attempt Escape** only near a gate/perimeter,
+  as a timed action with caught/interrupted/abandoned/prototype-success outcomes.
+- **Player chaos actions**: Comply / Return to Cell / Hide / Calm Down / Help Guard (context-sensitive)
+  with suspicion / riot-pressure / tension consequences.
+- **HUD/visuals**: LOCK timer chip, chaos banner (lockdown/alarm/riot/objective), red alarm vignette,
+  flashing locked-door lamps, panic/anger/"Return to cell" bubbles.
+- **Save/load v5**: persists lockdown, alarm, riot pressure, and area tension (escape always resets to
+  a stable state on load); backward-compatible with v4 saves.
+- **?debug self-test** extended: checkpoints exist, a guard can path to one, riot pressure is a valid
+  number, lockdown state is well-formed, and the v5 save round-trips.
 
 ## v2.4.1-stability — Stage Stability 2.4 (real bug fixes, remove prototype shortcuts)
 Hardening pass to make the codebase ready for Stage Chaos 3.0. Sim authoritative, RenderSync

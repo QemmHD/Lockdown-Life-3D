@@ -9,6 +9,10 @@ import { GANGS, GANG_MAP, areEnemies, NAME_POOL, GUARD_NAMES, PRISONER_TRAITS, p
 import { ITEMS, CONTRABAND_IDS, ITEM_IDS, isContraband } from '../data/items';
 import { JOB_BY_ROOM } from '../data/jobs';
 import { Interactable, InteractableDef, OBJ_ACTIONS, OBJ_ACTION_LABEL, isExclusive } from '../world/Interactable';
+import { LockdownState, newLockdown, LOCKDOWN_SECONDS, lockdownLocks, sanitizeLockdown } from './LockdownSystem';
+import { RiotLevel, computeRiotTarget, riotLevel, RIOT_WARN, tensionLabel } from './RiotSystem';
+import { Checkpoint, buildCheckpoints } from './GuardCheckpointSystem';
+import { EscapeState, newEscape, ESCAPE_OPPORTUNITY_ROOMS, rollEscapeOutcome } from './EscapeSystem';
 
 const SECONDS_PER_HOUR = 5;
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
@@ -35,11 +39,12 @@ const USE_STATE: Record<string, string> = {
   job: 'working', shelf: 'working', trash: 'working'
 };
 const USING_STATES = new Set(['resting', 'washing', 'eating', 'training', 'working']);
-export type InteractAction = 'talk' | 'insult' | 'threaten' | 'trade' | 'favor' | 'fight' | 'backoff' | 'comply' | 'argue' | 'rest' | 'wash' | 'eat' | 'train' | 'work' | 'pickup' | 'use' | 'inspect' | 'search' | 'hide' | 'take' | 'open' | 'close' | 'try';
+export type InteractAction = 'talk' | 'insult' | 'threaten' | 'trade' | 'favor' | 'fight' | 'backoff' | 'comply' | 'argue' | 'rest' | 'wash' | 'eat' | 'train' | 'work' | 'pickup' | 'use' | 'inspect' | 'search' | 'hide' | 'take' | 'open' | 'close' | 'try' | 'escape';
 const SELF_ACTIONS: InteractAction[] = ['rest', 'wash', 'eat', 'train', 'work'];
-const ACTION_DUR: Record<string, number> = { talk: 0.8, insult: 0.9, threaten: 1.0, trade: 1.1, favor: 1.0, comply: 0.6, argue: 0.8, rest: 1.4, wash: 1.4, eat: 1.5, train: 1.4, work: 1.8 };
-const ACTION_STATE: Record<string, string> = { talk: 'talking', comply: 'talking', argue: 'threatening', insult: 'threatening', threaten: 'threatening', trade: 'trading', favor: 'trading', rest: 'resting', wash: 'washing', eat: 'eating', train: 'training', work: 'working' };
-const SAY: Record<string, string> = { talk: "What's up?", insult: '😠', threaten: 'Back off!', trade: 'Trade?', favor: 'A favor?', comply: 'Yes, sir.', argue: '😤', rest: '😴', wash: '🚿', eat: '🍽️', train: '🏋️', work: '💪' };
+const ACTION_DUR: Record<string, number> = { talk: 0.8, insult: 0.9, threaten: 1.0, trade: 1.1, favor: 1.0, comply: 0.6, argue: 0.8, rest: 1.4, wash: 1.4, eat: 1.5, train: 1.4, work: 1.8, escape: 3.0 };
+const ACTION_STATE: Record<string, string> = { talk: 'talking', comply: 'talking', argue: 'threatening', insult: 'threatening', threaten: 'threatening', trade: 'trading', favor: 'trading', rest: 'resting', wash: 'washing', eat: 'eating', train: 'training', work: 'working', escape: 'working' };
+const SAY: Record<string, string> = { talk: "What's up?", insult: '😠', threaten: 'Back off!', trade: 'Trade?', favor: 'A favor?', comply: 'Yes, sir.', argue: '😤', rest: '😴', wash: '🚿', eat: '🍽️', train: '🏋️', work: '💪', escape: '🏃' };
+const CHAOS_KEYS = ['comply', 'returncell', 'hide', 'calm', 'helpguard'];   // immediate player chaos actions
 // object-action timings, character states, and bubble icons
 const OBJ_DUR: Record<string, number> = { rest: 1.6, wash: 1.4, use: 0.6, eat: 1.5, train: 1.4, work: 1.8, inspect: 0.8, search: 1.2, hide: 1.0, take: 0.8, open: 0.6, close: 0.6, try: 0.7 };
 const OBJ_STATE: Record<string, string> = { rest: 'resting', wash: 'washing', eat: 'eating', train: 'training', work: 'working', search: 'searching', hide: 'working', take: 'working', use: 'talking', inspect: 'talking', open: 'talking', close: 'talking', try: 'talking' };
@@ -60,6 +65,20 @@ export class Simulation {
   private fightCd = 6;
   private suspTimer = 0;
 
+  // ---------- chaos layer (Stage 3.0): lockdown / alarm / riot / tension / escape ----------
+  lockdown: LockdownState = newLockdown();
+  alarm = { active: false, timer: 0, reason: '' };
+  riotPressure = 0;
+  riotLevel: RiotLevel = 'calm';
+  riotEventTimer = 0;
+  tension: Record<string, number> = {};        // by room id, 0..100
+  escape: EscapeState = newEscape();
+  playerObjective = '';                         // chaos objective shown in the HUD
+  private checkpoints: Checkpoint[] = [];
+  private fightsRecent = 0;
+  private searchesRecent = 0;
+  private blockedCount = 0;                      // prisoners blocked from schedule this tick
+
   constructor(public bus: EventBus, seed = Math.floor(Math.random() * 1e9)) { this.rng = new Random(seed); }
 
   generate() {
@@ -74,6 +93,8 @@ export class Simulation {
     pb.isPlayer = true; pb.name = 'You'; pb.action = 'Idle';
     const ps = this.ecs.get<Social>(this.playerId, 'Social')!; ps.reputation = 0; ps.respect = 8; ps.suspicion = 0;
     this.ecs.get<Render>(this.playerId, 'Render')!.color = 0xef7a22;
+    this.checkpoints = buildCheckpoints(this.rooms as any, (i) => this.map.tileXY(i), (x, y) => this.map.toWorld(x, y));
+    for (const r of this.rooms) this.tension[r.id] = 0;
   }
 
   player(): Entity { return this.playerId; }
@@ -164,18 +185,21 @@ export class Simulation {
     if (ph.id !== this.phaseId) {
       this.phaseId = ph.id;
       this.applyDoorSchedule();                 // open/lock areas for the new phase
-      const free = ph.id === 'yard' || ph.id === 'free' || ph.id === 'work';
-      for (const e of this.ecs.query('Brain')) {
-        const b = this.ecs.get<Brain>(e, 'Brain')!;
-        if (b.isPlayer) continue; // the player is not yanked by the schedule
-        if (b.role === 'prisoner' && b.state !== 'fight' && b.state !== 'down' && b.state !== 'solitary' && b.state !== 'escorted' && b.state !== 'beingSearched') {
-          // release any object held/claimed for the previous phase, then re-route
-          this.releaseFor(e); b.objTarget = undefined;
-          if (USING_STATES.has(b.state)) b.state = 'idle';
-          // during free time, gang members drift to their turf
-          b.targetRoom = (free && b.gang) ? GANG_MAP[b.gang].territory : ph.room;
-          b.state = 'goto';
-          this.ecs.get<Agent>(e, 'Agent')!.path = null;
+      // during an active lockdown the schedule is overridden — prisoners stay corralled
+      if (!this.lockdown.active) {
+        const free = ph.id === 'yard' || ph.id === 'free' || ph.id === 'work';
+        for (const e of this.ecs.query('Brain')) {
+          const b = this.ecs.get<Brain>(e, 'Brain')!;
+          if (b.isPlayer) continue; // the player is not yanked by the schedule
+          if (b.role === 'prisoner' && b.state !== 'fight' && b.state !== 'down' && b.state !== 'solitary' && b.state !== 'escorted' && b.state !== 'beingSearched') {
+            // release any object held/claimed for the previous phase, then re-route
+            this.releaseFor(e); b.objTarget = undefined;
+            if (USING_STATES.has(b.state)) b.state = 'idle';
+            // during free time, gang members drift to their turf
+            b.targetRoom = (free && b.gang) ? GANG_MAP[b.gang].territory : ph.room;
+            b.state = 'goto';
+            this.ecs.get<Agent>(e, 'Agent')!.path = null;
+          }
         }
       }
       this.bus.emit('alert', { type: 'phase', text: `${ph.name}` });
@@ -183,6 +207,7 @@ export class Simulation {
 
     this.needsSystem(dt);
     this.sweepReservations(dt);
+    this.chaosSystem(dt);
     this.prisonerAI(dt);
     this.guardAI(dt);
     this.combatSystem(dt);
@@ -203,6 +228,227 @@ export class Simulation {
     }
   }
   private releaseFor(e: Entity) { for (const o of this.objs.values()) if (o.reservedBy === e) { o.reservedBy = 0; o.reservedUntil = 0; } }
+
+  // ===================== CHAOS LAYER (Stage 3.0) =====================
+  // Lockdown / alarm / riot pressure / area tension / abstract escape. Thin orchestration here;
+  // pure rules live in LockdownSystem/RiotSystem/EscapeSystem/GuardCheckpointSystem.
+  // TODO(refactor): promote these into standalone *System classes once the surface settles.
+
+  private chaosSystem(dt: number) {
+    // decay "recent incident" tallies
+    this.fightsRecent = Math.max(0, this.fightsRecent - dt * 0.06);
+    this.searchesRecent = Math.max(0, this.searchesRecent - dt * 0.05);
+
+    // lockdown timer + fatigue
+    if (this.lockdown.active) {
+      this.lockdown.timer -= dt;
+      this.lockdown.fatigue = clamp01(this.lockdown.fatigue + dt * 0.01);
+      if (this.lockdown.timer <= 0) this.endLockdown();
+    } else if (this.lockdown.fatigue > 0) {
+      this.lockdown.fatigue = Math.max(0, this.lockdown.fatigue - dt * 0.02);
+    }
+    if (this.alarm.active) { this.alarm.timer -= dt; if (this.alarm.timer <= 0) { this.alarm.active = false; this.alarm.reason = ''; } }
+
+    // riot pressure eases toward a target computed from prisoner mood + incidents
+    const target = computeRiotTarget(this.riotInputs());
+    this.riotPressure += (target - this.riotPressure) * Math.min(1, dt * 0.12);
+    this.riotPressure = clamp01(this.riotPressure);
+    const lvl = riotLevel(this.riotPressure);
+    if (lvl !== this.riotLevel) this.onRiotLevel(lvl);
+    if (this.riotEventTimer > 0) { this.riotEventTimer -= dt; }
+
+    this.updateTension(dt);
+    this.maybeNpcEscape(dt);
+    this.updatePlayerObjective();
+  }
+
+  private riotInputs() {
+    let anger = 0, hunger = 0, hygiene = 0, sleep = 0, n = 0;
+    for (const e of this.ecs.query('Needs', 'Brain')) {
+      const b = this.brain(e)!; if (b.role !== 'prisoner') continue;
+      const nd = this.ecs.get<Needs>(e, 'Needs')!;
+      anger += nd.anger; hunger += nd.hunger; hygiene += nd.hygiene; sleep += nd.sleep; n++;
+    }
+    const blocked = this.blockedCount; this.blockedCount = 0;
+    return n ? {
+      count: n, anger: anger / n, hunger: hunger / n, hygiene: hygiene / n, sleep: sleep / n,
+      fightsRecent: this.fightsRecent, blocked, searchesRecent: this.searchesRecent,
+      lockdownActive: this.lockdown.active, lockdownFatigue: this.lockdown.fatigue
+    } : { count: 0, anger: 0, hunger: 0, hygiene: 0, sleep: 0, fightsRecent: 0, blocked: 0, searchesRecent: 0, lockdownActive: false, lockdownFatigue: 0 };
+  }
+
+  private onRiotLevel(lvl: RiotLevel) {
+    const prev = this.riotLevel; this.riotLevel = lvl;
+    if (lvl === 'warning' && prev === 'calm') {
+      this.bus.emit('alert', { type: 'lockdown', text: 'Tension rising — guards on alert.' });
+      this.assignGuardCheckpoints();
+      const room = this.hottestRoom();          // a couple of anger bubbles in the tensest room
+      if (room) this.prisonersInRoom(room).slice(0, 2).forEach((e) => this.bubble(e, '😠', 'insult', 1.4));
+    } else if (lvl === 'event' && prev !== 'event') {
+      this.startRiotEvent();
+    } else if (lvl === 'calm' && prev !== 'calm') {
+      this.bus.emit('alert', { type: 'guard', text: 'Tension settling down.' });
+    }
+  }
+
+  // small, controlled riot event: alarm + soft lockdown + a few prisoners flare up + guards respond
+  private startRiotEvent() {
+    this.riotEventTimer = 24;
+    this.bus.emit('alert', { type: 'fight', text: 'RIOT BREAKING OUT — guards responding!' });
+    this.triggerAlarm('riot', 2);
+    const room = this.hottestRoom();
+    const crowd = room ? this.prisonersInRoom(room) : [];
+    let flared = 0;
+    for (const e of crowd) {
+      const b = this.brain(e)!; if (b.isPlayer || b.state === 'down' || b.state === 'solitary') continue;
+      const nd = this.ecs.get<Needs>(e, 'Needs')!; nd.anger = clamp01(nd.anger + 0.4);
+      this.bubble(e, '😡', 'insult', 1.6);
+      if (++flared >= 4) break;
+    }
+    if (!this.lockdown.active) this.startLockdown('riot', 2, room ?? undefined);
+  }
+
+  // ---------- lockdown ----------
+  startLockdown(reason: string, severity = 2, sourceRoom?: string) {
+    if (this.lockdown.active) {   // escalate / refresh an existing lockdown
+      this.lockdown.severity = Math.max(this.lockdown.severity, severity);
+      this.lockdown.timer = Math.max(this.lockdown.timer, LOCKDOWN_SECONDS[severity] ?? 40);
+      return;
+    }
+    this.lockdown = { active: true, reason, severity, timer: LOCKDOWN_SECONDS[severity] ?? 40, startedAtHour: this.hour, scheduleOverride: true, sourceRoom: sourceRoom ?? '', fatigue: 0 };
+    this.triggerAlarm(reason, severity);
+    this.applyDoorSchedule();
+    this.orderPrisonersToCells();
+    this.assignGuardCheckpoints();
+    this.bus.emit('alert', { type: 'lockdown', text: `LOCKDOWN — ${this.lockdownReasonText(reason)}` });
+  }
+  private endLockdown() {
+    if (!this.lockdown.active) return;
+    this.lockdown.active = false; this.lockdown.scheduleOverride = false;
+    this.applyDoorSchedule();                       // re-derive normal door states for the current phase
+    // release any stale reservations / targets and re-route prisoners onto the current phase
+    const ph = phaseAt(this.hour);
+    for (const e of this.ecs.query('Brain', 'Agent')) {
+      const b = this.brain(e)!; if (b.role !== 'prisoner' || b.isPlayer) continue;
+      if (['fight', 'down', 'solitary', 'escorted', 'beingSearched'].includes(b.state)) continue;
+      this.releaseFor(e); b.objTarget = undefined; if (USING_STATES.has(b.state)) b.state = 'idle';
+      b.targetRoom = ph.room; b.state = 'goto'; this.ecs.get<Agent>(e, 'Agent')!.path = null;
+    }
+    // guards drop checkpoint posts back to patrol
+    for (const e of this.ecs.query('Brain')) { const b = this.brain(e)!; if (b.role === 'guard' && b.state === 'idle') b.checkpoint = undefined; }
+    this.bus.emit('alert', { type: 'lockdown', text: 'Lockdown lifted — resuming schedule.' });
+  }
+  private lockdownReasonText(r: string) {
+    return ({ fight: 'fighting on the block', contraband: 'contraband found', riot: 'unrest', escape: 'escape attempt', breach: 'restricted-area breach', suspicion: 'security alert', manual: 'security drill' } as Record<string, string>)[r] ?? r;
+  }
+  private orderPrisonersToCells() {
+    for (const e of this.ecs.query('Brain', 'Agent', 'Position')) {
+      const b = this.brain(e)!; if (b.role !== 'prisoner' || b.isPlayer) continue;
+      if (['fight', 'down', 'solitary', 'escorted', 'beingSearched'].includes(b.state)) continue;
+      this.releaseFor(e); b.objTarget = undefined; if (USING_STATES.has(b.state)) b.state = 'idle';
+      b.targetRoom = 'cellblock'; b.state = 'goto'; this.ecs.get<Agent>(e, 'Agent')!.path = null;
+      if (this.rng.chance(0.5)) this.bubble(e, this.rng.chance(0.5) ? 'Return to cell!' : '😟', 'search', 1.4);
+    }
+  }
+
+  // a fight just started — bump the recent-fight tally + local tension; repeated brawls → lockdown
+  private registerFight(at: Entity) {
+    this.fightsRecent += 1;
+    this.riotPressure = clamp01(this.riotPressure + 0.05);
+    const room = this.roomIdAt(this.pos(at)!);
+    if (room) this.tension[room] = Math.min(100, (this.tension[room] ?? 0) + 20);
+    if (this.fightsRecent >= 3 && !this.lockdown.active) this.startLockdown('fight', 2, room || undefined);
+  }
+
+  // ---------- alarm ----------
+  triggerAlarm(reason: string, severity = 1) {
+    this.alarm.active = true; this.alarm.reason = reason; this.alarm.timer = Math.max(this.alarm.timer, 8 + severity * 4);
+    this.bus.emit('alert', { type: 'fight', text: `ALARM — ${this.lockdownReasonText(reason)}` });
+  }
+
+  // ---------- area tension ----------
+  private updateTension(dt: number) {
+    // count prisoners + gang spread per room
+    const count: Record<string, number> = {}; const gangs: Record<string, Set<string>> = {};
+    for (const e of this.ecs.query('Brain', 'Position')) {
+      const b = this.brain(e)!; if (b.role !== 'prisoner') continue;
+      const rid = this.roomIdAt(this.pos(e)!); if (!rid) continue;
+      count[rid] = (count[rid] ?? 0) + 1;
+      if (b.gang) { (gangs[rid] ??= new Set()).add(b.gang); }
+    }
+    for (const r of this.rooms) {
+      const c = count[r.id] ?? 0;
+      const crowd = Math.min(40, c * (r.type === 'cafeteria' || r.type === 'yard' || r.type === 'shower' ? 7 : 4));
+      const rival = this.rivalsPresent(gangs[r.id]) ? 35 : 0;
+      const restricted = RESTRICTED.includes(r.type) && c > 0 ? 25 : 0;
+      const tgt = Math.min(100, crowd + rival + restricted + this.riotPressure * 30);
+      const cur = this.tension[r.id] ?? 0;
+      this.tension[r.id] = cur + (tgt - cur) * Math.min(1, dt * 0.25);
+    }
+  }
+  private rivalsPresent(gset?: Set<string>): boolean {
+    if (!gset || gset.size < 2) return false;
+    const arr = [...gset];
+    for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) if (areEnemies(arr[i], arr[j])) return true;
+    return false;
+  }
+  private hottestRoom(): string | null {
+    let best: string | null = null, bt = 30;
+    for (const r of this.rooms) { const t = this.tension[r.id] ?? 0; if (t > bt) { bt = t; best = r.id; } }
+    return best;
+  }
+  private prisonersInRoom(roomId: string): Entity[] {
+    const out: Entity[] = [];
+    for (const e of this.ecs.query('Brain', 'Position')) { const b = this.brain(e)!; if (b.role === 'prisoner' && this.roomIdAt(this.pos(e)!) === roomId) out.push(e); }
+    return out;
+  }
+  tensionAt(roomId: string): { value: number; label: string } { const v = Math.round(this.tension[roomId] ?? 0); return { value: v, label: tensionLabel(v) }; }
+
+  // ---------- guard checkpoints ----------
+  private assignGuardCheckpoints() {
+    if (!this.checkpoints.length) return;
+    let i = 0;
+    for (const e of this.ecs.query('Brain')) {
+      const b = this.brain(e)!; if (b.role !== 'guard') continue;
+      if (['searching', 'escorting', 'respond'].includes(b.state)) continue;
+      b.checkpoint = i % this.checkpoints.length; i++;
+    }
+  }
+
+  // ---------- abstract NPC escape (rare) ----------
+  private maybeNpcEscape(dt: number) {
+    if (this.escape.active) return;
+    // only occasionally, and only when it makes sense (yard time or chaos, low guard presence)
+    if (!this.rng.chance(dt * 0.01)) return;
+    const yardish = this.phaseId === 'yard' || this.phaseId === 'free' || this.riotLevel !== 'calm';
+    if (!yardish) return;
+    // a desperate prisoner near an opportunity zone
+    const cand = this.ecs.query('Brain', 'Position', 'Needs').find((e) => {
+      const b = this.brain(e)!; if (b.role !== 'prisoner' || b.isPlayer) return false;
+      if (['fight', 'down', 'solitary', 'escorted', 'beingSearched'].includes(b.state)) return false;
+      const nd = this.ecs.get<Needs>(e, 'Needs')!; if (nd.fear > 0.5 || nd.anger < 0.4) return false;
+      return ESCAPE_OPPORTUNITY_ROOMS.includes(this.roomTypeAt(this.pos(e)!));
+    });
+    if (cand == null) return;
+    const b = this.brain(cand)!;
+    this.bus.emit('alert', { type: 'fight', text: `${b.name} is making a break for it!` });
+    this.bubble(cand, '🏃', 'insult', 2);
+    this.triggerAlarm('escape', 2);
+    if (!this.lockdown.active) this.startLockdown('escape', 2, this.roomIdAt(this.pos(cand)!));
+    const g = this.nearestGuard(cand, 30);     // a guard runs them down → solitary
+    if (g != null) this.beginEscort(g, cand, 'attempted escape'); else this.sendToSolitary(this.playerId, cand, 'attempted escape');
+  }
+
+  private updatePlayerObjective() {
+    const pb = this.brain(this.playerId);
+    if (!pb) { this.playerObjective = ''; return; }
+    if (pb.state === 'solitary') this.playerObjective = 'In solitary';
+    else if (this.escape.active && this.escape.by === this.playerId) this.playerObjective = 'Escape attempt in progress';
+    else if (this.lockdown.active) this.playerObjective = 'Lockdown — return to your cell';
+    else if (this.riotLevel === 'event') this.playerObjective = 'Riot — comply or take cover';
+    else if (this.riotLevel === 'warning') this.playerObjective = 'Tension high — stay out of trouble';
+    else this.playerObjective = '';
+  }
 
   private needsSystem(dt: number) {
     for (const e of this.ecs.query('Needs', 'Brain')) {
@@ -254,10 +500,17 @@ export class Simulation {
       }
       if (!ag.path) {
         const here = this.roomTypeAt(p);
-        // prefer a real scheduled object/anchor over a generic room center
-        if (ag.repathCd <= 0 && this.assignScheduleTarget(e, b, p)) { ag.repathCd = 1.2; continue; }
-        if (here !== b.targetRoom && ag.repathCd <= 0) { this.gotoRoom(e, b.targetRoom); ag.repathCd = 1.2; b.state = 'goto'; }
-        else {
+        // during a lockdown, head for a cell instead of chasing schedule objects
+        if (!this.lockdown.active && ag.repathCd <= 0 && this.assignScheduleTarget(e, b, p)) { ag.repathCd = 1.2; continue; }
+        if (here !== b.targetRoom && ag.repathCd <= 0) {
+          this.gotoRoom(e, b.targetRoom); ag.repathCd = 1.2; b.state = 'goto';
+          if (!ag.path) {   // destination blocked (locked door / lockdown) → wait, complain, stew
+            this.blockedCount++;
+            if (this.rng.chance(0.12)) this.bubble(e, this.rng.pick(['Locked!', 'Open up!', '😠', 'Let us through!']), 'insult', 1.2);
+            const nd = this.ecs.get<Needs>(e, 'Needs'); if (nd) nd.anger = clamp01(nd.anger + dt * 0.04);
+            b.state = 'wander';
+          }
+        } else {
           b.state = 'wander'; b.timer -= dt;
           if (b.timer <= 0) { if (this.rng.chance(0.5)) this.gotoRoom(e, b.targetRoom); b.timer = this.rng.range(2.5, 6); }
         }
@@ -349,8 +602,24 @@ export class Simulation {
         }
         continue;
       }
+      // CHAOS: during lockdown/alarm/riot, man a checkpoint post (or push toward the tensest area in a riot)
+      if (this.checkpoints.length && (this.lockdown.active || this.alarm.active || this.riotLevel !== 'calm')) {
+        let dest: { x: number; z: number } | null = null;
+        if (this.riotLevel === 'event') { const hot = this.hottestRoom(); if (hot) { const r = this.rooms.find((rr) => rr.id === hot)!; dest = this.map.toWorld(r.x + (r.w >> 1), r.y + (r.h >> 1)); } }
+        if (!dest) { if (b.checkpoint == null) b.checkpoint = e % this.checkpoints.length; dest = this.checkpoints[b.checkpoint]; }
+        const at = Math.hypot(p.x - dest.x, p.z - dest.z) <= 1.8;
+        if (at) { ag.path = null; b.action = 'At checkpoint'; }
+        else if (!ag.path && ag.repathCd <= 0) {
+          ag.repathCd = 0.8;
+          const path = this.path(this.map.worldToIdx(p.x, p.z), this.map.worldToIdx(dest.x, dest.z), e);
+          if (path && path.length) { ag.path = path; ag.step = 0; b.action = 'To checkpoint'; }
+          else b.checkpoint = ((b.checkpoint ?? 0) + 1) % this.checkpoints.length;   // post unreachable → try another
+        }
+        continue;
+      }
       // patrol — sometimes man a guard post (desk/console), otherwise sweep an area or checkpoint
       if (!ag.path) {
+        b.checkpoint = undefined;
         b.timer -= dt;
         if (b.timer <= 0) {
           if (this.rng.chance(0.3) && this.guardToPost(e, b, p)) { b.timer = this.rng.range(3, 6); }
@@ -458,6 +727,7 @@ export class Simulation {
         ab.state = 'fight'; ab.foe = bb; bbr.state = 'fight'; bbr.foe = a; ab.attackCd = 0.3; bbr.attackCd = 0.5;
         this.bus.emit('alert', { type: 'fight', text: `${ab.name} and ${bbr.name} are fighting!` });
         this.dispatchGuard(a);
+        this.registerFight(a);
       }
       return; // at most one new fight per check
     }
@@ -575,6 +845,12 @@ export class Simulation {
       if (o.type !== 'door' && o.type !== 'gate') continue;
       const rtype = this.roomType(o.room);
       if (RESTRICTED.includes(rtype)) { o.open = false; o.locked = false; continue; } // staff-only handled by `restricted`
+      // lockdown overrides the schedule: rec areas lock, cell blocks stay reachable for "return to cell"
+      if (this.lockdown.active) {
+        if (lockdownLocks(rtype)) { o.open = false; o.locked = true; }
+        else { o.open = rtype === 'cellblock'; o.locked = false; }
+        continue;
+      }
       const open = (OPEN_FOR[rtype] ?? []).includes(this.phaseId);
       if (open) { o.open = true; o.locked = false; }
       else if (this.phaseId === 'sleep') { o.open = false; o.locked = true; }  // Lights Out: rec areas locked (guards still pass)
@@ -646,6 +922,101 @@ export class Simulation {
       if (here || this.path(start, this.map.worldToIdx(o.ix, o.iz), pl)) return this.requestObjectAction(o.id, action);
     }
     return SELF_REASON[action] ?? 'Nothing to use nearby.';
+  }
+
+  // ---------- player chaos actions (Stage 3.0) ----------
+  // Returns the chaos action buttons available to the player given the current state.
+  playerChaosActions(): { key: string; label: string; reason?: string; disabled?: boolean }[] {
+    const out: { key: string; label: string; reason?: string; disabled?: boolean }[] = [];
+    const pb = this.brain(this.playerId); if (!pb) return out;
+    const chaos = this.lockdown.active || this.alarm.active || this.riotLevel !== 'calm';
+    if (chaos) {
+      out.push({ key: 'comply', label: 'Comply' });
+      out.push({ key: 'returncell', label: 'Return to Cell' });
+      out.push({ key: 'hide', label: 'Hide' });
+      out.push({ key: 'calm', label: 'Calm Down' });
+      if (this.nearestGuard(this.playerId, 6) != null) out.push({ key: 'helpguard', label: 'Help Guard' });
+    }
+    // Attempt Escape only near a valid abstract opportunity (fictional, no real methods)
+    if (this.escapeOpportunity()) out.push({ key: 'escape', label: 'Attempt Escape' });
+    return out;
+  }
+  // nearest abstract opportunity zone within reach (gate object, or being in a perimeter/service room)
+  escapeOpportunity(): string | null {
+    const pp = this.pos(this.playerId); if (!pp) return null;
+    if (this.brain(this.playerId)?.state === 'solitary') return null;
+    for (const o of this.objs.values()) if (o.type === 'gate' && Math.hypot(o.ix - pp.x, o.iz - pp.z) < 4) return o.room;
+    const rt = this.roomTypeAt(pp); return ESCAPE_OPPORTUNITY_ROOMS.includes(rt) ? this.roomIdAt(pp) : null;
+  }
+  // immediate (in-place) chaos responses; returns a status string for the HUD
+  requestChaosAction(key: string): string {
+    const pl = this.playerId; const pb = this.brain(pl); const ps = this.social(pl); if (!pb || !ps) return '';
+    if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down') return 'You can\'t act right now.';
+    switch (key) {
+      case 'comply':
+        ps.suspicion = clamp(ps.suspicion - 18, 0, 100); this.riotPressure = clamp01(this.riotPressure - 0.03);
+        this.bubble(pl, 'Yes, sir.', 'talk', 1.0); this.floatBy(pl, 'Complied', '#9fe0a0'); return 'You comply with orders.';
+      case 'returncell': {
+        ps.suspicion = clamp(ps.suspicion - 8, 0, 100); this.riotPressure = clamp01(this.riotPressure - 0.04);
+        const r = this.requestNearestObjectAction('rest');   // route to a bed in a cell block
+        return r && r.startsWith('Heading') ? 'Returning to your cell…' : (r || 'Heading to your cell…');
+      }
+      case 'hide': {
+        const hidden = this.rng.chance(0.6);
+        if (hidden) { this.bubble(pl, '🤫', 'search', 1.2); this.floatBy(pl, 'Hidden', '#9fe0a0'); return 'You keep out of sight.'; }
+        ps.suspicion = clamp(ps.suspicion + 10, 0, 100); this.floatBy(pl, 'Spotted!', '#ff7a6a'); return 'A guard spots you skulking.';
+      }
+      case 'calm': {
+        const rid = this.roomIdAt(this.pos(pl)!);
+        const power = 6 + ps.respect * 0.2 + ps.reputation * 0.05;
+        if (rid) this.tension[rid] = Math.max(0, (this.tension[rid] ?? 0) - power);
+        this.riotPressure = clamp01(this.riotPressure - 0.03);
+        this.bubble(pl, 'Easy, everyone.', 'talk', 1.2); return 'You try to calm the area down.';
+      }
+      case 'helpguard': {
+        const g = this.nearestGuard(pl, 6);
+        if (g == null) return 'No guard nearby to help.';
+        ps.reputation = clamp(ps.reputation - 4, -100, 100); ps.suspicion = clamp(ps.suspicion - 6, 0, 100);
+        this.riotPressure = clamp01(this.riotPressure - 0.02); this.bubble(pl, 'On it.', 'talk', 1.0);
+        this.floatBy(pl, 'Snitch -Rep', '#ff7a6a'); return 'You side with the guards (other inmates notice).';
+      }
+    }
+    return '';
+  }
+  // start a timed, abstract escape attempt (no real-world method — pure game action)
+  requestEscape(): string {
+    const pl = this.playerId; const pb = this.brain(pl)!;
+    if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down') return 'You can\'t act right now.';
+    const spot = this.escapeOpportunity(); if (!spot) return 'No opportunity here.';
+    if (this.act && this.act.phase === 'perform') return 'Finish what you\'re doing first.';
+    this.escape = { active: true, by: pl, timer: ACTION_DUR.escape, spot, noticed: false };
+    this.act = { action: 'escape', target: pl, phase: 'perform', timer: ACTION_DUR.escape, dur: ACTION_DUR.escape, applied: false, approachT: 0 };
+    this.beginPerform();
+    this.social(pl)!.suspicion = clamp(this.social(pl)!.suspicion + 20, 0, 100);
+    this.bus.emit('alert', { type: 'fight', text: 'You make your move…' });
+    return 'Attempting escape — stay unseen!';
+  }
+  private resolveEscape() {
+    const pl = this.playerId; const pb = this.brain(pl)!; const ps = this.social(pl)!;
+    const guardsNear = this.ecs.query('Brain', 'Position').filter((g) => this.brain(g)!.role === 'guard' && this.dist(g, pl) < 8).length;
+    const outcome = rollEscapeOutcome(this.rng.float(), guardsNear);
+    this.escape = newEscape();
+    if (outcome === 'success') {
+      pb.action = 'ESCAPED'; this.bus.emit('alert', { type: 'rep', text: '🚨 You slipped out — ESCAPED! (prototype ending)' });
+      this.bus.emit('actionResult', { text: 'You escaped. (Prototype ending — reload to play again.)' });
+      return;
+    }
+    this.triggerAlarm('escape', 2);
+    if (outcome === 'caught') {
+      this.bus.emit('actionResult', { text: 'Caught! Straight to solitary.' });
+      const g = this.nearestGuard(pl, 40); if (g != null) this.beginEscort(g, pl, 'attempted escape'); else this.sendToSolitary(pl, pl, 'attempted escape');
+      this.startLockdown('escape', 2, this.roomIdAt(this.pos(pl)!) || undefined);
+    } else if (outcome === 'interrupted') {
+      ps.suspicion = clamp(ps.suspicion + 15, 0, 100); this.bus.emit('actionResult', { text: 'Interrupted — a guard moves to search you.' });
+      const g = this.nearestGuard(pl, 12); if (g != null) this.beginSearch(g, pl);
+    } else {
+      ps.suspicion = clamp(ps.suspicion + 6, 0, 100); this.bus.emit('actionResult', { text: 'You think better of it and back off.' });
+    }
   }
 
   private bubble(e: Entity, text: string, kind = 'talk', dur = 1.4) { this.bus.emit('bubble', { e, text, kind, dur }); }
@@ -777,6 +1148,7 @@ export class Simulation {
   private roomType(roomId: string) { return this.rooms.find((r) => r.id === roomId)?.type ?? ''; }
   private applyAction(a: { action: InteractAction; target: Entity }) {
     const pl = this.playerId; const pb = this.brain(pl)!; const ps = this.social(pl)!; const pinv = this.inv(pl)!;
+    if (a.action === 'escape') { this.resolveEscape(); if (pb.state !== 'solitary' && pb.state !== 'escorted' && pb.state !== 'down') { pb.state = 'idle'; if (pb.action !== 'ESCAPED') pb.action = 'Idle'; } return; }
     const beforeRep = ps.reputation, beforeResp = ps.respect, beforeSusp = ps.suspicion, beforeMoney = pinv.money;
     let result = '';
     if (SELF_ACTIONS.includes(a.action)) result = this.selfAction(a.action);
@@ -855,6 +1227,7 @@ export class Simulation {
   private doSearchResult(guard: Entity, target: Entity) {
     const inv = this.inv(target); const ps = this.social(target); const tb = this.brain(target);
     if (!inv || !ps || !tb) return;
+    this.searchesRecent += 1;                    // searches add a little prison-wide tension
     const contraband = inv.items.filter(isContraband);
     let found: string | null = null;
     for (const id of contraband) { if (this.rng.float() < 0.78 - ITEMS[id].concealment * 0.6) { found = id; break; } }
@@ -863,7 +1236,7 @@ export class Simulation {
       this.bus.emit('alert', { type: 'search', text: `Contraband found on ${tb.name}: ${ITEMS[found].name} — confiscated!` });
       this.bubble(guard, 'Found it.', 'search', 1.4); this.floatBy(target, 'Contraband!', '#ff7a6a');
       if (tb.isPlayer) ps.reputation = clamp(ps.reputation + 4, -100, 100);
-      if (ITEMS[found].risk >= 0.7) { this.beginEscort(guard, target, 'serious contraband'); return; }
+      if (ITEMS[found].risk >= 0.7) { this.beginEscort(guard, target, 'serious contraband'); this.startLockdown('contraband', 2, this.roomIdAt(this.pos(target)!) || undefined); return; }
       ps.suspicion = clamp(ps.suspicion - 30, 0, 100);
     } else {
       ps.suspicion = clamp(ps.suspicion - 22, 0, 100);
@@ -977,6 +1350,7 @@ export class Simulation {
     tb.state = 'fight'; tb.foe = pl; tb.attackCd = 0.5;
     this.bus.emit('alert', { type: 'fight', text: `Fight: You vs ${tb.name}!` });
     this.dispatchGuard(pl);
+    this.registerFight(pl);
   }
 
   private smalltalk(tb: Brain): string {
@@ -1020,13 +1394,24 @@ export class Simulation {
       const p = this.pos(npc)!; const start = this.map.worldToIdx(p.x, p.z);
       for (const o of arr) { if (want.includes(o.type) && this.path(start, this.map.worldToIdx(o.ix, o.iz), npc)) { npcPathOk = true; break; } }
     } else npcPathOk = !want.length;            // nothing required this phase
-    let saveOk = true; try { const s = JSON.parse(JSON.stringify(this.serialize())); saveOk = Array.isArray(s.ents) && s.ents.length > 0; } catch { saveOk = false; }
+    let saveOk = true; try { const s = JSON.parse(JSON.stringify(this.serialize())); saveOk = Array.isArray(s.ents) && s.ents.length > 0 && !!s.lockdown; } catch { saveOk = false; }
+    // chaos invariants (read-only): a guard can reach a checkpoint; riot/lockdown state is well-formed
+    let guardToCheckpoint = false;
+    const guard = this.ecs.query('Brain', 'Position').find((e) => this.brain(e)!.role === 'guard');
+    if (guard != null && this.checkpoints.length) {
+      const gp = this.pos(guard)!; const start = this.map.worldToIdx(gp.x, gp.z);
+      for (const cp of this.checkpoints) if (this.path(start, this.map.worldToIdx(cp.x, cp.z), guard)) { guardToCheckpoint = true; break; }
+    }
+    let lockdownSane = true; try { sanitizeLockdown(this.serialize().lockdown); } catch { lockdownSane = false; }
     return {
       playerOk: this.brain(this.playerId)?.isPlayer === true,
       mapOk: !!this.map && this.map.width > 0,
       interactables: this.objs.size,
       hasBed: has('bed'), hasSink: has('sink'), hasTable: has('table'), hasDoor: has('door'), hasGate: has('gate'),
-      doorsMapped, npcPathOk, saveOk
+      doorsMapped, npcPathOk, saveOk,
+      checkpoints: this.checkpoints.length, guardToCheckpoint,
+      riotPressureValid: typeof this.riotPressure === 'number' && isFinite(this.riotPressure),
+      riotLevel: this.riotLevel, lockdownSane
     };
   }
 
@@ -1046,7 +1431,13 @@ export class Simulation {
     }));
     const objs: Record<string, { stash: string[]; open: boolean; locked: boolean }> = {};
     for (const [id, o] of this.objs) if (o.stash.length || o.open !== !o.restricted || o.locked) objs[id] = { stash: o.stash, open: o.open, locked: o.locked };
-    return { version: 4, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs };
+    const chaos = {
+      lockdown: this.lockdown,
+      alarm: this.alarm,
+      riotPressure: this.riotPressure,
+      tension: this.tension
+    };
+    return { version: 5, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -1077,7 +1468,17 @@ export class Simulation {
       const pb = this.brain(this.playerId);
       if (pb) { pb.isPlayer = true; pb.name = 'You'; pb.action = 'Idle'; const r = this.ecs.get<Render>(this.playerId, 'Render'); if (r) r.color = 0xef7a22; }
     }
-    // reset object reservations, derive door states for the loaded phase, then restore saved overrides
+    // restore chaos state defensively (escape is always reset to a stable state on load)
+    this.lockdown = sanitizeLockdown(data.lockdown);
+    this.alarm = { active: !!data.alarm?.active, timer: num(data.alarm?.timer, 0), reason: typeof data.alarm?.reason === 'string' ? data.alarm.reason : '' };
+    this.riotPressure = clamp01(num(data.riotPressure, 0));
+    this.riotLevel = riotLevel(this.riotPressure);
+    this.riotEventTimer = 0; this.escape = newEscape();
+    this.fightsRecent = 0; this.searchesRecent = 0; this.blockedCount = 0;
+    this.tension = {}; for (const r of this.rooms) this.tension[r.id] = (data.tension && typeof data.tension[r.id] === 'number') ? clamp(data.tension[r.id], 0, 100) : 0;
+    if (!this.checkpoints.length) this.checkpoints = buildCheckpoints(this.rooms as any, (i) => this.map.tileXY(i), (x, y) => this.map.toWorld(x, y));
+
+    // reset object reservations, derive door states for the loaded phase (respects restored lockdown), then restore saved overrides
     for (const o of this.objs.values()) { o.reservedBy = 0; o.reservedUntil = 0; o.stash = []; o.open = !o.restricted; o.locked = false; }
     this.applyDoorSchedule();
     if (data.objs && typeof data.objs === 'object') for (const id in data.objs) {

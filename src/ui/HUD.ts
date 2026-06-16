@@ -34,8 +34,10 @@ export class HUD {
         <div class="tb-block right">
           <div class="tb-chip" id="chip-heat"><span>HEAT</span><b id="tb-heat">0</b></div>
           <div class="tb-chip" id="chip-riot"><span>RIOT</span><b id="tb-riot">0%</b></div>
+          <div class="tb-chip" id="chip-lock" style="display:none"><span>LOCK</span><b id="tb-lock">0s</b></div>
         </div>
       </div>
+      <div id="chaos-banner" class="hidden"></div>
       <div id="alert-feed"></div>
       <div id="action-bar" style="display:none"><div class="ab-label"></div><div class="ab-track"><div class="ab-fill"></div></div></div>
       <div id="panel" class="hidden"></div>
@@ -46,7 +48,7 @@ export class HUD {
         <button data-b="load" class="hud-btn"><span class="b-ico">▤</span><span class="b-lbl">Load</span></button>
       </div>`;
     document.getElementById('ui-root')!.appendChild(this.root);
-    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'alert-feed', 'panel', 'speed-x', 'alarm'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
+    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'chip-lock', 'tb-lock', 'chaos-banner', 'alert-feed', 'panel', 'speed-x', 'alarm'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
     this.root.querySelectorAll('#bottombar button').forEach((b) => {
       const k = (b as HTMLElement).dataset.b!;
       b.addEventListener('click', () => {
@@ -71,6 +73,21 @@ export class HUD {
   }
   setSpeed(label: string) { this.els['speed-x'].textContent = label; }
   setAlarm(level: number) { this.els['alarm'].style.opacity = level > 0.7 ? String((level - 0.7) * 2) : '0'; }
+  // chaos banner + lockdown chip. info.level: 'calm' | 'warning' | 'event'
+  setChaos(info: { lockdown: boolean; lockdownTimer: number; lockdownReason: string; alarm: boolean; level: string; objective: string }) {
+    const lock = this.els['chip-lock'];
+    if (info.lockdown) { lock.style.display = 'flex'; this.els['tb-lock'].textContent = Math.max(0, Math.ceil(info.lockdownTimer)) + 's'; lock.className = 'tb-chip sev-high'; }
+    else lock.style.display = 'none';
+    const banner = this.els['chaos-banner'];
+    let text = '', cls = '';
+    if (info.lockdown) { text = `🔒 LOCKDOWN — ${info.objective || info.lockdownReason}`; cls = 'cb-lock'; }
+    else if (info.level === 'event') { text = '🚨 RIOT — comply or take cover'; cls = 'cb-riot'; }
+    else if (info.alarm) { text = '🚨 ALARM'; cls = 'cb-riot'; }
+    else if (info.level === 'warning') { text = '⚠️ Tension rising'; cls = 'cb-warn'; }
+    else if (info.objective) { text = info.objective; cls = 'cb-warn'; }
+    if (text) { banner.classList.remove('hidden'); banner.textContent = text; banner.className = 'chaos ' + cls; }
+    else banner.classList.add('hidden');
+  }
   setAction(label: string, progress: number) {
     const bar = this.root.querySelector('#action-bar') as HTMLElement;
     if (!label || progress <= 0) { bar.style.display = 'none'; return; }

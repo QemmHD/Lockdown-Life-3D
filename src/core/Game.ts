@@ -146,12 +146,15 @@ export class Game {
 
   // reflect each door/gate's open/locked/restricted state into its mesh (read-only view of sim)
   private updateDoors(dt: number) {
+    const chaos = this.sim.alarm.active || this.sim.lockdown.active || this.sim.riotLevel === 'event';
+    const flash = chaos ? 0.5 + Math.abs(Math.sin(this.clock.elapsedTime * 6)) * 1.2 : 1.2;
     for (const d of this.doorVisuals) {
       const o = this.sim.getObj(d.id); if (!o) continue;
       const target = o.open ? Math.PI * 0.46 : 0;                   // swing the leaf open/closed
       d.pivot.rotation.y += (target - d.pivot.rotation.y) * Math.min(1, dt * 8);
       const col = o.restricted ? 0xff3322 : o.locked ? 0xffaa22 : o.open ? 0x33ff66 : 0xccbb44;
       d.lampMat.emissive.setHex(col); d.lampMat.color.setHex(col & 0x222222);
+      d.lampMat.emissiveIntensity = (chaos && (o.locked || o.restricted)) ? flash : 1.2;
     }
   }
 
@@ -193,9 +196,10 @@ export class Game {
     const isDoor = o.type === 'door' || o.type === 'gate';
     const meta: string[] = [];
     if (o.restricted) meta.push('Staff Only');
-    else if (isDoor && o.locked) meta.push('Locked Down');
+    else if (isDoor && o.locked) meta.push(this.sim.lockdown.active ? 'Lockdown' : 'Locked Down');
     if (isDoor) meta.push(o.open ? 'Open' : 'Closed');
     if (o.stash.length) meta.push(`Hidden: ${o.stash.length}`);
+    if (o.room) { const t = this.sim.tensionAt(o.room); if (t.value >= 25) meta.push(`Area: ${t.label}`); }
     const actions: PanelAction[] = this.sim.objActions(id).map((a) => ({
       key: a.key, label: a.label, disabled: a.disabled, reason: a.reason,
       kind: (a.key === 'search' || a.key === 'hide' || a.key === 'take') ? 'risky' : 'object',
@@ -243,13 +247,18 @@ export class Game {
   // (see Simulation.requestNearestObjectAction) — not a room-only stat change. If nothing is
   // reachable the sim returns a clear reason ("Find a bed.", "No reachable shower.", …).
   private playerActions(_e: Entity): PanelAction[] {
-    return [
+    const a: PanelAction[] = [
       { key: 'rest', label: 'Rest', kind: 'object' },
       { key: 'wash', label: 'Wash', kind: 'object' },
       { key: 'eat', label: 'Eat', kind: 'object' },
       { key: 'train', label: 'Train', kind: 'object' },
       { key: 'work', label: 'Work', kind: 'object' }
     ];
+    // chaos context actions (Comply / Return to Cell / Hide / Calm Down / Help Guard / Attempt Escape)
+    for (const c of this.sim.playerChaosActions()) {
+      a.push({ key: c.key, label: c.label, kind: c.key === 'escape' ? 'risky' : 'guard', disabled: c.disabled, reason: c.reason, danger: c.key === 'escape' });
+    }
+    return a;
   }
   private npcActions(e: Entity, role: string): PanelAction[] {
     if (role === 'guard') return [{ key: 'talk', label: 'Talk', kind: 'social' }, { key: 'comply', label: 'Comply', kind: 'guard' }, { key: 'argue', label: 'Argue', kind: 'risky' }];
@@ -266,6 +275,7 @@ export class Game {
     ];
   }
   private static SELF_KEYS = ['rest', 'wash', 'eat', 'train', 'work'];
+  private static CHAOS_KEYS = ['comply', 'returncell', 'hide', 'calm', 'helpguard'];
   private doAction(key: string) {
     this.panelDirty = true;
     if (this.selectedObj) {
@@ -276,11 +286,13 @@ export class Game {
     }
     const sel = this.selected ?? this.playerEntity;
     const isPlayerSel = sel === this.playerEntity || !!this.sim.ecs.get<Brain>(sel, 'Brain')?.isPlayer;
+    let status: string;
+    if (isPlayerSel && key === 'escape') status = this.sim.requestEscape();
+    else if (isPlayerSel && Game.CHAOS_KEYS.includes(key)) status = this.sim.requestChaosAction(key);
     // player "convenience" needs actions route to the nearest reachable real object (not room shortcuts)
-    const status = (isPlayerSel && Game.SELF_KEYS.includes(key))
-      ? this.sim.requestNearestObjectAction(key)
-      : this.sim.requestAction(sel, key as InteractAction);
-    if (status) this.hud.alert(status, key === 'fight' ? 'fight' : 'info');
+    else if (isPlayerSel && Game.SELF_KEYS.includes(key)) status = this.sim.requestNearestObjectAction(key);
+    else status = this.sim.requestAction(sel, key as InteractAction);
+    if (status) this.hud.alert(status, key === 'fight' || key === 'escape' ? 'fight' : 'info');
     this.refreshPanel();
   }
 
@@ -378,9 +390,15 @@ export class Game {
       if (this.selectedObj) this.refreshObjectPanel(); else this.refreshPanel();
       this.panelDirty = false; this.panelTimer = 0.15;
     }
-    const riot = this.riotRisk();
-    this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, 0, riot);
-    this.hud.setAlarm(riot);
+    // chaos-driven HUD: riot pressure + heat (alarm/lockdown), lockdown chip + chaos banner
+    const riot = this.sim.riotPressure;
+    const heat = (this.sim.alarm.active ? 70 : 0) + (this.sim.lockdown.active ? 30 : 0);
+    this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, heat, riot);
+    this.hud.setAlarm(this.sim.alarm.active || this.sim.riotLevel === 'event' ? 1 : riot);
+    this.hud.setChaos({
+      lockdown: this.sim.lockdown.active, lockdownTimer: this.sim.lockdown.timer, lockdownReason: this.sim.lockdown.reason,
+      alarm: this.sim.alarm.active, level: this.sim.riotLevel, objective: this.sim.playerObjective
+    });
 
     this.app.renderer.render(this.app.scene, this.cam.camera);
     requestAnimationFrame(this.loop);
