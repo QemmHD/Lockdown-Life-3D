@@ -19,6 +19,7 @@ import { AIMemory, newMemory, decayMemory, rememberFoe, rememberThreat, remember
 import { clusterOffset } from './GroupBehaviorSystem';
 import { routeFor } from './GuardAISystem';
 import { AttackType, CombatOutcome, ATTACKS, COMBAT_SPACING, SQUARE_UP, HITREACT, STUMBLE, DOWN_TIME, RECOVER, chooseAttack, resolveDefense, OUTCOME_TEXT } from './CombatSystem';
+import { Progression, Objective, newProgression, sanitizeProgression, repTier, rollObjectives, DailyStats, newDaily, dayRating } from './Progression';
 
 const SECONDS_PER_HOUR = 5;
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
@@ -90,6 +91,13 @@ export class Simulation {
   private riotEventCd = 0;                       // cooldown before another riot event
   private escapeCd = 0;                          // cooldown between escape attempts
   private heatEventTimer = 0;                    // recent-heat-event timer (slows decay briefly)
+  // ---------- progression / objectives (Stage 3.4) ----------
+  progression: Progression = newProgression();
+  objectives: Objective[] = [];
+  daily: DailyStats = newDaily(0, 8, 0);
+  lastSummaryDay = 0;
+  pendingSummary: any = null;          // built at a day rollover; the UI shows + clears it
+
   // lightweight playtest telemetry (?debug)
   metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0 };
 
@@ -109,6 +117,8 @@ export class Simulation {
     this.ecs.get<Render>(this.playerId, 'Render')!.color = 0xef7a22;
     this.checkpoints = buildCheckpoints(this.rooms as any, (i) => this.map.tileXY(i), (x, y) => this.map.toWorld(x, y));
     for (const r of this.rooms) this.tension[r.id] = 0;
+    this.daily = newDaily(ps.reputation, ps.respect, this.inv(this.playerId)!.money);
+    this.objectives = rollObjectives(() => this.rng.float(), this.day);
   }
 
   player(): Entity { return this.playerId; }
@@ -196,7 +206,7 @@ export class Simulation {
   step(dt: number) {
     // clock + schedule
     this.hour += dt / SECONDS_PER_HOUR;
-    if (this.hour >= 24) { this.hour -= 24; this.day++; }
+    if (this.hour >= 24) { this.hour -= 24; this.day++; this.onDayRollover(); }
     const ph = phaseAt(this.hour);
     if (ph.id !== this.phaseId) {
       this.phaseId = ph.id;
@@ -355,7 +365,7 @@ export class Simulation {
     // cooldown after a recent lockdown — only a severe (sev 3) event may break it
     if (this.lockdownCd > 0 && severity < 3) return;
     this.lockdown = { active: true, reason, severity, timer: LOCKDOWN_SECONDS[severity] ?? 40, startedAtHour: this.hour, scheduleOverride: true, sourceRoom: sourceRoom ?? '', fatigue: 0 };
-    this.metrics.lockdownsStarted++; this.addHeat(8 + severity * 3);
+    this.metrics.lockdownsStarted++; this.prog('lockdown'); this.addHeat(8 + severity * 3);
     this.triggerAlarm(reason, severity);
     this.applyDoorSchedule();
     this.orderPrisonersToCells();
@@ -527,6 +537,95 @@ export class Simulation {
     else if (inRestricted) this.playerObjective = 'Restricted area — you shouldn\'t be here.';
     else this.playerObjective = '';
   }
+
+  // ---------- progression / objectives / daily summary (Stage 3.4) ----------
+  // advance any active objective whose kind matches an event (and grant its reward on completion)
+  private bumpObjective(kind: string, amt = 1) {
+    for (const o of this.objectives) {
+      if (o.done || o.kind !== kind) continue;
+      o.progress = Math.min(o.goal, o.progress + amt);
+      if (o.progress >= o.goal) this.completeObjective(o);
+    }
+  }
+  private completeObjective(o: Objective) {
+    o.done = true; this.progression.objectivesCompleted++; this.daily.objectivesDone++;
+    const ps = this.social(this.playerId); const pinv = this.inv(this.playerId);
+    if (ps && o.reward.rep) ps.reputation = clamp(ps.reputation + o.reward.rep, -100, 100);
+    if (ps && o.reward.respect) ps.respect = clamp(ps.respect + o.reward.respect, 0, 100);
+    if (pinv && o.reward.money) { pinv.money += o.reward.money; this.progression.moneyEarned += o.reward.money; }
+    this.bus.emit('alert', { type: 'player', text: `✓ Objective: ${o.text}` });
+  }
+  // central progression hook (counters + objectives + daily stats). Called at event sites.
+  private prog(kind: string, amt = 1) {
+    const P = this.progression, D = this.daily;
+    switch (kind) {
+      case 'eat': case 'wash': case 'rest': case 'train': case 'talk': case 'returncell': this.bumpObjective(kind, amt); break;
+      case 'job': P.jobs++; D.jobs++; this.bumpObjective('job', amt); break;
+      case 'earn': P.moneyEarned += amt; this.bumpObjective('earn', amt); break;
+      case 'spend': P.moneySpent += amt; break;
+      case 'respect': if (amt > 0) this.bumpObjective('respect', amt); break;
+      case 'fightWin': P.fights++; P.wins++; D.fights++; D.wins++; break;
+      case 'fightLoss': P.fights++; P.losses++; D.fights++; break;
+      case 'search': P.searches++; D.searches++; break;
+      case 'contraband': P.contrabandIncidents++; D.contraband++; break;
+      case 'solitary': P.solitary++; D.solitary++; break;
+      case 'lockdown': P.lockdowns++; D.lockdowns++; break;
+      case 'escape': P.escapes++; break;
+      case 'relUp': P.relImproved++; D.relImproved++; break;
+      case 'relDown': P.relWorsened++; break;
+    }
+  }
+  private onDayRollover() {
+    // resolve passive "survive the day" objectives, then summarise + roll a fresh set
+    for (const o of this.objectives) if (!o.done && o.kind === 'surviveNoSolitary' && this.daily.solitary === 0) this.completeObjective(o);
+    this.progression.daysSurvived++;
+    const ps = this.social(this.playerId)!; const pinv = this.inv(this.playerId)!;
+    this.progression.bestTier = Math.max(this.progression.bestTier, repTier(ps.reputation, ps.respect).index);
+    this.pendingSummary = this.buildSummary(ps.reputation, ps.respect, pinv.money);
+    this.progression.summariesShown++;
+    this.lastSummaryDay = this.day;
+    this.daily = newDaily(ps.reputation, ps.respect, pinv.money);
+    this.objectives = rollObjectives(() => this.rng.float(), this.day);
+  }
+  private buildSummary(rep: number, resp: number, money: number) {
+    const d = this.daily;
+    return {
+      day: this.day - 1, rating: dayRating(d),
+      repChange: Math.round(rep - d.repStart), respChange: Math.round(resp - d.respStart), moneyChange: money - d.moneyStart,
+      fights: d.fights, wins: d.wins, jobs: d.jobs, searches: d.searches, contraband: d.contraband,
+      solitary: d.solitary, lockdowns: d.lockdowns, objectivesDone: d.objectivesDone, relImproved: d.relImproved,
+      tier: repTier(rep, resp).name, daysSurvived: this.progression.daysSurvived
+    };
+  }
+  takeSummary() { const s = this.pendingSummary; this.pendingSummary = null; return s; }
+  tier() { const ps = this.social(this.playerId)!; return repTier(ps.reputation, ps.respect); }
+
+  // one structured snapshot for the menus (stats / relationships / inventory / gangs / objectives)
+  uiSnapshot() {
+    const pl = this.playerId; const pb = this.brain(pl)!; const n = this.ecs.get<Needs>(pl, 'Needs')!; const ps = this.social(pl)!; const inv = this.inv(pl)!;
+    const tier = this.tier();
+    const stats = {
+      name: pb.name, day: this.day, hour: this.hour, room: this.currentRoomName(pl), action: pb.action ?? pb.state,
+      health: n.health, hunger: n.hunger, energy: n.energy, hygiene: n.hygiene, anger: n.anger, fear: n.fear,
+      money: inv.money, suspicion: Math.round(ps.suspicion), respect: Math.round(ps.respect), reputation: Math.round(ps.reputation),
+      discipline: pb.discipline ?? 'none', solitaryTimer: pb.state === 'solitary' ? Math.ceil(pb.discTimer ?? 0) : 0,
+      gang: pb.gang ? GANG_MAP[pb.gang].name : 'Unaffiliated', tier: tier.name, heat: Math.round(this.heat)
+    };
+    const memHint = (b: Brain) => b.mem ? (b.mem.foe === pl ? 'fought you' : b.mem.threat === pl ? 'you threatened them' : b.mem.searchedT > 0 ? 'just searched' : '') : '';
+    const relationships = this.ecs.query('Brain', 'Social').filter((e) => e !== pl && this.brain(e)!.role === 'prisoner').map((e) => {
+      const b = this.brain(e)!; const s = this.social(e)!;
+      return { id: e, name: b.name, role: b.role, gang: b.gang ? GANG_MAP[b.gang].name : '', rel: Math.round(s.rel), word: this.relWordSim(s.rel), hint: memHint(b) };
+    }).sort((a, c) => c.rel - a.rel);
+    const inventory = inv.items.map((id) => ({ id, name: ITEMS[id]?.name ?? id, icon: ITEMS[id]?.icon ?? '▪', contraband: isContraband(id), value: ITEMS[id]?.value ?? 0, risk: ITEMS[id]?.risk ?? 0, concealment: ITEMS[id]?.concealment ?? 0, combat: ITEMS[id]?.combat ?? 0 }));
+    const gangs = GANGS.map((g) => {
+      const members = this.ecs.query('Brain', 'Social').filter((e) => this.brain(e)!.gang === g.id);
+      const avg = members.length ? members.reduce((s, e) => s + this.social(e)!.rel, 0) / members.length : 0;
+      return { id: g.id, name: g.name, color: g.color, territory: g.territory, allies: g.allies.map((a) => GANG_MAP[a]?.name ?? a), enemies: g.enemies.map((a) => GANG_MAP[a]?.name ?? a), members: members.length, standing: this.standingWord(avg) };
+    });
+    return { stats, tier, progression: this.progression, objectives: this.objectives, relationships, inventory, gangs, contrabandCarried: inv.items.some(isContraband) };
+  }
+  private relWordSim(v: number) { return v <= -50 ? 'enemy' : v <= -15 ? 'dislikes you' : v < 15 ? 'neutral' : v < 50 ? 'friendly' : 'ally'; }
+  private standingWord(v: number) { return v <= -30 ? 'threatened' : v <= -10 ? 'disliked' : v < 12 ? 'neutral' : v < 40 ? 'respected' : 'watched'; }
 
   private needsSystem(dt: number) {
     for (const e of this.ecs.query('Needs', 'Brain')) {
@@ -1253,6 +1352,7 @@ export class Simulation {
         ps.suspicion = clamp(ps.suspicion - 18, 0, 100); this.riotPressure = clamp01(this.riotPressure - 0.03);
         this.bubble(pl, 'Yes, sir.', 'talk', 1.0); this.floatBy(pl, 'Complied', '#9fe0a0'); return 'You comply with orders.';
       case 'returncell': {
+        this.prog('returncell');
         ps.suspicion = clamp(ps.suspicion - 8, 0, 100); this.riotPressure = clamp01(this.riotPressure - 0.04);
         const r = this.requestNearestObjectAction('rest');   // route to a bed in a cell block
         return r && r.startsWith('Heading') ? 'Returning to your cell…' : (r || 'Heading to your cell…');
@@ -1287,7 +1387,7 @@ export class Simulation {
     const spot = this.escapeOpportunity(); if (!spot) return 'No opportunity here.';
     if (this.act && this.act.phase === 'perform') return 'Finish what you\'re doing first.';
     this.escape = { active: true, by: pl, timer: ACTION_DUR.escape, spot, noticed: false };
-    this.metrics.escapeAttempts++; this.escapeCd = ESCAPE_COOLDOWN;
+    this.metrics.escapeAttempts++; this.escapeCd = ESCAPE_COOLDOWN; this.prog('escape');
     this.act = { action: 'escape', target: pl, phase: 'perform', timer: ACTION_DUR.escape, dur: ACTION_DUR.escape, applied: false, approachT: 0 };
     this.beginPerform();
     this.social(pl)!.suspicion = clamp(this.social(pl)!.suspicion + 20, 0, 100);
@@ -1410,8 +1510,8 @@ export class Simulation {
     const pl = this.playerId; const pb = this.brain(pl)!; const n = this.ecs.get<Needs>(pl, 'Needs')!; const ps = this.social(pl)!; const pinv = this.inv(pl)!;
     let result = '';
     switch (action) {
-      case 'rest': n.sleep = clamp01(n.sleep - 0.45); n.energy = clamp01(n.energy + 0.3); this.floatBy(pl, '+Energy', '#6dff9e'); result = `You rest on the ${o.name}.`; break;
-      case 'wash': n.hygiene = clamp01(n.hygiene - 0.55); this.floatBy(pl, '+Hygiene', '#9fcad8'); result = `You wash up at the ${o.name}.`; break;
+      case 'rest': n.sleep = clamp01(n.sleep - 0.45); n.energy = clamp01(n.energy + 0.3); this.floatBy(pl, '+Energy', '#6dff9e'); this.prog('rest'); result = `You rest on the ${o.name}.`; break;
+      case 'wash': n.hygiene = clamp01(n.hygiene - 0.55); this.floatBy(pl, '+Hygiene', '#9fcad8'); this.prog('wash'); result = `You wash up at the ${o.name}.`; break;
       case 'use': if (o.type === 'door' || o.type === 'gate') { o.open = !o.open; this.bubble(pl, o.open ? 'Open.' : 'Shut.', 'search', 1.0); result = `${o.name}: ${o.open ? 'opened' : 'closed'}.`; } else { n.hygiene = clamp01(n.hygiene - 0.1); result = `You use the ${o.name}.`; } break;
       case 'open': o.open = true; this.bubble(pl, 'Open.', 'search', 1.0); this.floatBy(pl, 'Opened', '#9fe0a0'); result = `You open the ${o.name}.`; break;
       case 'close': o.open = false; this.bubble(pl, 'Shut.', 'search', 1.0); result = `You close the ${o.name}.`; break;
@@ -1423,8 +1523,8 @@ export class Simulation {
         const g = this.nearestGuard(pl, 7); if (g != null && this.rng.chance(0.4)) { this.bus.emit('alert', { type: 'guard', text: `A guard noticed you at the ${o.name}.` }); }
         break;
       }
-      case 'eat': n.hunger = clamp01(n.hunger - 0.55); this.floatBy(pl, 'Fed', '#e8b52e'); result = `You eat at the ${o.name}.`; break;
-      case 'train': n.energy = clamp01(n.energy - 0.15); ps.respect = clamp(ps.respect + 1, 0, 100); this.floatBy(pl, '+Respect', '#ffd24a'); result = `You train on the ${o.name}.`; break;
+      case 'eat': n.hunger = clamp01(n.hunger - 0.55); this.floatBy(pl, 'Fed', '#e8b52e'); this.prog('eat'); result = `You eat at the ${o.name}.`; break;
+      case 'train': n.energy = clamp01(n.energy - 0.15); ps.respect = clamp(ps.respect + 1, 0, 100); this.floatBy(pl, '+Respect', '#ffd24a'); this.prog('train'); this.prog('respect', 1); result = `You train on the ${o.name}.`; break;
       case 'work': { const before = pinv.money; result = this.doJob(o.jobRoom ?? this.roomType(o.room)); const dM = pinv.money - before; if (dM) this.floatBy(pl, `$+${dM}`, '#9fe0a0'); break; }
       case 'inspect': result = (o.type === 'door' || o.type === 'gate') ? `${o.name}: ${o.restricted ? 'restricted, staff only' : o.locked ? 'locked down' : o.open ? 'open' : 'closed (unlocked)'}.` : `You inspect the ${o.name}.`; break;
       case 'search': {
@@ -1526,11 +1626,12 @@ export class Simulation {
     const inv = this.inv(target); const ps = this.social(target); const tb = this.brain(target);
     if (!inv || !ps || !tb) return;
     this.searchesRecent += 1; this.metrics.searches++;   // searches add a little prison-wide tension
+    if (tb.isPlayer) this.prog('search');
     const contraband = inv.items.filter(isContraband);
     let found: string | null = null;
     for (const id of contraband) { if (this.rng.float() < 0.78 - ITEMS[id].concealment * 0.6) { found = id; break; } }
     if (found) {
-      inv.items.splice(inv.items.indexOf(found), 1); this.metrics.contrabandFound++;
+      inv.items.splice(inv.items.indexOf(found), 1); this.metrics.contrabandFound++; if (tb.isPlayer) this.prog('contraband');
       this.bus.emit('alert', { type: 'search', text: `Contraband found on ${tb.name}: ${ITEMS[found].name} — confiscated!` });
       this.bubble(guard, 'Found it.', 'search', 1.4); this.floatBy(target, 'Contraband!', '#ff7a6a');
       if (tb.isPlayer) ps.reputation = clamp(ps.reputation + 4, -100, 100);
@@ -1563,6 +1664,7 @@ export class Simulation {
     const so = this.pickRoomOfType('solitary'); const k = randomTileInRoom(this.map, this.rooms, so.id, () => this.rng.float());
     const t = this.map.tileXY(k); const w = this.map.toWorld(t.x, t.y); tp.x = w.x; tp.z = w.z;
     if (ps) { ps.suspicion = clamp(ps.suspicion - 40, 0, 100); ps.reputation = clamp(ps.reputation + 3, -100, 100); }
+    if (tb.isPlayer) this.prog('solitary');
     this.bus.emit('alert', { type: 'discipline', text: `${tb.name} sent to solitary — ${reason}` });
   }
 
@@ -1573,6 +1675,7 @@ export class Simulation {
     if (wb.isPlayer && ws) { ws.reputation = clamp(ws.reputation + 7, -100, 100); this.bus.emit('alert', { type: 'rep', text: `You beat ${lb.name}! Respect rises.` }); }
     if (lb.isPlayer && ls) { ls.reputation = clamp(ls.reputation - 6, -100, 100); this.bus.emit('alert', { type: 'rep', text: `You were beaten by ${wb.name}.` }); this.escortLoserToInfirmaryOrSolitary(); }
     if (ls) ls.respect = clamp(ls.respect - 4, 0, 100);
+    if (wb.isPlayer) this.prog('fightWin'); else if (lb.isPlayer) this.prog('fightLoss');
     // a fight always draws suspicion + a chance of being searched (winner especially)
     if (ws) ws.suspicion = clamp(ws.suspicion + 14, 0, 100);
     if (ls) ls.suspicion = clamp(ls.suspicion + 6, 0, 100);
@@ -1609,6 +1712,7 @@ export class Simulation {
     switch (action) {
       case 'talk':
         if (ts) ts.rel = clamp(ts.rel + 6, -100, 100);
+        this.prog('talk'); if (ts) this.prog('relUp');
         return tb.role === 'guard' ? `${tb.name}: "Keep moving, inmate."` : `${tb.name}: "${this.smalltalk(tb)}"`;
       case 'comply':
         ps.suspicion = clamp(ps.suspicion - 15, 0, 100); return `${tb.name}: "Smart choice."`;
@@ -1624,15 +1728,16 @@ export class Simulation {
       }
       case 'threaten': {
         if (tb.mem) rememberThreat(tb.mem, pl);
-        const win = ps.respect + ps.reputation * 0.3 > (ts ? ts.respect : 30);
+        const win = ps.respect + ps.reputation * 0.3 + this.tier().index * 6 > (ts ? ts.respect : 30);
         if (win || tb.traits.includes('cowardly')) { if (ts) { ts.rel = clamp(ts.rel - 8, -100, 100); } ps.reputation = clamp(ps.reputation + 4, -100, 100); this.ecs.get<Needs>(target, 'Needs')!.fear = clamp01(this.ecs.get<Needs>(target, 'Needs')!.fear + 0.3); return `${tb.name} backs down.`; }
         ps.reputation = clamp(ps.reputation - 2, -100, 100);
         if (this.rng.chance(0.5)) { this.startPlayerFight(target); return `${tb.name} calls your bluff — fight!`; }
         return `${tb.name}: "You don't scare me."`;
       }
       case 'favor': {
-        const ok = (ts ? ts.rel : 0) > 10 || this.rng.chance(0.4 + ps.reputation * 0.003);
-        if (ok) { const pinv = this.inv(pl)!; if (this.rng.chance(0.5)) pinv.items.push(this.rng.pick(ITEM_IDS)); else pinv.money += this.rng.int(2, 6); if (ts) ts.rel = clamp(ts.rel + 4, -100, 100); return `${tb.name} does you a favor.`; }
+        // higher standing tiers make inmates more willing to help
+        const ok = (ts ? ts.rel : 0) > 10 || this.rng.chance(0.4 + ps.reputation * 0.003 + this.tier().index * 0.05);
+        if (ok) { const pinv = this.inv(pl)!; if (this.rng.chance(0.5)) pinv.items.push(this.rng.pick(ITEM_IDS)); else { const m = this.rng.int(2, 6); pinv.money += m; this.prog('earn', m); } if (ts) ts.rel = clamp(ts.rel + 4, -100, 100); this.prog('relUp'); return `${tb.name} does you a favor.`; }
         return `${tb.name} refuses.`;
       }
       case 'trade': {
@@ -1643,6 +1748,7 @@ export class Simulation {
         if (pinv.money < price) return `You can't afford ${ITEMS[item].name} ($${price}).`;
         pinv.money -= price; tinv.money += price; tinv.items.shift(); pinv.items.push(item);
         if (ts) ts.rel = clamp(ts.rel + 5, -100, 100);
+        this.prog('spend', price); this.prog('relUp');
         this.bus.emit('alert', { type: 'trade', text: `Traded for ${ITEMS[item].name} ($${price})` });
         return `Bought ${ITEMS[item].name} from ${tb.name}.`;
       }
@@ -1695,10 +1801,10 @@ export class Simulation {
   selfAction(action: InteractAction): string {
     const pl = this.playerId; const n = this.ecs.get<Needs>(pl, 'Needs')!; const pb = this.brain(pl)!; const room = this.roomTypeAt(this.pos(pl)!);
     switch (action) {
-      case 'rest': n.sleep = clamp01(n.sleep - 0.4); n.energy = clamp01(n.energy + 0.3); pb.action = 'Resting'; return 'You rest. Energy restored.';
-      case 'wash': n.hygiene = clamp01(n.hygiene - 0.5); pb.action = 'Washing'; return 'You clean up.';
-      case 'eat': n.hunger = clamp01(n.hunger - 0.5); pb.action = 'Eating'; return 'You eat a meal.';
-      case 'train': n.energy = clamp01(n.energy - 0.15); { const s = this.social(pl)!; s.respect = clamp(s.respect + 1, 0, 100); } pb.action = 'Training'; return 'You train. Respect rises slightly.';
+      case 'rest': n.sleep = clamp01(n.sleep - 0.4); n.energy = clamp01(n.energy + 0.3); pb.action = 'Resting'; this.prog('rest'); return 'You rest. Energy restored.';
+      case 'wash': n.hygiene = clamp01(n.hygiene - 0.5); pb.action = 'Washing'; this.prog('wash'); return 'You clean up.';
+      case 'eat': n.hunger = clamp01(n.hunger - 0.5); pb.action = 'Eating'; this.prog('eat'); return 'You eat a meal.';
+      case 'train': n.energy = clamp01(n.energy - 0.15); { const s = this.social(pl)!; s.respect = clamp(s.respect + 1, 0, 100); } pb.action = 'Training'; this.prog('train'); this.prog('respect', 1); return 'You train. Respect rises slightly.';
       case 'work': return this.doJob(room);
       default: return '';
     }
@@ -1710,6 +1816,7 @@ export class Simulation {
     const s = this.social(pl)!; s.reputation = clamp(s.reputation + job.rep, -100, 100); s.respect = clamp(s.respect + job.respect, 0, 100);
     this.inv(pl)!.money += job.money;
     this.brain(pl)!.action = job.name;
+    this.prog('job'); this.prog('earn', job.money); if (job.respect > 0) this.prog('respect', job.respect);
     this.bus.emit('alert', { type: 'job', text: `${job.verb} — +$${job.money}` });
     return `${job.verb}. Earned $${job.money}.`;
   }
@@ -1754,6 +1861,10 @@ export class Simulation {
       riotLevel: this.riotLevel, lockdownSane,
       guardsHaveRole: guards > 0 && guardsWithRole === guards,
       prisonersHaveIntent: prisoners > 0 && prisonersWithIntent === prisoners,
+      progressionOk: !!this.progression && typeof this.progression.daysSurvived === 'number',
+      objectivesOk: this.objectives.length > 0,
+      tierOk: typeof this.tier().name === 'string',
+      snapshotOk: (() => { try { const s = this.uiSnapshot(); return !!s.stats && Array.isArray(s.objectives) && Array.isArray(s.relationships); } catch { return false; } })(),
       metrics: this.metrics
     };
   }
@@ -1781,7 +1892,8 @@ export class Simulation {
       riotPressure: this.riotPressure,
       tension: this.tension
     };
-    return { version: 7, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos };
+    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay };
+    return { version: 8, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -1823,6 +1935,16 @@ export class Simulation {
     this.lockdownCd = 0; this.riotWarnCd = 0; this.riotEventCd = 0; this.escapeCd = 0; this.heatEventTimer = 0;
     this.tension = {}; for (const r of this.rooms) this.tension[r.id] = (data.tension && typeof data.tension[r.id] === 'number') ? clamp(data.tension[r.id], 0, 100) : 0;
     if (!this.checkpoints.length) this.checkpoints = buildCheckpoints(this.rooms as any, (i) => this.map.tileXY(i), (x, y) => this.map.toWorld(x, y));
+
+    // progression / objectives (defaults for older saves that lack them)
+    this.progression = sanitizeProgression(data.progression);
+    const ps2 = this.social(this.playerId); const pinv2 = this.inv(this.playerId);
+    this.objectives = Array.isArray(data.objectives) && data.objectives.length
+      ? data.objectives.map((o: any) => ({ id: String(o?.id ?? ''), text: String(o?.text ?? ''), kind: String(o?.kind ?? ''), goal: +o?.goal || 1, progress: +o?.progress || 0, done: !!o?.done, reward: (o && typeof o.reward === 'object') ? o.reward : {} }))
+      : rollObjectives(() => this.rng.float(), this.day);
+    this.daily = (data.daily && typeof data.daily === 'object') ? data.daily : newDaily(ps2?.reputation ?? 0, ps2?.respect ?? 8, pinv2?.money ?? 0);
+    this.lastSummaryDay = typeof data.lastSummaryDay === 'number' ? data.lastSummaryDay : 0;
+    this.pendingSummary = null;
 
     // reset object reservations, derive door states for the loaded phase (respects restored lockdown), then restore saved overrides
     for (const o of this.objs.values()) { o.reservedBy = 0; o.reservedUntil = 0; o.stash = []; o.open = !o.restricted; o.locked = false; }
