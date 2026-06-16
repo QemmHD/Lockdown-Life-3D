@@ -115,6 +115,7 @@ export class Menus {
         ${row('Heat / Suspicion', Math.round(s.heat))}
         ${row('Injury', Math.round(s.injury))}
         ${row('Money', '$' + s.money)}
+        ${row('Body count', this.state.bodyCount)}
         ${row('Sentence', this.state.sentenceDays + ' days')}
       </div>
       ${this.backBtn()}</div>`);

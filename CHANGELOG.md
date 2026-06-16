@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.4.0 — "Do or Die" (living prison, encounters & permadeath)
+- **One life, permadeath**: inmates can be **killed** — finishing a downed inmate, or a heavy
+  weapon blow — and once dead they're **gone for good** (removed from the world and from your save).
+- **Story consequences**: killing earns huge heat, a big sentence penalty (murder; even harsher for
+  an officer → facility manhunt/lockdown), notoriety (fear/respect), and the **victim's crew comes
+  for revenge**. A rising **body count** drives new endings ("Blood on Your Hands", "The Reaper Walks").
+- **Rooms simulate prison life**: inmates now *do* things in the right room/phase — eat at the
+  cafeteria during meals, train in the gym/yard, work at job stations, and sleep in their bunks at
+  lights-out.
+- **Dynamic encounters**: rival-faction inmates randomly **start brawls with each other** out in the
+  world (which can end in KO — or, occasionally, death), so the roster shifts over a playthrough.
+- Body count shown on the stats screen; combat resolution unified for player, thrown weapons, and
+  NPC-vs-NPC fights.
+
 ## v1.3.1 — Randomization
 - **🎲 Randomize Everything** button in character creation — instantly rolls a random name, build,
   skin, hair, jumpsuit and backstory.

@@ -231,6 +231,8 @@ export interface SaveData {
   settings: GameSettings;
   stashes: Record<string, InventoryItem[]>;
   flags: Record<string, boolean | number>;
+  deadNPCs: string[];
+  bodyCount: number;
 }
 
 export interface GameSettings {

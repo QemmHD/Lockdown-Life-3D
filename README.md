@@ -42,6 +42,12 @@ contraband, assaulting officers, solitary trips — **adds days**, while clean d
 **cut your time**. You can also **grab loose objects** around the prison and **throw** them (`G`/🎯)
 as improvised weapons.
 
+**Life and death are permanent.** Inmates live out their daily routines (eating, training, working,
+sleeping) and rival crews start brawls of their own. Anyone — including you — can be **killed**:
+finish a downed inmate or land a heavy weapon blow and they're **gone for good**. Killing brings a
+manhunt, a murder penalty on your sentence, and the victim's faction out for revenge — your **body
+count** shapes how your story ends.
+
 ### Desktop controls
 | Action | Key |
 | --- | --- |

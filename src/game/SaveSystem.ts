@@ -32,7 +32,9 @@ export class SaveSystem {
         completedEvents: state.completedEvents,
         settings: state.settings,
         stashes: state.stashes,
-        flags: { ...state.flags, playerFaction: state.playerFaction as any }
+        flags: { ...state.flags, playerFaction: state.playerFaction as any },
+        deadNPCs: state.deadNPCs,
+        bodyCount: state.bodyCount
       };
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
       return true;
@@ -74,6 +76,8 @@ export class SaveSystem {
     state.stashes = data.stashes ?? {};
     state.flags = data.flags ?? {};
     state.playerFaction = (data.flags?.playerFaction as any) ?? null;
+    state.deadNPCs = data.deadNPCs ?? [];
+    state.bodyCount = data.bodyCount ?? 0;
   }
 
   static clear() { try { localStorage.removeItem(SAVE_KEY); } catch {} }

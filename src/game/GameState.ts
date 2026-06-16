@@ -44,6 +44,8 @@ export class GameState {
   appearance: PlayerAppearance = { height: 1.0, skin: 0xe0ac69, hair: 0x2b1d0e, hairStyle: 'short', uniform: 0xd86a2c };
   dayCrime = false;        // committed a witnessed crime today (drives sentence growth)
   dayClean = true;         // stayed out of trouble today (drives "good behavior" cuts)
+  deadNPCs: string[] = []; // permanently dead inmates (one life, gone for good)
+  bodyCount = 0;           // inmates the player has killed (notoriety/story)
 
   constructor() {
     this.reset();
@@ -81,6 +83,8 @@ export class GameState {
     this.appearance = { height: 1.0, skin: 0xe0ac69, hair: 0x2b1d0e, hairStyle: 'short', uniform: 0xd86a2c };
     this.dayCrime = false;
     this.dayClean = true;
+    this.deadNPCs = [];
+    this.bodyCount = 0;
   }
 
   mem(id: string): NPCMemory {

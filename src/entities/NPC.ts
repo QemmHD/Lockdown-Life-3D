@@ -6,7 +6,7 @@ import { FACTIONS } from '../data/factions';
 import { ROOM_MAP, roomAt } from '../data/rooms';
 import type { NPCDef } from '../game/types';
 
-export type AIState = 'schedule' | 'flee' | 'fight' | 'approach' | 'down';
+export type AIState = 'schedule' | 'flee' | 'fight' | 'fightNPC' | 'approach' | 'down';
 
 // Deterministic per-id PRNG so each named NPC's randomization stays consistent across save/load.
 function seedFrom(str: string): () => number {
@@ -34,6 +34,7 @@ export interface NPCContext {
   dt: number; time: number;
   lockdown: boolean;
   requiredRoom: string;       // where inmates should be this phase
+  phase: string;              // current schedule phase id
   alarm: boolean;             // guards converge
   alarmX: number; alarmZ: number;
 }
@@ -57,6 +58,9 @@ export class NPC {
   fleeTarget: Vec2 | null = null;
   speakTimer = 0;
   hostile = false; // currently aggro on player
+  dead = false;
+  deathTimer = 0;          // counts up after death; Game removes the body when it elapses
+  npcFoe: NPC | null = null; // current NPC-vs-NPC brawl target
   base: { health: number; aggression: number; fear: number; respect: number; loyalty: number; strength: number };
 
   constructor(def: NPCDef, private collision: CollisionWorld) {
@@ -115,8 +119,38 @@ export class NPC {
     this.koTimer = sec;
     this.ai = 'down';
     this.combatTarget = null;
+    this.npcFoe = null;
     this.hostile = false;
     this.rig.setState('ko');
+  }
+
+  // One life: when an inmate dies they fall and are gone for good.
+  die() {
+    this.dead = true;
+    this.deathTimer = 0;
+    this.koTimer = 0;
+    this.ai = 'down';
+    this.combatTarget = null;
+    this.npcFoe = null;
+    this.hostile = false;
+    this.health = 0;
+    this.rig.setState('ko');
+    this.rig.setRingColor(0x550000);
+  }
+
+  consumeNpcAttack(): boolean {
+    if ((this as any)._npcAttack) { (this as any)._npcAttack = false; return true; }
+    return false;
+  }
+
+  // Animation that fits what you'd be doing in this room/phase — makes the prison feel alive.
+  private roomActivityAnim(ctx: NPCContext): 'idle' | 'eat' | 'train' | 'sleep' | 'interact' {
+    const r = this.targetRoom;
+    if ((ctx.phase === 'sleep' || ctx.phase === 'lockdown') && r === 'cellblock') return 'sleep';
+    if (r === 'cafeteria' && ['breakfast', 'lunch', 'dinner'].includes(ctx.phase)) return 'eat';
+    if ((r === 'gym' || r === 'yard') && Math.random() < 0.5) return 'train';
+    if (r === 'workshop' || r === 'kitchen' || r === 'laundry') return 'interact';
+    return 'idle';
   }
 
   takeHit() { if (!this.ko) this.rig.setState('hit'); }
@@ -148,8 +182,12 @@ export class NPC {
 
   update(ctx: NPCContext) {
     const dt = ctx.dt;
+    if (this.dead) { this.deathTimer += dt; this.rig.update(dt, 0); return; }
     if (this.attackCd > 0) this.attackCd -= dt;
     if (this.speakTimer > 0) this.speakTimer -= dt;
+
+    // drop NPC brawl if the foe is gone/down
+    if (this.npcFoe && (this.npcFoe.ko || this.npcFoe.dead)) { this.npcFoe = null; if (this.ai === 'fightNPC') this.ai = 'schedule'; }
 
     if (this.ko) {
       this.koTimer -= dt;
@@ -177,6 +215,26 @@ export class NPC {
           this.rig.setState('punch');
           this.attackCd = 1.1 - this.base.aggression * 0.4;
           (this as any)._didAttack = true;
+        }
+      }
+      this.rig.update(dt, 1);
+      return;
+    }
+
+    // NPC vs NPC brawl (random encounters that play out in the world)
+    if (this.ai === 'fightNPC' && this.npcFoe) {
+      const foe = this.npcFoe;
+      const d = this.distTo(foe.x, foe.z);
+      this.rig.facing = Math.atan2(foe.x - this.x, foe.z - this.z);
+      if (d > 1.5) {
+        this.moveToward({ x: foe.x, z: foe.z }, dt, speedBase * 1.1);
+        this.rig.setState('walk');
+      } else {
+        this.vx = this.vz = 0;
+        if (this.attackCd <= 0 && !this.rig.isBusy()) {
+          this.rig.setState('punch');
+          this.attackCd = 1.2 - this.base.aggression * 0.4;
+          (this as any)._npcAttack = true;
         }
       }
       this.rig.update(dt, 1);
@@ -223,7 +281,7 @@ export class NPC {
       }
       this.vx = THREE.MathUtils.lerp(this.vx, 0, dt * 6);
       this.vz = THREE.MathUtils.lerp(this.vz, 0, dt * 6);
-      this.rig.setState('idle');
+      if (!this.rig.isBusy()) this.rig.setState(this.roomActivityAnim(ctx));
     }
     this.rig.update(dt, 1);
   }

@@ -10,6 +10,7 @@ import { Backdrop } from '../world/Backdrop';
 import { PostFX } from './PostFX';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { roomAt, ROOM_MAP } from '../data/rooms';
+import { FACTIONS } from '../data/factions';
 import { Player } from '../entities/Player';
 import { NPC } from '../entities/NPC';
 import { NPCS, NPC_MAP } from '../data/npcs';
@@ -29,7 +30,7 @@ import { InventoryUI } from '../ui/InventoryUI';
 
 type Mode = 'menu' | 'playing' | 'paused' | 'dialogue' | 'inventory' | 'event' | 'activity';
 
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 const INTERACT_RANGE = 2.4;
 
 export class Game {
@@ -215,12 +216,25 @@ export class Game {
   }
 
   private spawnNPCs() {
+    // rebuild the full roster (so a fresh game restores anyone killed last run)
+    for (const n of this.npcs) { this.scene.remove(n.rig.group); n.rig.dispose(); }
+    this.npcs.length = 0;
     for (const def of NPCS) {
       const npc = new NPC(def, this.collision);
       const r = ROOM_MAP[def.spawnRoom];
       npc.setPos(r.x + (Math.random() - 0.5) * (r.w - 3), r.z + (Math.random() - 0.5) * (r.d - 3));
       this.scene.add(npc.rig.group);
       this.npcs.push(npc);
+    }
+  }
+
+  private removeDeadFromWorld() {
+    for (let i = this.npcs.length - 1; i >= 0; i--) {
+      const n = this.npcs[i];
+      if (this.state.deadNPCs.includes(n.def.id)) {
+        this.scene.remove(n.rig.group); n.rig.dispose();
+        this.npcs.splice(i, 1);
+      }
     }
   }
 
@@ -250,6 +264,7 @@ export class Game {
       if (npc.isGuard) { this.heat.add(45); this.addTime(2, 'Assaulted a guard'); }
       else this.hud.toast(`You beat ${npc.def.name}. Respect up.`, 'good');
     };
+    this.combat.onDeath = (npc, byPlayer) => this.handleDeath(npc, byPlayer);
     this.combat.onPlayerKO = () => this.handlePlayerKO();
     this.combat.onHostile = (npc) => { if (npc.isGuard) this.triggerAlarm(npc.x, npc.z); };
     this.combat.onFightSeen = (x, z, byGuardOnly) => {
@@ -299,6 +314,7 @@ export class Game {
     const days = c.min + Math.floor(Math.random() * (c.max - c.min + 1));
     this.state.sentenceDays = days;
     this.state.crime = c.crime;
+    this.spawnNPCs();   // fresh roster — anyone killed last run is back for the new sentence
     this.resetEntities();
     SaveSystem.clear();
     this.menus.intro(
@@ -332,6 +348,8 @@ export class Game {
     const data = SaveSystem.load();
     if (!data) { this.newGame(); return; }
     SaveSystem.apply(this.state, data);
+    this.spawnNPCs();
+    this.removeDeadFromWorld();   // inmates killed before the save stay gone
     this.player.customize(this.state.appearance, this.scene);
     this.player.setPos(data.player.x, data.player.z);
     for (const ns of Object.values(data.npcState)) {
@@ -412,6 +430,76 @@ export class Game {
     n.setPos(this.player.x + Math.sin(ang) * 6, this.player.z + Math.cos(ang) * 6);
     n.ai = 'fight'; n.combatTarget = 'player'; n.hostile = true;
     this.hud.toast(`${n.def.name} comes at you!`, 'bad');
+  }
+
+  // ----- Death & story consequences (one life — they're gone for good) -----
+  private handleDeath(npc: NPC, byPlayer: boolean) {
+    if (!this.state.deadNPCs.includes(npc.def.id)) this.state.deadNPCs.push(npc.def.id);
+    const fac = FACTIONS[npc.def.faction];
+    this.cam.shake(0.8);
+    this.audio.play('siren');
+    if (byPlayer) {
+      const s = this.state.stats;
+      this.state.bodyCount += 1;
+      s.fear = clamp(s.fear + 30, 0, 100);
+      s.reputation += 10; s.respect += 8;
+      this.heat.add(100);
+      this.state.changeFactionRep(npc.def.faction, -60);
+      if (npc.isGuard) {
+        this.addTime(15, 'MURDER of an officer');
+        this.forceLockdown();
+        this.hud.notify('MANHUNT', `You killed ${npc.def.name}. The whole block is locked down and hunting you.`);
+      } else {
+        this.addTime(6, 'Murder');
+        this.hud.notify('A LIFE TAKEN', `You killed ${npc.def.name}. The ${fac.name} swear revenge.`);
+      }
+      // the victim's crew comes for you
+      let avengers = 0;
+      for (const ally of this.npcs) {
+        if (ally === npc || ally.dead || ally.ko) continue;
+        const sameCrew = ally.def.faction === npc.def.faction;
+        const enforcer = ally.def.role === 'leader' || ally.def.role === 'enforcer';
+        if ((npc.isGuard && ally.isGuard) || (sameCrew && (enforcer || ally.base.aggression > 0.55))) {
+          ally.ai = 'fight'; ally.combatTarget = 'player'; ally.hostile = true; ally.npcFoe = null;
+          avengers++;
+          if (avengers >= 4) break;
+        }
+      }
+      this.triggerAlarm(npc.x, npc.z);
+    } else {
+      this.hud.notify('Word spreads', `${npc.def.name} (${fac.name}) was killed in a brawl. The yard feels colder.`);
+      this.state.stats.mood = clamp(this.state.stats.mood - 4, 0, 100);
+    }
+  }
+
+  private npcFightTimer = 14;
+  private maybeStartNpcFight() {
+    if (this.state.lockdown) return;
+    const pool = this.npcs.filter((n) => !n.ko && !n.dead && !n.isGuard && !n.isStaff && !n.hostile && !n.npcFoe);
+    if (pool.length < 2) return;
+    const a = pool[Math.floor(Math.random() * pool.length)];
+    // find a rival-faction inmate nearby to scrap with
+    let foe: NPC | null = null;
+    for (const b of pool) {
+      if (b === a) continue;
+      if (b.def.faction !== a.def.faction && a.distTo(b.x, b.z) < 12) { foe = b; break; }
+    }
+    if (!foe) return;
+    this.combat.startNpcFight(a, foe);
+    if (a.distTo(this.player.x, this.player.z) < 22) {
+      this.hud.toast(`${a.def.name} and ${foe.def.name} are throwing down!`, 'event');
+      this.triggerAlarm((a.x + foe.x) / 2, (a.z + foe.z) / 2);
+    }
+  }
+
+  private cleanupDeadBodies() {
+    for (let i = this.npcs.length - 1; i >= 0; i--) {
+      const n = this.npcs[i];
+      if (n.dead && n.deathTimer > 7) {
+        this.scene.remove(n.rig.group); n.rig.dispose();
+        this.npcs.splice(i, 1);
+      }
+    }
   }
 
   private handlePlayerKO() {
@@ -505,7 +593,7 @@ export class Game {
   private resetNPCPositions() {
     for (const npc of this.npcs) {
       if (npc.ko) { npc.koTimer = 0; npc.health = npc.maxHealth; npc.rig.setState('idle'); }
-      npc.ai = 'schedule'; npc.combatTarget = null; npc.hostile = false;
+      npc.ai = 'schedule'; npc.combatTarget = null; npc.hostile = false; npc.npcFoe = null;
     }
   }
 
@@ -513,7 +601,9 @@ export class Game {
     const s = this.state.stats;
     let title = '🌅 Released!';
     let body = `You served your time and walked out alive. Final reputation: ${Math.round(s.reputation)}, respect: ${Math.round(s.respect)}.`;
-    if (s.respect > 70 && s.influence > 50) { title = '👑 Prison Kingpin'; body = 'You didn\'t just survive — you RAN the place. They\'ll tell stories about you for years.'; }
+    if (this.state.bodyCount >= 3) { title = '☠️ The Reaper Walks'; body = `You leave behind ${this.state.bodyCount} bodies. They didn't free you — they were glad to be rid of you. Your name is a warning now.`; }
+    else if (this.state.bodyCount >= 1) { title = '🔪 Blood on Your Hands'; body = `You survived, but ${this.state.bodyCount} inmate(s) didn't. Some things don't wash off.`; }
+    else if (s.respect > 70 && s.influence > 50) { title = '👑 Prison Kingpin'; body = 'You didn\'t just survive — you RAN the place. They\'ll tell stories about you for years.'; }
     else if (this.state.playerFaction) { body += ` You leave as a respected member of the ${this.state.playerFaction.replace('_', ' ')}.`; }
     this.audio.play('rep');
     this.menus.ending(title, body, () => this.toMenu());
@@ -635,6 +725,7 @@ export class Game {
       px: this.player.x, pz: this.player.z, dt, time: t,
       lockdown: this.state.lockdown,
       requiredRoom: this.schedule.requiredRoom(),
+      phase: this.state.phase,
       alarm: this.alarmTimer > 0,
       alarmX: this.alarm.x, alarmZ: this.alarm.z
     };
@@ -699,6 +790,11 @@ export class Game {
     const ctx = this.npcCtx(dt, t);
     for (const n of this.npcs) n.update(ctx);
     if (this.alarmTimer > 0) this.alarmTimer -= dt;
+
+    // dynamic encounters: inmates start brawls with rivals; clear out bodies
+    this.npcFightTimer -= dt;
+    if (this.npcFightTimer <= 0) { this.npcFightTimer = 16 + Math.random() * 20; this.maybeStartNpcFight(); }
+    this.cleanupDeadBodies();
 
     // schedule / time
     this.schedule.update(dt);
@@ -780,11 +876,11 @@ export class Game {
     for (const n of this.npcs) {
       if (n.ko || n.isStaff && false) {}
       const d = n.distTo(this.player.x, this.player.z);
-      if (d < bn && !n.ko) { bn = d; bestN = n; }
+      if (d < bn && !n.ko && !n.dead) { bn = d; bestN = n; }
     }
     this.nearNPC = bestN;
     // exclamation marks for hostile npcs / event givers
-    for (const n of this.npcs) n.rig.showExclaim(this.scene, n.hostile && !n.ko);
+    for (const n of this.npcs) n.rig.showExclaim(this.scene, n.hostile && !n.ko && !n.dead);
   }
 
   private updatePromptUI() {

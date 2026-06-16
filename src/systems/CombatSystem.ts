@@ -14,6 +14,7 @@ export class CombatSystem {
   camera!: CameraController;
 
   onKO?: (npc: NPC) => void;
+  onDeath?: (npc: NPC, byPlayer: boolean) => void;
   onPlayerKO?: () => void;
   onFightSeen?: (x: number, z: number, byGuardOnly: boolean) => void;
   onHostile?: (npc: NPC) => void;
@@ -24,11 +25,25 @@ export class CombatSystem {
     this.player = player; this.npcs = npcs; this.camera = camera;
   }
 
+  // A downed (KO) inmate can be finished off; a weapon makes any blow potentially lethal.
+  private finishOrDown(target: NPC, weaponDmg: number, byPlayer: boolean) {
+    const lethal = target.ko || weaponDmg >= 8 || target.health <= -22;
+    if (lethal) {
+      target.die();
+      this.fx.crowd(target.x, target.z);
+      this.onDeath?.(target, byPlayer);
+    } else {
+      target.knockout(20 + Math.random() * 15);
+      this.fx.crowd(target.x, target.z);
+      if (byPlayer) this.onKO?.(target);
+    }
+  }
+
   private nearestTarget(range: number): NPC | null {
     let best: NPC | null = null, bestD = range;
     const fx = Math.sin(this.player.rig.facing), fz = Math.cos(this.player.rig.facing);
     for (const n of this.npcs) {
-      if (n.ko) continue;
+      if (n.dead) continue;
       const dx = n.x - this.player.x, dz = n.z - this.player.z;
       const d = Math.hypot(dx, dz);
       if (d > range) continue;
@@ -75,14 +90,10 @@ export class CombatSystem {
     target.z += Math.cos(ang) * kb;
     target.setPos(target.x, target.z);
 
-    this.makeReaction(target);
+    if (!target.ko) this.makeReaction(target);
     this.onFightSeen?.(target.x, target.z, false);
 
-    if (target.health <= 0) {
-      target.knockout(20 + Math.random() * 15);
-      this.fx.crowd(target.x, target.z);
-      this.onKO?.(target);
-    }
+    if (target.health <= 0) this.finishOrDown(target, weapon, true);
   }
 
   // Throw your best weapon at the faced target (Hard Time style)
@@ -107,9 +118,9 @@ export class CombatSystem {
       this.camera.shake(0.35);
       const ang = Math.atan2(target.x - this.player.x, target.z - this.player.z);
       target.x += Math.sin(ang) * 1.6; target.z += Math.cos(ang) * 1.6; target.setPos(target.x, target.z);
-      this.makeReaction(target);
+      if (!target.ko) this.makeReaction(target);
       this.onFightSeen?.(target.x, target.z, false);
-      if (target.health <= 0) { target.knockout(20 + Math.random() * 15); this.fx.crowd(target.x, target.z); this.onKO?.(target); }
+      if (target.health <= 0) this.finishOrDown(target, w.damage, true);
     });
   }
 
@@ -142,11 +153,36 @@ export class CombatSystem {
     }
   }
 
+  // Start a brawl between two inmates (dynamic world encounter)
+  startNpcFight(a: NPC, b: NPC) {
+    if (a.ko || b.ko || a.dead || b.dead) return;
+    a.npcFoe = b; a.ai = 'fightNPC';
+    b.npcFoe = a; b.ai = 'fightNPC';
+    this.fx.crowd((a.x + b.x) / 2, (a.z + b.z) / 2);
+  }
+
   update(dt: number) {
+    // resolve NPC-vs-NPC brawls
+    for (const n of this.npcs) {
+      if (n.dead || n.ko) continue;
+      if (n.npcFoe && n.consumeNpcAttack()) {
+        const foe = n.npcFoe;
+        if (!foe || foe.ko || foe.dead || n.distTo(foe.x, foe.z) > 1.9) continue;
+        const dmg = Math.max(1, Math.round(4 + n.base.strength * 1.3));
+        foe.health -= dmg;
+        foe.takeHit();
+        this.fx.damageNumber(foe.x, foe.z, dmg);
+        this.fx.impact(foe.x, foe.z);
+        const ang = Math.atan2(foe.x - n.x, foe.z - n.z);
+        foe.x += Math.sin(ang) * 0.7; foe.z += Math.cos(ang) * 0.7; foe.setPos(foe.x, foe.z);
+        if (foe.health <= 0) this.finishOrDown(foe, 0, false);
+      }
+    }
+
     if (this.player.ko) return;
     const s = this.state.stats;
     for (const n of this.npcs) {
-      if (n.ko) continue;
+      if (n.ko || n.dead) continue;
       if (n.combatTarget === 'player' && n.consumeAttack()) {
         const d = n.distTo(this.player.x, this.player.z);
         if (d > 2.0) continue;
