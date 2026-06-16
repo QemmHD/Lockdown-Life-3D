@@ -56,7 +56,8 @@ for how the code is organised.
 
 ## How to play
 
-You are the inmate with the **gold selection ring** (named **"You"**). The camera follows you.
+You are the inmate with the **gold selection ring** — the one you create in **New Game** (name, look,
+traits, backstory, difficulty). The camera follows you.
 
 - **Move:** tap/click an empty floor tile — you path there (A*), with a destination marker.
 - **Inspect / interact with a person:** tap a prisoner or guard to open their panel, then choose a
@@ -136,6 +137,7 @@ Gangs are purely fictional game data. Joining gangs is **not** implemented yet (
 - **Prisoner AI**: intent scoring (schedule/socialize/group/avoid/flee/watch/return-cell/hide/comply) + decaying memory + group clustering + standoffs
 - **Combat feel**: phased fights (squareUp/windup/strike/block/dodge/hitReact/stumble/down/recover), attack types, knockback, knockdown, player combat panel, guard interruption, crowd reactions
 - **Structure layer**: title screen, tabbed pause menu (Stats/People/Inventory/Objectives/Gangs/Help), reputation tiers, daily objectives + HUD tracker, end-of-day summary, progression totals
+- **Character creation**: new-game setup (name/appearance/traits/backstory/gang-lean/difficulty), randomize, run identity applied to the player
 
 **Partial**
 - Guard AI (roles + routes + checkpoints, but no formal squad tactics / dynamic routes)
@@ -148,9 +150,9 @@ Gangs are purely fictional game data. Joining gangs is **not** implemented yet (
 - Balance / tuning · Mobile UI polish
 
 **Planned / Future**
-- Deeper riot warfare, **gang joining**, event director
+- Deeper riot warfare, **gang joining** (lean exists), event director
 - Economy/contraband depth, settings menu, audio
-- Character creation / new-game setup
+- Deeper appearance / cosmetics
 - Real audio / SFX
 - More animation
 - Capacitor / iOS `.ipa` packaging
@@ -235,7 +237,7 @@ versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARC
 - **Tuning (3.1)**: eased Heat that decays when calm, smoothed riot pressure with hysteresis + cooldowns, lockdown re-entry cooldown, deduped alerts, contextual player panel, and `?debug` playtest telemetry (`sim.metrics`).
 
 ## Planned next
-Economy/contraband depth, character creation/new-game setup, or audio/polish — then iOS (Capacitor) packaging prep.
+Economy/contraband depth, gang joining/faction progression, or audio/polish — then iOS (Capacitor) packaging prep.
 
 ---
 

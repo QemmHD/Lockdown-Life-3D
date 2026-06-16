@@ -39,6 +39,7 @@ export class Game {
   private selectedObj: string | null = null;
   private objHits: THREE.Object3D[] = [];
   private objHighlight!: THREE.Mesh;
+  private interactableDefs: any[] = [];
   private panelDirty = true;     // request an immediate panel refresh
   private panelTimer = 0;        // throttle background refreshes to ~6.7/s (not every frame)
 
@@ -54,7 +55,8 @@ export class Game {
     const dressed = dressRooms(this.app.scene, this.sim.map, this.sim.rooms);
     const doors = this.buildDoorObjects();        // register doors/gates as interactables
     this.objHits = [...dressed.hitMeshes, ...doors.hitMeshes];
-    this.sim.setInteractables([...dressed.interactables, ...doors.defs]);
+    this.interactableDefs = [...dressed.interactables, ...doors.defs];
+    this.sim.setInteractables(this.interactableDefs);
     // selection highlight ring under the picked object
     this.objHighlight = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.78, 28), new THREE.MeshBasicMaterial({ color: 0x9fe0ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
     this.objHighlight.rotation.x = -Math.PI / 2; this.objHighlight.position.y = 0.07; this.objHighlight.visible = false; this.app.scene.add(this.objHighlight);
@@ -80,16 +82,18 @@ export class Game {
 
     // menus / title / pause / daily summary (Stage 3.4)
     this.menus = new Menus({
-      onNewGame: () => { SaveManager.clear(); location.reload(); },
+      onNewGame: () => this.menus.showSetup(),
       onContinue: () => { this.load(); this.closeMenu(); },
       onQuickStart: () => this.closeMenu(),
       onResume: () => this.closeMenu(),
       onSave: () => { const ok = SaveManager.save(this.sim.serialize()); this.hud.alert(ok ? 'Game saved' : 'Save failed', ok ? 'guard' : 'fight'); },
       onLoad: () => { this.load(); this.closeMenu(); },
       onMainMenu: () => { this.menus.showTitle(); this.paused = true; },
+      onBeginRun: (setup) => this.beginRun(setup),
       hasSave: () => SaveManager.has(),
+      saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v3.4.0-ui'
+      version: 'v3.5.0-newgame'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -319,6 +323,19 @@ export class Game {
 
   private openMenu() { if (this.menus.isOpen()) return; this.menus.showPause(); this.paused = true; }
   private closeMenu() { this.menus.hide(); this.paused = false; this.hud.setSpeed(SPEEDS[this.speedIdx] + '×'); }
+
+  // start a fresh run from a created character setup (no page reload)
+  private beginRun(setup: any) {
+    SaveManager.clear();
+    this.sim.startNewRun(setup, this.interactableDefs as any);
+    this.sync.reset(); this.feedback.reset(); this.sync.setEcs(this.sim.ecs);
+    this.playerEntity = this.sim.player();
+    const sp = this.sim.ecs.get<Position>(this.playerEntity, 'Position'); if (sp) this.cam.focus(sp.x, sp.z);
+    this.speedIdx = 0; this.paused = false; this.hud.setSpeed('1×');
+    this.hud.clearAlerts();
+    this.panelDirty = true; this.menus.hide(); this.select(this.playerEntity);
+    this.hud.alert(`Welcome to the block, ${this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.name ?? 'inmate'}.`, 'player');
+  }
 
   private load() {
     const data = SaveManager.load();

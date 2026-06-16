@@ -74,6 +74,14 @@ export function rollObjectives(rollFn: () => number, day: number): Objective[] {
   return picks.map((t) => ({ id: t.id, text: t.text, kind: t.kind, goal: t.goal, progress: 0, done: false, reward: t.reward }));
 }
 
+// build a specific objective set by id (backstory-seeded first objectives; falls back to a roll)
+export function objectivesByIds(ids: string[]): Objective[] {
+  const all = [...POOL, SURVIVE];
+  const out: Objective[] = [];
+  for (const id of ids) { const t = all.find((x) => x.id === id); if (t && !out.find((o) => o.id === t.id)) out.push({ id: t.id, text: t.text, kind: t.kind, goal: t.goal, progress: 0, done: false, reward: t.reward }); }
+  return out.length ? out : rollObjectives(() => Math.random(), 1);
+}
+
 // ---------- daily summary ----------
 export interface DailyStats { repStart: number; respStart: number; moneyStart: number; fights: number; wins: number; jobs: number; searches: number; contraband: number; solitary: number; lockdowns: number; objectivesDone: number; relImproved: number; }
 export function newDaily(rep: number, resp: number, money: number): DailyStats {

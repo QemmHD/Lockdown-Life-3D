@@ -19,7 +19,7 @@ export class RenderSync {
   private ensure(e: Entity, r: Render): CharView {
     let v = this.views.get(e);
     if (!v) {
-      v = makeCharacter(r.kind, r.color);
+      v = makeCharacter(r.kind, r.color, r.appearance);
       v.hit.userData.entity = e;
       this.scene.add(v.group);
       this.views.set(e, v);

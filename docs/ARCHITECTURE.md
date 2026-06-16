@@ -70,7 +70,8 @@ input (tap/drag/pinch)
 | AI | `sim/AIIntent.ts`, `PrisonerAISystem.ts`, `AIMemorySystem.ts`, `GroupBehaviorSystem.ts`, `GuardAISystem.ts` | pure AI vocabulary/labels, prisoner-intent scoring, decaying memory, cluster/separation geometry, and guard routes; the Simulation gathers context and applies the chosen intents/roles |
 | Combat | `sim/CombatSystem.ts` | pure attack tables (windup/recovery/hit-chance/damage/knockback), attack selection, and hit/block/dodge/miss resolution; the Simulation runs the per-fighter phase machine, RenderSync animates the phases read-only |
 | Progression | `sim/Progression.ts` | pure reputation tiers, objective templates/roll, daily-summary rating; the Simulation owns live progression/objectives/daily state and a `prog()` event hook |
-| Menus | `ui/Menus.ts` | title screen, tabbed pause overlay (Stats/People/Inventory/Objectives/Gangs/Help), and daily-summary modal — reads `Simulation.uiSnapshot()`, never writes |
+| Setup | `sim/NewGameSetup.ts` | pure character-creation model: appearance/traits/backstory/gang-lean/difficulty defs + randomize/sanitize; `Simulation.applySetup()` writes it onto the player |
+| Menus | `ui/Menus.ts` | title screen, **new-game setup flow**, tabbed pause overlay (Stats/People/Inventory/Objectives/Gangs/Help), and daily-summary modal — reads `Simulation.uiSnapshot()`, never writes |
 | World | `world/TileMap.ts`, `Pathfinding.ts`, `WorldGen.ts`, `Interactable.ts` | grid, A*, floorplan, object model |
 | Render | `render/ThreeApp.ts`, `IsoCamera.ts`, `WorldRenderer.ts`, `PropRenderer.ts`, `CharacterFactory.ts`, `RenderSync.ts`, `Feedback.ts`, `VisualTheme.ts`, `textures/` | rendering (read-only) |
 | UI | `ui/HUD.ts` | DOM overlay |
@@ -108,6 +109,15 @@ cluster/separation geometry so crowds read as loose groups. All of it is pure he
 integration; transient AI (intent, memory refs) resets on load. Still **partial**: no full GOAP
 planner, no formal squad tactics, group clustering is geometric (not negotiated), and guard routes are
 fixed tables rather than learned/dynamic.
+
+**Character creation (Stage 3.5).** `NewGameSetup.ts` is pure data (appearance/traits/backstory/
+gang-lean/difficulty + randomize/sanitize). `ui/Menus.ts` runs the setup flow and calls
+`Game.beginRun(setup)` → `Simulation.startNewRun(setup)` which **reseeds + re-runs `generate()`**
+(now idempotent — resets ECS/chaos/progression) then `applySetup` writes identity/appearance/traits/
+standing/needs/money/gang-lean/objectives + difficulty multipliers onto the player. Appearance lives on
+the `Render` component so RenderSync (read-only) can show it. Save v9 persists the setup; difficulty is
+re-derived on load. Still **partial**: gang joining (lean only), simple low-poly appearance, fixed
+backstory/trait tables.
 
 **UI / progression (Stage 3.4).** `Progression.ts` is pure (tiers/objectives/daily rating); the
 Simulation owns `progression`, `objectives`, `daily`, and a `prog(kind)` hook called at existing event
