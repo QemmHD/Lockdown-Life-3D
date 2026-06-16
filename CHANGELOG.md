@@ -11,6 +11,33 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v2.4.1-stability — Stage Stability 2.4 (real bug fixes, remove prototype shortcuts)
+Hardening pass to make the codebase ready for Stage Chaos 3.0. Sim authoritative, RenderSync
+read-only, build passes, 0 runtime errors.
+- **Panel no longer rebuilt every frame**: the loop now refreshes the panel on demand (selection /
+  action / inventory / load) and otherwise only ~6–7×/sec, never 60 FPS. Combined with the
+  signature-based soft-update, action buttons keep their handlers (reliable taps, far less work).
+- **Player needs actions are object-based**: Rest/Wash/Eat/Train/Work now route to the **nearest
+  reachable** matching interactable (bed/sink/shower/table/counter/weights/pull-up/job) via
+  `requestObjectAction` — not room-only stat shortcuts. If nothing's reachable you get a clear reason
+  ("Find a bed.", "No reachable shower or sink.", …). `selfAction` remains only as a fallback.
+- **No more stuck "Approaching"**: NPC/guard interactions check for a real route before queuing and
+  refuse with a reason ("No route to them." / "They're in a restricted area."); the approach phase has
+  a fail-safe timeout that cancels cleanly with a message.
+- **Smarter NPC scheduling**: `assignScheduleTarget` now tries the nearest reachable candidates in
+  order (not just one), reserves only after confirming a path, and falls back to room/wander otherwise.
+- **Door/gate de-duplication**: `WorldRenderer` no longer draws door/gate frames+bars (it kept drawing
+  a second static set under Game's moving leaf). It now owns only signs + warning stripes; **Game owns
+  all door/gate geometry** (frame + lintel + swinging barred leaf + state lamp; gates render wider).
+- **Save/load hardening (more)**: Save button reports failure honestly ("Save failed…") instead of
+  always "Game saved"; the storage key is version-neutral (`lockdown_life_save`); a loaded save with a
+  missing player id promotes the first prisoner **and marks them as the player** (gold ring/name).
+- **Debug self-test** (`?debug`): logs an invariant check on boot — player/map exist, interactables
+  registered, bed/sink/table/door/gate present, every door object maps to a door tile, an NPC can path
+  to a schedule object, and serialize round-trips without throwing.
+- **Code organization**: added `TODO(refactor)` markers at the future system seams (Door/Schedule/
+  Interaction/GuardAI/PrisonerAI/SaveSerializer) per `docs/ARCHITECTURE.md`. No large refactor yet.
+
 ## v2.4.0-qa — Stage QA 2.4 (audit, truth pass, hardening)
 Stabilization pass before the chaos systems — no new gameplay. Sim authoritative, RenderSync
 read-only, build passes, 0 runtime errors.
