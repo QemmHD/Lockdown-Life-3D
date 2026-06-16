@@ -1,14 +1,35 @@
 # Lockdown Life 3D
 
-A gritty, system-driven **3D isometric top-down prison-life sandbox simulator**. You control an
-inmate surviving daily prison life: factions, guards, combat, contraband, jobs, training,
-reputation, relationships, random events, and a path to freedom.
+A mobile-first, system-driven **3D isometric prison-life simulation**. You control a single
+inmate ("You") living out a prison day alongside autonomous prisoners and guards — schedules,
+gangs, reputation, contraband, searches, discipline, jobs, and a prison full of real
+interactable objects (beds, showers, tables, weights, doors and gates).
 
-Built from scratch with **Vite + TypeScript + Three.js**, HTML/CSS overlay UI, WebAudio-generated
-sound effects, `localStorage` saves, and full **desktop + mobile/touch** controls. All 3D art is
-procedurally generated low-poly geometry (no external assets required).
+Built from scratch with **Vite + TypeScript + Three.js**, a lightweight **DOM/CSS HUD**,
+`localStorage` saves, and a small **ECS-lite simulation**. All 3D art is **procedurally generated
+low-poly geometry** — no external art/audio assets.
 
-![isometric prison](https://img.shields.io/badge/view-isometric%203D-orange) ![stack](https://img.shields.io/badge/Vite%20%2B%20TS%20%2B%20Three.js-blue)
+![view](https://img.shields.io/badge/view-isometric%203D-orange) ![stack](https://img.shields.io/badge/Vite%20%2B%20TS%20%2B%20Three.js-blue)
+
+> **Status:** active development. This README describes **what is actually implemented right now**.
+> Anything not yet built is listed under [Planned / Future](#planned--future). The previous
+> player-controller prototype is archived under `src/legacy/` and is **not** part of the current
+> build (see [Legacy](#legacy-archived)).
+
+---
+
+## Tech stack (current)
+
+- **Vite** dev server + production build
+- **TypeScript** (strict)
+- **Three.js** for rendering (orthographic isometric camera)
+- **DOM / CSS** overlay HUD (no UI framework)
+- **`localStorage`** saves (versioned, currently v4)
+- **Procedural low-poly geometry** built at runtime (no model/texture/audio files)
+- A small **ECS-lite** simulation (`src/ecs` + `src/sim`)
+
+There is **no** audio, no WebGL post-processing pipeline, no character-creation flow, and no
+keyboard/gamepad controls in the current build.
 
 ---
 
@@ -16,208 +37,196 @@ procedurally generated low-poly geometry (no external assets required).
 
 ```bash
 npm install        # install dependencies
-npm run dev        # start dev server  -> http://localhost:5173
+npm run dev        # dev server -> http://localhost:5173
 ```
 
-Then open the printed URL in a browser. On a phone, open the **Network** URL Vite prints.
-
-Other commands:
+Open the printed URL. On a phone, open the **Network** URL Vite prints (same Wi-Fi).
 
 ```bash
-npm run build      # type-check (tsc --noEmit) + production build into dist/
+npm run typecheck  # tsc --noEmit (type-check only)
+npm run build      # type-check + production build into dist/
+npm run check      # alias: type-check + build
 npm run preview    # serve the production build -> http://localhost:4173
-npm run typecheck  # type-check only
 ```
+
+See [`QA.md`](./QA.md) for a manual playtest checklist and [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
+for how the code is organised.
 
 ---
 
 ## How to play
 
-After booking, you **create your inmate** (name, build, looks, jumpsuit and a backstory that biases
-your starting stats), then begin your randomly-rolled sentence. Survive each day, build a reputation,
-manage your needs, deal with the gangs, and earn your way out.
+You are the inmate with the **gold selection ring** (named **"You"**). The camera follows you.
 
-**Your sentence is not fixed** (Hard Time style): misbehaving in front of guards — fighting,
-contraband, assaulting officers, solitary trips — **adds days**, while clean days with low heat
-**cut your time**. You can also **grab loose objects** around the prison and **throw** them (`G`/🎯)
-as improvised weapons.
-
-**Life and death are permanent.** Inmates live out their daily routines (eating, training, working,
-sleeping) and rival crews start brawls of their own. Anyone — including you — can be **killed**:
-finish a downed inmate or land a heavy weapon blow and they're **gone for good**. Killing brings a
-manhunt, a murder penalty on your sentence, and the victim's faction out for revenge — your **body
-count** shapes how your story ends.
-
-### Desktop controls
-| Action | Key |
-| --- | --- |
-| Move | `WASD` / Arrow keys (camera-relative) |
-| Sprint | `Shift` (drains stamina) |
-| Interact / Use | `E` or `Space` |
-| Attack | `F` or **Left-click** |
-| Block | `R` or **Right-click** (hold) |
-| Shove | `Q` |
-| Throw weapon | `G` |
-| Grab object | `E` (near a loose object) |
-| Inventory | `I` or `Tab` |
-| Map | `M` |
-| Pause | `P` or `Esc` |
-| Zoom | `+` / `-` |
-| Dev panel | `` ` `` (backtick) |
-
-### Mobile controls
-- **Left virtual joystick** to move.
-- Big action buttons (bottom-right): 👊 Attack · 🛡️ Block · ✋ Interact · 🏃 Sprint · 💬 Talk · 🎒 Inventory.
-- HUD buttons (top-right) open Inventory, Stats, Factions, Relationships, Map, and Pause.
-- Best in **landscape** (a rotate hint appears in portrait). Page scrolling is disabled while playing.
+- **Move:** tap/click an empty floor tile — you path there (A*), with a destination marker.
+- **Inspect / interact with a person:** tap a prisoner or guard to open their panel, then choose a
+  social action (Talk / Trade / Favor / Insult / Threaten / Fight / Back Off; guards: Talk / Comply / Argue).
+- **Interact with an object:** tap a bed, sink, shower, toilet, table, counter, weights, pull-up bar,
+  shelf, trash can, desk, locker, **door** or **gate**. The panel shows that object's actions. You
+  walk to its interaction point, face it, and perform a short timed action.
+- **Camera:** one-finger drag (or mouse drag) to pan — auto-follow resumes after a moment. Pinch or
+  mouse-wheel to zoom.
+- **Bottom bar:** Pause · Speed (1×/2×/4×) · Save · Load.
 
 ### The loop
-- **Follow the daily schedule** (wake-up, roll call, meals, work, yard, gym, showers, lockdown, sleep).
-  Missing roll call/lockdown or loitering in **restricted** rooms raises your **Heat**.
-- **Interact** with stations: bunk (sleep to advance the day), weights/bag/track (train Strength/Combat/Agility),
-  books (Intelligence), serving counter (eat), showers/phone (mood), work stations (jobs for cash),
-  stash spots (hide contraband), medical bed (rest/heal).
-- **Talk** to inmates to trade, ask for work, recruit, threaten, bribe guards, ask for protection,
-  or **join one of five factions**.
-- **Fight** with punches, shoves, blocking, knockback, stamina and stats. Winning earns respect but
-  raises heat if guards see you. Getting knocked out sends you to **Medical** (or **Solitary** if your heat is high).
-- **Random events** fire throughout the day (yard fights, shakedowns, cell searches, ambushes, recruitment, an escape rumor…).
-- **Win paths:** serve your sentence and walk out, become the most respected inmate / **prison kingpin**,
-  or discover the **escape plan** (find a *file* + *keycard* and reach the maintenance stash during Lights Out).
+- A repeating **daily schedule** (Wake-Up → Breakfast → Work → Yard → Lunch → Free → Showers →
+  Dinner → Lockdown → Lights Out) moves the population between areas. **Doors and gates open and lock
+  by phase** (e.g. the yard gate locks at Lights Out; the cafeteria opens at meals).
+- **Needs** (hunger, sleep, hygiene, energy, anger, fear, health) drift over time. Use the matching
+  objects to satisfy them (bed = rest, sink/shower = wash, table/counter = eat, weights/pull-up = train).
+- **Suspicion** rises when you carry contraband, loiter in restricted areas, fight, or rattle locked
+  doors. When it's high a nearby guard walks over and **searches** you; serious contraband or fighting
+  gets you **escorted to solitary**.
+- **Gangs (v1):** six fictional gangs with turf, allies/enemies and accent colours. Members drift to
+  their turf in free time; rivals are more likely to brawl.
+- **Reputation / respect / relationships** shift from fights, threats, favours, jobs and getting
+  caught. NPCs track how they feel about you.
+- **Contraband / inventory (v1):** abstract items with trade value, risk, concealment and suspicion.
+  Trade with inmates, **hide** contraband in stash spots (beds/toilets/lockers/shelves/trash),
+  **search** spots, and **take** your stash back.
+- **Jobs (v1):** work at job objects (kitchen counter, mop spot, storage shelf, yard cleanup) for a
+  little money / respect / reputation.
+- **Save/Load:** manual from the bottom bar (`localStorage`).
 
-Saves are automatic at each day transition and manual from the Pause menu (`localStorage`).
-
-### Every run is procedurally generated
-Each new game rolls a **seed** (shown on the intake screen — copy it, or enter your own via the dev
-panel) that generates a different prison: a **world state** (gang war, crackdown, contraband boom,
-debt crisis…), randomized **gang leaders/territory/allegiances**, a unique **population** with
-behavior-changing traits and procedural names, a **dynamic contraband economy** with daily prices,
-**daily modifiers**, **rumors**, a reactive **event director**, and procedural **favors/missions**
-from the gangs. The day summary is a "prison diary" recapping the day and previewing tomorrow.
-
-**Testing the randomness:** start two new games and compare the seed/world state on the intake
-screen, the gang line-up, NPC names, and trade prices — they differ every run. Press `` ` `` to open
-the **dev panel** to reroll the prison, start with a specific seed, trigger events, advance the
-day/phase, or spawn a mission.
+Autonomous NPCs run the same systems: they follow the schedule to **real objects** (sleep in beds,
+eat at tables, wash in showers, train on equipment, work at job spots), reserve single-use objects,
+and route through doors. Guards patrol, man guard desks, respond to fights, search, and escort.
 
 ---
 
-## Factions
-| Faction | Color | Territory | Values |
+## Gangs (v1, fictional)
+
+| Gang | Accent | Turf | Notes |
 | --- | --- | --- | --- |
-| **Iron Dogs** | Red | Gym / Yard | Strength & fighting |
-| **Blue Kings** | Blue | Cafeteria / Phones | Reputation & deals |
-| **Black Vipers** | Green/Black | Storage / Maintenance / Showers | Intelligence & secrecy |
-| **Yard Saints** | White/Gold | Cell block / Medical | Loyalty & fairness |
-| **Lone Wolves** | Grey | — | Unpredictable |
+| **Iron Block** | Grey | Cell block / Yard | enemies: Redline Crew · allies: North Hall |
+| **Yard Kings** | Gold | Yard | enemies: Blue Chain |
+| **Blue Chain** | Blue | Showers / Cell block | enemies: Yard Kings · allies: Cell Rats |
+| **Redline Crew** | Red | Cafeteria / Yard | enemies: Iron Block |
+| **North Hall** | Green | Cell block | allies: Iron Block |
+| **Cell Rats** | Tan | Cafeteria / Cell block | allies: Blue Chain |
 
-Helping one faction can anger another; attacking members tanks your standing; high standing unlocks
-protection and the ability to join.
+Gangs are purely fictional game data. Joining gangs is **not** implemented yet (see Planned).
 
 ---
 
-## Project structure
+## Feature matrix
+
+**Implemented**
+- ECS-lite simulation (authoritative) + read-only render sync
+- Hand-authored isometric prison map (cell blocks, cafeteria, yard, showers, security, intake, storage, solitary, corridors)
+- Player prisoner with gold ring; camera follow
+- Tap/click-to-move (A* pathfinding) + destination marker
+- Daily schedule / phases
+- Autonomous prisoners + guards
+- Basic fights + nearest-guard response / break-up
+- Gangs v1 (turf / allies / enemies / colours)
+- Reputation, respect, suspicion, NPC relationships
+- Inventory + contraband v1 (trade / drop / hide / search / take)
+- Search → confiscation → discipline → solitary v1 (visible escort)
+- Jobs v1
+- Interactable props (beds, sinks, showers, toilets, tables, counters, weights, pull-ups, desks, shelves, trash, lockers)
+- Doors / gates as real pathfinding blockers + schedule-driven open/lock + schedule anchors for NPCs
+- Object reservations (NPC + player) with safety auto-release
+- World feedback: floating text + speech/icon bubbles, selection/highlight rings, action progress bar
+- Save / load v4 (`localStorage`)
+- Touch + mouse: tap, drag-pan, pinch/wheel-zoom
+
+**Partial**
+- Guard AI (patrol / respond / search / escort / man desks — but no formal checkpoint rotation)
+- NPC object use (light; schedule-anchor driven, no deep daily planning)
+- Door permissions (open/closed/locked/restricted/guard-pass; `broken/jammed` & finer roles are placeholders)
+- Jobs (small fixed rewards)
+- Contraband hiding/searching economy (no dynamic prices)
+- Mobile UI polish
+- Balance / tuning
+
+**Planned / Future**
+- Lockdowns, riots, escape attempts (Stage Chaos 3.0)
+- Deeper guard patrols / event director
+- Gang joining & faction storylines
+- Character creation
+- Real audio / SFX
+- More animation
+- Capacitor / iOS `.ipa` packaging
+- Performance profiling
+
+---
+
+## Project structure (active build)
 
 ```
 src/
-  main.ts                  # entry point + WebGL guard
-  style.css                # all overlay UI styling
-  game/
-    Game.ts                # orchestrator + main loop + game-state machine
-    GameState.ts           # central mutable state, stat clamping, relationship levels
-    CameraController.ts    # orthographic isometric camera (follow, zoom, shake)
-    Input.ts               # keyboard/mouse (camera-relative movement)
-    MobileControls.ts      # touch joystick + action buttons
-    SaveSystem.ts          # versioned localStorage save/load
-    types.ts               # shared type definitions
+  main.ts                 # entry point + WebGL guard + boot
+  style.css               # all HUD/overlay styling
+  core/
+    Game.ts               # orchestrator: loop, input wiring, selection, door visuals, HUD glue
+    EventBus.ts           # tiny string-keyed event bus (feedback/alerts)
+    InputManager.ts       # pointer/touch: tap, drag-pan, pinch/wheel-zoom
+    SaveManager.ts        # localStorage read/write
+    Random.ts             # seeded RNG
+  ecs/
+    world.ts              # ECS-lite entity/component store
+    components.ts         # plain-data components (Position, Render, Agent, Needs, Brain, Social, Inventory)
+  sim/
+    Simulation.ts         # AUTHORITATIVE world: schedule, needs, AI, combat, interactions, save/load
   world/
-    PrisonMap.ts           # floors, walls, props, doors, lights, decals, interactables
-    Collision.ts           # circle-vs-AABB collision world
-    Navigation.ts          # waypoint routing through the hallway for NPCs
-  entities/
-    CharacterFactory.ts    # procedural low-poly humanoid rig + animations
-    Player.ts              # player movement, stamina, animation
-    NPC.ts                 # NPC AI (schedule/wander/fight/flee), pathing
-  systems/
-    ScheduleSystem.ts  HeatSystem.ts   InventorySystem.ts  CombatSystem.ts
-    DialogueSystem.ts  EventSystem.ts  JobSystem.ts        TrainingSystem.ts
-    AudioSystem.ts     EffectsSystem.ts
+    TileMap.ts            # logical grid
+    Pathfinding.ts        # A* with per-entity (door-aware) passability
+    WorldGen.ts           # hand-authored prison floorplan -> tilemap + doors
+    Interactable.ts       # interactable-object model (types, actions, reservation/door state)
+  render/
+    ThreeApp.ts           # renderer/scene/lights
+    IsoCamera.ts          # orthographic iso follow camera + pan/zoom
+    WorldRenderer.ts      # walls + room floors
+    PropRenderer.ts       # room dressing + interactable hitboxes
+    CharacterFactory.ts   # procedural low-poly humanoids
+    RenderSync.ts         # reads sim, animates characters — NEVER writes to sim
+    Feedback.ts           # world-anchored floating text + speech bubbles (DOM)
+    VisualTheme.ts        # colours / lighting / camera constants
+    textures/             # procedural CanvasTextures
   ui/
-    HUD.ts  Menus.ts  InventoryUI.ts
+    HUD.ts                # DOM overlay HUD (topbar, alerts, panel, action bar, bottom bar)
   data/
-    factions.ts  npcs.ts  items.ts  events.ts  rooms.ts  schedule.ts
+    content.ts            # gangs, names, traits, schedule phases
+    items.ts              # abstract item/contraband data
+    jobs.ts               # job definitions
+  legacy/                 # ARCHIVED original prototype — excluded from the build (see below)
 ```
+
+### Active vs legacy code path
+- **Active:** everything under `src/` **except** `src/legacy/`. Entry is `src/main.ts → core/Game.ts`.
+- **Legacy:** `src/legacy/` is the original player-controller prototype, kept for reference only. It is
+  **excluded from `tsconfig.json`** and never imported by the active build. Don't treat anything in
+  `src/legacy/` as a current feature.
 
 ---
 
-## Building an IPA for sideloading (iOSGods / AltStore / Sideloadly / TrollStore)
+## Architecture in one paragraph
 
-This is a web game, so to get an **`.ipa`** you wrap the production web build in a native iOS
-shell using **Capacitor**. The resulting `.ipa` can then be installed via iOSGods' guides,
-AltStore, Sideloadly, or TrollStore.
-
-> ⚠️ Building an `.ipa` **requires macOS with Xcode** (Apple's toolchain only runs on macOS).
-> The repo already includes a ready `capacitor.config.ts`.
-
-### 1. Build the web bundle
-```bash
-npm install
-npm run build          # outputs dist/
-```
-
-### 2. Add Capacitor + the iOS platform (on a Mac)
-```bash
-npm install @capacitor/core @capacitor/cli @capacitor/ios
-npx cap add ios        # creates the ios/ Xcode project
-npx cap sync ios       # copies dist/ into the native app
-```
-
-### 3. Produce the `.ipa`
-
-**Xcode route**
-1. `npx cap open ios` to open the project in Xcode.
-2. Select a Generic iOS Device, set your Bundle Identifier (`com.lockdownlife.game`) and a Team.
-3. **Product → Archive**, then in the Organizer choose **Distribute App → Ad Hoc / Development**,
-   or **Export** to get an `.ipa`.
-
-**Command-line route**
-```bash
-cd ios/App
-xcodebuild -workspace App.xcworkspace -scheme App \
-  -configuration Release -archivePath build/App.xcarchive archive
-xcodebuild -exportArchive -archivePath build/App.xcarchive \
-  -exportPath build -exportOptionsPlist ExportOptions.plist
-# build/App.ipa is your sideloadable IPA
-```
-
-For an **unsigned** `.ipa` (common for re-signing through sideload tools): archive, then wrap the
-`.app` into a `Payload/` folder and zip it:
-```bash
-mkdir -p Payload && cp -r build/App.xcarchive/Products/Applications/App.app Payload/
-zip -r LockdownLife3D.ipa Payload
-```
-
-### 4. Sideload it
-- **iOSGods** — follow their per-tool guide and import the `.ipa`.
-- **Sideloadly / AltStore** — drag the `.ipa` in and sign with your Apple ID (7-day free cert) or a paid cert.
-- **TrollStore** (supported iOS versions) — import the `.ipa` to install permanently without re-signing.
-
-After any code change, re-run `npm run build && npx cap sync ios` and re-archive.
+`Simulation` is the single source of truth and runs the systems. `RenderSync` and `Feedback` **only
+read** sim state to draw the world (read-only rule). UI (`HUD`) dispatches player intents into the
+`Simulation`, which mutates state and emits feedback via the `EventBus`. Interactable objects (incl.
+doors/gates) are owned by the sim; door state feeds the pathfinding passability test. Save/load is a
+versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
 
 ---
 
 ## Known limitations
-- NPC pathfinding is lightweight waypoint routing (via the central hallway), not full navmesh A*.
-- Characters are stylized low-poly primitives with procedural animation — an intentional "tabletop diorama" look.
-- Audio is fully synthesized via WebAudio (no audio files); it unlocks after the first tap/click.
-- The escape thread is a single multi-step objective rather than a deep questline.
+- Single hand-authored prison (no procedural prison generation).
+- Guard/NPC AI is intentionally light; deeper planning is a future stage.
+- No audio, no character creation, no riots/escape/lockdown systems yet.
+- Balance is rough and subject to change.
+- The follow camera reframes the subject slightly left of centre so the right-side panel doesn't cover it.
 
-## Best next polish pass
-- A* navmesh + door-aware pathing so guards/inmates flow through doorways more naturally.
-- More dialogue branches per archetype and persistent faction storylines / leader missions.
-- Post-processing (SSAO, bloom, true outline pass) behind the existing "High" quality toggle.
-- Richer combat (heavy attacks, weapon-specific animations, grapples) and crowd AI during brawls.
+## Planned next (Stage Chaos 3.0)
+Lockdowns, riots, and escape attempts — built on the existing doors/gates, schedule, and AI systems.
 
 ---
+
+## Legacy (archived)
+`src/legacy/` contains the earlier "Hard Time–style" player-controller build (character creation,
+WASD/joystick controls, WebAudio SFX, factions, grab/throw, permadeath, dev panel, missions, escape,
+etc.). **None of those features are in the current ECS-lite build.** The history of that prototype is
+preserved at the bottom of [`CHANGELOG.md`](./CHANGELOG.md) under *Archived legacy history* for context.
 
 Built with Three.js + TypeScript + Vite. All art procedurally generated.

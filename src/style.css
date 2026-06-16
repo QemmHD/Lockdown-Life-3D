@@ -35,11 +35,11 @@ button { font-family: inherit; cursor: pointer; }
 .alert-fight { border-left-color: #e74c3c; } .alert-guard { border-left-color: #3498db; } .alert-phase { border-left-color: var(--accent); }
 .alert-lockdown { border-left-color: #d2281e; } .alert-search { border-left-color: #9b59b6; }
 
-#panel { position: absolute; right: 12px; top: 70px; width: 240px; background: var(--panel); border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; padding: 14px; }
+#panel { position: absolute; right: 12px; top: 70px; width: 240px; max-height: calc(100% - 160px); overflow-y: auto; -webkit-overflow-scrolling: touch; background: var(--panel); border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; padding: 14px; }
 #panel.hidden { display: none; }
-.panel-head { display: flex; justify-content: space-between; align-items: center; }
-.panel-head b { font-size: 18px; }
-.panel-head button { background: none; border: none; color: var(--ink); font-size: 18px; }
+.panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; }
+.panel-head b { font-size: 18px; line-height: 1.15; word-break: break-word; }
+.panel-head button { flex: 0 0 auto; background: none; border: none; color: var(--ink); font-size: 18px; line-height: 1; padding: 2px 6px; min-width: 30px; min-height: 30px; }
 .panel-sub { font-size: 12px; opacity: 0.8; margin: 2px 0 8px; }
 .panel-sub .state { color: var(--accent); text-transform: capitalize; }
 .panel-traits { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
@@ -56,7 +56,7 @@ button { font-family: inherit; cursor: pointer; }
 .inv-item:active { background: var(--accent); color: #000; }
 .inv-empty { font-size: 11px; opacity: 0.4; }
 .panel-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
-.act { flex: 1 1 auto; min-width: 64px; background: linear-gradient(180deg, #3a3f49, #1c1f26); color: var(--ink); border: 1px solid #4b515c; border-radius: 8px; padding: 8px 6px; font-size: 12px; font-weight: 600; }
+.act { flex: 1 1 auto; min-width: 64px; min-height: 40px; background: linear-gradient(180deg, #3a3f49, #1c1f26); color: var(--ink); border: 1px solid #4b515c; border-radius: 8px; padding: 8px 6px; font-size: 12px; font-weight: 600; }
 .act:active { background: linear-gradient(180deg, var(--accent), #b87a18); color: #1a1206; }
 .act.danger { border-color: #c0392b; } .act.danger:active { background: #c0392b; color: #fff; }
 .act.k-social { border-color: #3f7fa5; } .act.k-risky { border-color: #c97a2a; } .act.k-guard { border-color: #6f86b0; } .act.k-object { border-color: #5f8a5f; }

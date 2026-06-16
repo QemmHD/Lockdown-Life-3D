@@ -1,5 +1,39 @@
 # Changelog
 
+> **Current State (read me first).** The active game is the **rebuilt ECS-lite simulation** —
+> all `v2.x` entries below. Stack: **Vite + TypeScript + Three.js**, DOM/CSS HUD, `localStorage`
+> saves (v4), procedural low-poly geometry. Implemented: player prisoner, tap-to-move (A*),
+> follow camera, daily schedule, autonomous prisoners/guards, basic fights, gangs v1,
+> reputation/relationships, inventory/contraband v1, search/discipline/solitary v1, jobs v1,
+> interactable props, doors/gates with schedule-driven locking + NPC schedule anchors, object
+> reservations, and save/load v4. **Not yet built:** lockdowns, riots, escape, audio, character
+> creation, Capacitor/IPA. The `v1.x` entries are **archived legacy history** for the original
+> prototype that now lives under `src/legacy/` (excluded from the build) — those features are
+> **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
+
+## v2.4.0-qa — Stage QA 2.4 (audit, truth pass, hardening)
+Stabilization pass before the chaos systems — no new gameplay. Sim authoritative, RenderSync
+read-only, build passes, 0 runtime errors.
+- **README truth pass**: rewritten to describe the *actual* current ECS-lite game (Vite/TS/Three.js,
+  DOM HUD, localStorage, procedural geometry, tap controls). Removed claims that only existed in the
+  legacy prototype (character creation, WASD/joystick, WebAudio, grab/throw, permadeath, dev panel,
+  procedural prison/economy, missions, faction joining, win/escape paths). Added a feature matrix
+  (Implemented / Partial / Planned) and active-vs-legacy notes.
+- **Changelog**: added a "Current State" summary and clearly separated the rebuilt `v2.x` history from
+  the **archived legacy** `v1.x` history.
+- **Docs**: added `QA.md` (manual playtest checklist) and `docs/ARCHITECTURE.md` (active structure +
+  read-only rule + future refactor candidates: Door/Schedule/Interaction/GuardAI/PrisonerAI/SaveSerializer/Riot/Lockdown systems).
+- **Bug fix — HUD churn / flaky taps**: the panel was rebuilding its `innerHTML` (and action buttons)
+  every frame; now it only soft-updates volatile values when the structure is unchanged, so buttons
+  keep their handlers across frames (fixes dropped taps and wasted work).
+- **Save/load hardening**: `hydrate` now defends against old/foreign/corrupt saves — defaults for
+  numeric fields, clamped role/kind, string-filtered inventory/stash, invalid object ids ignored,
+  transient action/reservation state reset, and it bails out safely (keeping a fresh world) on bad data.
+- **Repo hygiene**: page title fixed (`Lockdown Life 3D`), removed an orphaned screenshot script,
+  broadened `.gitignore` for ad-hoc test artifacts, added a `check` script.
+- **Mobile/UI polish**: the info panel now caps its height and scrolls (never covers the bottom bar),
+  bigger close-button and action-button tap targets, long names wrap instead of clipping.
+
 ## v2.3.0-interaction — Stage Interaction 2.3 (real doors/gates, schedule anchors, NPC object use)
 Doors, gates, schedules, and NPC routines now connect into one physical world. Sim stays
 authoritative (RenderSync still read-only; door meshes are a read-only view of sim state),
@@ -192,6 +226,16 @@ hallway), 8 prisoners + 3 guards, daily schedule moving inmates between rooms, d
 movement, emergent fights with nearest-guard response/break-up, **tap-to-select** with a live stats
 panel + selection ring, save/load (localStorage), riot-risk meter, and a mobile action bar
 (pause / speed / save / load). Simulation is decoupled from rendering.
+
+---
+
+# Archived legacy history (pre-rebuild)
+
+> Everything below describes the **original player-controller prototype** (Hard Time–style:
+> character creation, WASD/joystick, WebAudio SFX, factions, grab/throw, permadeath, dev panel,
+> procedural missions/economy, escape paths…). That code is archived under `src/legacy/` and is
+> **excluded from the current build** — none of these `v1.x` features are guaranteed active in the
+> rebuilt ECS game above. Kept for historical context only.
 
 ## v1.7.0 — "Impact" (character models + game feel)
 - **Character models overhauled again**: smooth-shaded bodies with **shoulders, a tapered chest, a
