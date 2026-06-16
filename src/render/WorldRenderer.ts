@@ -82,20 +82,24 @@ export function buildPrison(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
   body.instanceMatrix.needsUpdate = true; cap.instanceMatrix.needsUpdate = true;
   root.add(body, cap);
 
-  // ---- doors: metal frame + bars, warning stripes + room sign ----
+  // ---- doors / gates: metal frame + bars, warning stripes + room sign ----
   const stripeTex = createWarningStripeTexture();
-  const SIGN: Record<string, string> = { cellblock: 'CELLS', cafeteria: 'CAFETERIA', shower: 'SHOWERS', guardroom: 'GUARD', yard: 'YARD' };
+  const signFor = (r: Room): string => ({
+    cellblock_a: 'BLOCK A', cellblock_b: 'BLOCK B', cafeteria: 'CAFETERIA', shower: 'SHOWERS',
+    showers: 'SHOWERS', guardroom: 'SECURITY', yard: 'YARD', intake: 'INTAKE', storage: 'STORAGE', solitary: 'SOLITARY'
+  } as Record<string, string>)[r.id] ?? ({ cellblock: 'CELLS', cafeteria: 'CAFETERIA', shower: 'SHOWERS', guardroom: 'SECURITY', yard: 'YARD' } as Record<string, string>)[r.type] ?? '';
   for (const r of rooms) {
     if (r.door == null) continue;
     const t = map.tileXY(r.door); const w = map.toWorld(t.x, t.y);
-    buildDoor(root, w.x, w.z, r.security >= 3);
-    if (r.security >= 3) {
-      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.2),
-        new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.9 }));
-      stripe.rotation.x = -Math.PI / 2; stripe.position.set(w.x, 0.05, w.z); root.add(stripe);
+    const restricted = r.security >= 3;
+    if (r.gate) buildGate(root, w.x, w.z);
+    else buildDoor(root, w.x, w.z, restricted);
+    if (restricted || r.gate) {
+      const stripe = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.3), new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.9 }));
+      stripe.rotation.x = -Math.PI / 2; stripe.position.set(w.x, 0.06, w.z); root.add(stripe);
     }
-    const label = SIGN[r.type];
-    if (label) { const s = makeSign(label, r.security >= 3); s.position.set(w.x, WALL_H + 0.42, w.z + (r.y < map.height / 2 ? 0.35 : -0.35)); s.rotation.y = Math.PI / 4; root.add(s); }
+    const label = signFor(r);
+    if (label) { const s = makeSign(label, restricted); s.position.set(w.x, WALL_H + 0.5, w.z + (r.y < map.height / 2 ? 0.4 : -0.4)); s.rotation.y = Math.PI / 4; root.add(s); }
   }
 
   scene.add(root);
@@ -112,6 +116,17 @@ function makeSign(text: string, restricted: boolean): THREE.Mesh {
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   const m = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.42), new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.35, side: THREE.DoubleSide }));
   return m;
+}
+
+// wide sliding-style security gate (yard transition)
+function buildGate(root: THREE.Group, x: number, z: number) {
+  const frameMat = new THREE.MeshStandardMaterial({ color: THEME.walls.frame, roughness: 0.7, metalness: 0.35 });
+  const barMat = new THREE.MeshStandardMaterial({ color: THEME.walls.bars, roughness: 0.5, metalness: 0.6 });
+  const g = new THREE.Group(); g.position.set(x, 0, z);
+  for (const px of [-1.05, 1.05]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.24, WALL_H + 0.3, 0.36), frameMat); post.position.set(px, (WALL_H + 0.3) / 2, 0); post.castShadow = true; g.add(post); }
+  const top = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.26, 0.36), frameMat); top.position.set(0, WALL_H + 0.15, 0); g.add(top);
+  for (let i = -4; i <= 4; i++) { const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, WALL_H, 6), barMat); bar.position.set(i * 0.22, WALL_H / 2, 0); g.add(bar); }
+  root.add(g);
 }
 
 function buildDoor(root: THREE.Group, x: number, z: number, restricted: boolean) {

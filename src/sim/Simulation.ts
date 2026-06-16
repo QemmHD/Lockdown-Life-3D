@@ -27,18 +27,19 @@ export class Simulation {
     const layout = generatePrison();
     this.map = layout.map;
     this.rooms = layout.rooms;
-    for (let i = 0; i < 8; i++) this.spawnPrisoner();
-    for (let i = 0; i < 3; i++) this.spawnGuard(i);
+    for (let i = 0; i < 12; i++) this.spawnPrisoner();
+    for (let i = 0; i < 4; i++) this.spawnGuard(i);
   }
 
   // ---------- spawning ----------
-  private spawnAt(roomId: string) {
-    const k = randomTileInRoom(this.map, this.rooms, roomId, () => this.rng.float());
+  private spawnAtType(type: string) {
+    const r = this.pickRoomOfType(type);
+    const k = randomTileInRoom(this.map, this.rooms, r.id, () => this.rng.float());
     const t = this.map.tileXY(k); return this.map.toWorld(t.x, t.y);
   }
   spawnPrisoner(): Entity {
     const e = this.ecs.create();
-    const w = this.spawnAt('cellblock');
+    const w = this.spawnAtType('cellblock');
     const gang = this.rng.chance(0.7) ? this.rng.pick(GANGS).id : undefined;
     const color = gang ? GANGS.find((g) => g.id === gang)!.color : 0xc98a3a;
     const traits = [this.rng.pick(PRISONER_TRAITS)];
@@ -58,7 +59,7 @@ export class Simulation {
   }
   spawnGuard(i: number): Entity {
     const e = this.ecs.create();
-    const w = this.spawnAt('guardroom');
+    const w = this.spawnAtType('guardroom');
     this.ecs.set<Position>(e, 'Position', { x: w.x, z: w.z, facing: 0 });
     this.ecs.set<Render>(e, 'Render', { kind: 'guard', color: 0x2c3e50, meshId: e });
     this.ecs.set<Agent>(e, 'Agent', { speed: 2.4, path: null, step: 0, repathCd: 0 });
@@ -77,11 +78,23 @@ export class Simulation {
     const ri = this.map.room[k];
     return ri >= 0 ? this.rooms[ri].id : '';
   }
-  private gotoRoom(e: Entity, roomId: string) {
+  roomTypeAt(p: Position): string {
+    const k = this.map.worldToIdx(p.x, p.z);
+    if (k < 0) return '';
+    const ri = this.map.room[k];
+    return ri >= 0 ? this.rooms[ri].type : '';
+  }
+  private pickRoomOfType(type: string) {
+    const list = this.rooms.filter((r) => r.type === type);
+    return list.length ? this.rng.pick(list) : this.rooms[0];
+  }
+  // routes by room TYPE — supports multiple rooms of a type (e.g. two cell blocks)
+  private gotoRoom(e: Entity, type: string) {
     const p = this.ecs.get<Position>(e, 'Position')!;
     const ag = this.ecs.get<Agent>(e, 'Agent')!;
+    const r = this.pickRoomOfType(type);
     const start = this.map.worldToIdx(p.x, p.z);
-    const goal = randomTileInRoom(this.map, this.rooms, roomId, () => this.rng.float());
+    const goal = randomTileInRoom(this.map, this.rooms, r.id, () => this.rng.float());
     const path = start >= 0 ? findPath(this.map, start, goal) : null;
     ag.path = path && path.length ? path : null; ag.step = 0;
   }
@@ -121,8 +134,8 @@ export class Simulation {
       n.sleep = clamp01(n.sleep + dt * 0.008);
       n.hygiene = clamp01(n.hygiene + dt * 0.006);
       n.anger = clamp01(n.anger + (n.hunger > 0.7 ? dt * 0.01 : -dt * 0.004));
-      // being in the scheduled room satisfies the matching need
-      const room = this.roomIdAt(this.ecs.get<Position>(e, 'Position')!);
+      // being in the scheduled room type satisfies the matching need
+      const room = this.roomTypeAt(this.ecs.get<Position>(e, 'Position')!);
       if (room === 'cafeteria') n.hunger = clamp01(n.hunger - dt * 0.08);
       if (room === 'shower') n.hygiene = clamp01(n.hygiene - dt * 0.08);
       if (room === 'cellblock' && (this.phaseId === 'sleep' || this.phaseId === 'lockdown')) n.sleep = clamp01(n.sleep - dt * 0.06);
@@ -138,7 +151,7 @@ export class Simulation {
       ag.repathCd -= dt;
       if (!ag.path) {
         const p = this.ecs.get<Position>(e, 'Position')!;
-        const here = this.roomIdAt(p);
+        const here = this.roomTypeAt(p);
         if (here !== b.targetRoom && ag.repathCd <= 0) { this.gotoRoom(e, b.targetRoom); ag.repathCd = 1.2; b.state = 'goto'; }
         else {
           b.state = 'wander'; b.timer -= dt;

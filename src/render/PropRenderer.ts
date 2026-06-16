@@ -39,6 +39,10 @@ function chair() { const g = new THREE.Group(); g.add(box(0.45, 0.1, 0.45, M.bla
 function vent() { return box(0.7, 0.4, 0.08, M.darkMetal, 0, 0, 0); }
 function securityLight() { return box(0.18, 0.18, 0.18, new THREE.MeshStandardMaterial({ color: 0x300, emissive: 0xff3322, emissiveIntensity: 1.6 }), 0, 0, 0); }
 function fencePost() { return cyl(0.07, 2.6, M.metal, 0, 1.3, 0); }
+function barPartition() { const g = new THREE.Group(); for (let i = -2; i <= 2; i++) g.add(cyl(0.04, 1.8, M.darkMetal, i * 0.28, 0.9, 0)); g.add(box(1.4, 0.08, 0.08, M.darkMetal, 0, 1.8, 0)); return g; }
+function cot() { const g = new THREE.Group(); g.add(box(0.9, 0.22, 1.8, M.darkMetal, 0, 0.16, 0)); g.add(box(0.82, 0.12, 1.7, M.mattress, 0, 0.32, 0)); return g; }
+function shelf() { const g = new THREE.Group(); g.add(box(1.6, 1.6, 0.5, M.metal, 0, 0.8, 0)); for (let i = 0; i < 3; i++) g.add(box(1.5, 0.05, 0.46, M.darkMetal, 0, 0.4 + i * 0.5, 0)); for (let i = 0; i < 4; i++) g.add(box(0.4, 0.3, 0.4, M.wood, -0.5 + (i % 2), 0.55 + Math.floor(i / 2) * 0.5, 0)); return g; }
+function scanner() { const g = new THREE.Group(); for (const x of [-0.6, 0.6]) g.add(box(0.18, 2.0, 0.4, M.steel, x, 1.0, 0)); g.add(box(1.4, 0.2, 0.4, M.steel, 0, 2.0, 0)); g.add(box(1.2, 0.05, 0.4, new THREE.MeshStandardMaterial({ color: 0x113, emissive: 0x2255aa, emissiveIntensity: 0.8 }), 0, 1.9, 0)); return g; }
 function trash() { const g = new THREE.Group(); g.add(cyl(0.32, 0.8, M.darkMetal, 0, 0.4, 0)); return g; }
 function bench() { return box(2.0, 0.18, 0.5, M.wood, 0, 0.42, 0); }
 function weights() { const g = new THREE.Group(); g.add(box(1.6, 0.2, 0.6, M.rubber, 0, 0.4, 0)); g.add(cyl(0.05, 2.0, M.steel, 0, 1.1, -0.5)); for (const x of [-0.85, 0.85]) g.add(cyl(0.35, 0.16, M.black, x, 1.1, -0.5)); return g; }
@@ -64,14 +68,36 @@ export function dressRooms(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
 
     switch (r.type) {
       case 'cellblock': {
-        const cols = Math.min(5, Math.floor(r.w / 3));
+        // a wing of repeated cells along both walls, separated by bars (reads as a cell block)
+        const cols = Math.max(3, Math.floor((r.w - 2) / 3.2));
         for (let i = 0; i < cols; i++) {
-          const x = minX + 2 + i * 3;
-          place(bed(), x, minZ + 1.6);
-          place(toilet(), x + 1.0, minZ + 3.4, Math.PI);
-          place(sink(), x - 0.2, minZ + 3.6, Math.PI);
-          place(locker(), x - 1.1, minZ + 3.4);
+          const x = minX + 2 + i * 3.2;
+          // top row cell
+          place(bed(), x, minZ + 1.5);
+          place(toilet(), x + 1.1, minZ + 1.2, Math.PI);
+          place(sink(), x + 1.1, minZ + 2.2, Math.PI);
+          if (i > 0) place(barPartition(), x - 1.6, minZ + 1.6, Math.PI / 2);
+          // bottom row cell
+          place(bed(), x, maxZ - 1.5, Math.PI);
+          place(toilet(), x + 1.1, maxZ - 1.2);
+          place(locker(), x - 1.1, maxZ - 1.4);
+          if (i > 0) place(barPartition(), x - 1.6, maxZ - 1.6, Math.PI / 2);
         }
+        break;
+      }
+      case 'intake': {
+        place(scanner(), cx, minZ + 1.6);
+        place(desk(), cx, maxZ - 1.4, Math.PI);
+        break;
+      }
+      case 'storage': {
+        place(shelf(), minX + 1.2, cz, Math.PI / 2);
+        place(shelf(), maxX - 1.2, cz, -Math.PI / 2);
+        break;
+      }
+      case 'solitary': {
+        const cells = Math.max(2, Math.floor(r.h / 3));
+        for (let i = 0; i < cells; i++) { place(cot(), cx, minZ + 1.5 + i * 2.6); place(barPartition(), cx, minZ + 0.4 + i * 2.6, 0); }
         break;
       }
       case 'cafeteria': {

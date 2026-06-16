@@ -1,5 +1,24 @@
 # Changelog
 
+## v2.0.0-layout.1 — Stage Layout 1.0 (real prison complex)
+Reworked the floorplan from one hallway-with-themed-rooms into a believable prison complex
+(sim/visuals preserved, RenderSync read-only, build passes, 0 runtime errors).
+- Bigger 60x44 tile grid with a proper circulation network: a central **spine** + **upper/lower
+  cross-corridors** that form junctions, instead of a single strip-mall hallway.
+- Distinct connected zones: **Cell Block A** + **Cell Block B** (two housing wings), **Cafeteria**,
+  separated **Shower** block, a gated outdoor **Yard**, plus a restricted cluster of **Security**,
+  **Intake**, **Storage**, and **Solitary**. Each hangs off a corridor via a 1-tile wall + controlled door.
+- Controlled transitions: barred metal doors, a wide **security gate** to the yard, hazard stripes at
+  restricted thresholds, and room **signs** (BLOCK A/B, CAFETERIA, SHOWERS, SECURITY, YARD, INTAKE,
+  STORAGE, SOLITARY).
+- Sim now routes by **room type** (so two cell blocks work): schedules, spawns, guard patrols, and
+  needs all resolve a room of the right type; pathfinding verified across every zone.
+- Population bumped to 12 prisoners + 4 guards to fill the larger complex.
+- Room dressing updated for new zones: cell wings show repeated barred cells (beds/toilets/sinks),
+  intake gets a scanner + desk, storage gets shelving, solitary gets cots behind bars; yard/cafeteria/
+  showers scale to the new bounds.
+- Camera default widened so the whole complex frames cleanly; pan/zoom unchanged.
+
 ## v2.0.0-sim.3 — Stage Visual 1.1 (readability & polish)
 - Brighter, balanced lighting: stronger ambient/key/hemisphere + exposure; large rooms now get a
   grid of point lights so cafeteria/yard/hallway/guard room stay readable while keeping the mood.

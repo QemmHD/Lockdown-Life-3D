@@ -1,6 +1,6 @@
 // Single source of truth for art direction. No magic colors scattered elsewhere.
 export const THEME = {
-  camera: { zoom: 12.5, min: 7, max: 28, offset: { x: 22, y: 28, z: 22 } },
+  camera: { zoom: 18, min: 7, max: 40, offset: { x: 22, y: 28, z: 22 } },
 
   bg: 0x14171e,
   fog: { color: 0x14171e, near: 70, far: 170 },
