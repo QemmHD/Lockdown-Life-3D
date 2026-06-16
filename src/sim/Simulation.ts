@@ -19,7 +19,8 @@ import { AIMemory, newMemory, decayMemory, rememberFoe, rememberThreat, remember
 import { clusterOffset } from './GroupBehaviorSystem';
 import { routeFor } from './GuardAISystem';
 import { AttackType, CombatOutcome, ATTACKS, COMBAT_SPACING, SQUARE_UP, HITREACT, STUMBLE, DOWN_TIME, RECOVER, chooseAttack, resolveDefense, OUTCOME_TEXT } from './CombatSystem';
-import { Progression, Objective, newProgression, sanitizeProgression, repTier, rollObjectives, DailyStats, newDaily, dayRating } from './Progression';
+import { Progression, Objective, newProgression, sanitizeProgression, repTier, rollObjectives, objectivesByIds, DailyStats, newDaily, dayRating } from './Progression';
+import { NewGameSetup, sanitizeSetup, defaultSetup, randomSetup, traitSimTokens, backstoryDef, diffDef } from './NewGameSetup';
 
 const SECONDS_PER_HOUR = 5;
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
@@ -97,13 +98,31 @@ export class Simulation {
   daily: DailyStats = newDaily(0, 8, 0);
   lastSummaryDay = 0;
   pendingSummary: any = null;          // built at a day rollover; the UI shows + clears it
+  setup: NewGameSetup = defaultSetup();
+  diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1 };
 
   // lightweight playtest telemetry (?debug)
-  metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0 };
+  metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0, newGameStarted: 0, setupRandomized: 0, setupCompleted: 0 };
 
   constructor(public bus: EventBus, seed = Math.floor(Math.random() * 1e9)) { this.rng = new Random(seed); }
 
+  reseed(seed: number) { if (typeof seed === 'number' && seed > 0) this.rng = new Random(seed); }
+  // start a fresh run with a created character setup (re-runs generate + re-applies interactables)
+  startNewRun(setup: NewGameSetup, defs: InteractableDef[]) {
+    this.reseed(setup.seed);
+    this.generate();
+    this.setInteractables(defs);
+    this.applySetup(setup);
+  }
+
   generate() {
+    // reset all run state so generate() is safely re-runnable for a new run
+    this.ecs = new ECS();
+    this.day = 1; this.hour = 6; this.phaseId = 'wake'; this.act = null;
+    this.lockdown = newLockdown(); this.alarm = { active: false, timer: 0, reason: '' };
+    this.heat = 0; this.riotPressure = 0; this.riotLevel = 'calm'; this.riotEventTimer = 0; this.escape = newEscape();
+    this.tension = {}; this.progression = newProgression(); this.objectives = []; this.pendingSummary = null; this.lastSummaryDay = 0;
+    this.fightCd = 6; this.suspTimer = 0; this.diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1 };
     const layout = generatePrison();
     this.map = layout.map;
     this.rooms = layout.rooms;
@@ -119,6 +138,42 @@ export class Simulation {
     for (const r of this.rooms) this.tension[r.id] = 0;
     this.daily = newDaily(ps.reputation, ps.respect, this.inv(this.playerId)!.money);
     this.objectives = rollObjectives(() => this.rng.float(), this.day);
+  }
+
+  // apply a created character setup to the player entity + run state (Stage 3.5)
+  applySetup(setup: NewGameSetup) {
+    this.setup = sanitizeSetup(setup);
+    const s = this.setup;
+    const pl = this.playerId; const pb = this.brain(pl)!; const ps = this.social(pl)!; const inv = this.inv(pl)!;
+    const ag = this.ecs.get<Agent>(pl, 'Agent')!; const rnd = this.ecs.get<Render>(pl, 'Render')!;
+    const back = backstoryDef(s.backstory); const dd = diffDef(s.difficulty);
+    // identity + appearance
+    pb.name = (s.nickname || s.name).slice(0, 16);
+    rnd.appearance = { ...s.appearance }; rnd.color = s.appearance.accent;
+    // traits (chosen + backstory trait + weakness) → sim tokens existing systems read
+    const traitIds = [...s.traits]; if (back.trait && !traitIds.includes(back.trait)) traitIds.push(back.trait);
+    pb.traits = traitSimTokens([...traitIds, s.weakness]);
+    ag.speed = pb.traits.includes('fast') ? 2.6 : pb.traits.includes('slow') ? 1.7 : 2.2;
+    // standing + needs + money/items
+    ps.reputation = clamp(back.rep, -100, 100); ps.respect = clamp(8 + back.respect, 0, 100); ps.suspicion = clamp(Math.max(0, back.suspicion), 0, 100);
+    if (pb.traits.includes('quiet')) ps.suspicion = Math.max(0, ps.suspicion - 3);
+    inv.money = Math.max(0, Math.round(back.money * dd.moneyMul));
+    inv.items = back.item ? [back.item] : [];
+    // difficulty + chaos intensity
+    this.diff = { heatMul: dd.heatMul, searchAt: dd.searchAt, riotMul: dd.riotMul, rewardMul: dd.rewardMul, decayMul: dd.decayMul };
+    if (s.chaosIntensity === 'low') this.diff.riotMul *= 0.8; else if (s.chaosIntensity === 'high') this.diff.riotMul *= 1.25;
+    // gang lean (standing only — joining is planned): warm to chosen gang, cool to its rivals
+    let lean = s.gangLean;
+    if (back.gangBias === 'auto' && lean === 'none') lean = this.rng.pick(GANGS).id;
+    if (lean && lean !== 'none' && GANG_MAP[lean]) {
+      for (const e of this.ecs.query('Brain', 'Social')) { const b = this.brain(e)!; if (b.isPlayer || b.role !== 'prisoner') continue; const sc = this.social(e)!; if (b.gang === lean) sc.rel = clamp(sc.rel + 25, -100, 100); else if (areEnemies(b.gang, lean)) sc.rel = clamp(sc.rel - 22, -100, 100); }
+    }
+    if (pb.traits.includes('hated')) for (const e of this.ecs.query('Brain', 'Social')) { if (e === pl) continue; const sc = this.social(e); if (sc) sc.rel = clamp(sc.rel - 12, -100, 100); }
+    // first objectives from the backstory + a fresh daily
+    this.objectives = objectivesByIds(back.objectives);
+    this.daily = newDaily(ps.reputation, ps.respect, inv.money);
+    this.metrics.newGameStarted = (this.metrics.newGameStarted || 0) + 1;
+    this.metrics.setupCompleted = (this.metrics.setupCompleted || 0) + 1;
   }
 
   player(): Entity { return this.playerId; }
@@ -285,7 +340,7 @@ export class Simulation {
     if (this.alarm.active) { this.alarm.timer -= dt; if (this.alarm.timer <= 0) { this.alarm.active = false; this.alarm.reason = ''; this.bus.emit('alert', { type: 'guard', text: 'Alarm cleared.' }); } }
 
     // riot pressure eases toward a target computed from prisoner mood + incidents (smooth, no jumps)
-    const target = computeRiotTarget(this.riotInputs());
+    const target = clamp01(computeRiotTarget(this.riotInputs()) * this.diff.riotMul);
     this.riotPressure += (target - this.riotPressure) * Math.min(1, dt * 0.1);
     this.riotPressure = clamp01(this.riotPressure);
     const lvl = riotLevelHyst(this.riotPressure, this.riotLevel);  // hysteresis avoids flicker
@@ -298,7 +353,7 @@ export class Simulation {
   }
 
   // raise facility heat by a discrete amount (eased decay handled in chaosSystem)
-  private addHeat(amount: number) { this.heat = clamp(this.heat + amount, 0, 100); this.heatEventTimer = 6; }
+  private addHeat(amount: number) { this.heat = clamp(this.heat + amount * this.diff.heatMul, 0, 100); this.heatEventTimer = 6; }
 
   private riotInputs() {
     let anger = 0, hunger = 0, hygiene = 0, sleep = 0, n = 0;
@@ -552,7 +607,7 @@ export class Simulation {
     const ps = this.social(this.playerId); const pinv = this.inv(this.playerId);
     if (ps && o.reward.rep) ps.reputation = clamp(ps.reputation + o.reward.rep, -100, 100);
     if (ps && o.reward.respect) ps.respect = clamp(ps.respect + o.reward.respect, 0, 100);
-    if (pinv && o.reward.money) { pinv.money += o.reward.money; this.progression.moneyEarned += o.reward.money; }
+    if (pinv && o.reward.money) { const m = Math.max(1, Math.round(o.reward.money * this.diff.rewardMul)); pinv.money += m; this.progression.moneyEarned += m; }
     this.bus.emit('alert', { type: 'player', text: `✓ Objective: ${o.text}` });
   }
   // central progression hook (counters + objectives + daily stats). Called at event sites.
@@ -609,7 +664,9 @@ export class Simulation {
       health: n.health, hunger: n.hunger, energy: n.energy, hygiene: n.hygiene, anger: n.anger, fear: n.fear,
       money: inv.money, suspicion: Math.round(ps.suspicion), respect: Math.round(ps.respect), reputation: Math.round(ps.reputation),
       discipline: pb.discipline ?? 'none', solitaryTimer: pb.state === 'solitary' ? Math.ceil(pb.discTimer ?? 0) : 0,
-      gang: pb.gang ? GANG_MAP[pb.gang].name : 'Unaffiliated', tier: tier.name, heat: Math.round(this.heat)
+      gang: pb.gang ? GANG_MAP[pb.gang].name : 'Unaffiliated', tier: tier.name, heat: Math.round(this.heat),
+      backstory: backstoryDef(this.setup.backstory).name, difficulty: diffDef(this.setup.difficulty).name,
+      traits: pb.traits.slice(0, 4), gangLean: this.setup.gangLean === 'none' ? 'Unaffiliated' : (GANG_MAP[this.setup.gangLean]?.name ?? this.setup.gangLean)
     };
     const memHint = (b: Brain) => b.mem ? (b.mem.foe === pl ? 'fought you' : b.mem.threat === pl ? 'you threatened them' : b.mem.searchedT > 0 ? 'just searched' : '') : '';
     const relationships = this.ecs.query('Brain', 'Social').filter((e) => e !== pl && this.brain(e)!.role === 'prisoner').map((e) => {
@@ -632,9 +689,10 @@ export class Simulation {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
       if (b.role !== 'prisoner') continue;
       const n = this.ecs.get<Needs>(e, 'Needs')!;
-      n.hunger = clamp01(n.hunger + dt * 0.012);
-      n.sleep = clamp01(n.sleep + dt * 0.008);
-      n.hygiene = clamp01(n.hygiene + dt * 0.006);
+      const dm = b.isPlayer ? this.diff.decayMul : 1;   // difficulty only speeds the player's needs
+      n.hunger = clamp01(n.hunger + dt * 0.012 * dm);
+      n.sleep = clamp01(n.sleep + dt * 0.008 * dm);
+      n.hygiene = clamp01(n.hygiene + dt * 0.006 * dm);
       n.anger = clamp01(n.anger + (n.hunger > 0.7 ? dt * 0.01 : -dt * 0.004));
       // being in the scheduled room type satisfies the matching need
       const room = this.roomTypeAt(this.ecs.get<Position>(e, 'Position')!);
@@ -1364,7 +1422,7 @@ export class Simulation {
       }
       case 'calm': {
         const rid = this.roomIdAt(this.pos(pl)!);
-        const power = 6 + ps.respect * 0.2 + ps.reputation * 0.05;
+        const power = (6 + ps.respect * 0.2 + ps.reputation * 0.05) * (this.playerHas('talker') || this.playerHas('calm') ? 1.4 : 1);
         if (rid) this.tension[rid] = Math.max(0, (this.tension[rid] ?? 0) - power);
         this.riotPressure = clamp01(this.riotPressure - 0.03);
         this.bubble(pl, 'Easy, everyone.', 'talk', 1.2); return 'You try to calm the area down.';
@@ -1593,11 +1651,13 @@ export class Simulation {
     if (RESTRICTED.includes(room)) rise += dt * 6;
     if (this.hasContraband(pl)) rise += dt * 1.2;
     if (pb.state === 'fight') rise += dt * 8;
+    if (this.playerHas('magnet')) rise *= 1.3;      // trait: draws guard attention
+    if (this.playerHas('quiet')) rise *= 0.85;
     ps.suspicion = clamp(ps.suspicion + rise - dt * 0.6, 0, 100);
 
     // a nearby guard moves in to search a suspicious player (visible)
     this.suspTimer -= dt;
-    if (this.suspTimer <= 0 && ps.suspicion > 45 && pb.state !== 'beingSearched' && pb.state !== 'fight') {
+    if (this.suspTimer <= 0 && ps.suspicion > this.diff.searchAt + (this.playerHas('watchful') ? 12 : 0) && pb.state !== 'beingSearched' && pb.state !== 'fight') {
       this.suspTimer = 6;
       const guard = this.nearestGuard(pl, 9);
       if (guard != null) this.beginSearch(guard, pl);
@@ -1736,7 +1796,7 @@ export class Simulation {
       }
       case 'favor': {
         // higher standing tiers make inmates more willing to help
-        const ok = (ts ? ts.rel : 0) > 10 || this.rng.chance(0.4 + ps.reputation * 0.003 + this.tier().index * 0.05);
+        const ok = (ts ? ts.rel : 0) > 10 || this.rng.chance(0.4 + ps.reputation * 0.003 + this.tier().index * 0.05 + (this.playerHas('talker') ? 0.12 : 0) + (this.playerHas('clever') ? 0.06 : 0));
         if (ok) { const pinv = this.inv(pl)!; if (this.rng.chance(0.5)) pinv.items.push(this.rng.pick(ITEM_IDS)); else { const m = this.rng.int(2, 6); pinv.money += m; this.prog('earn', m); } if (ts) ts.rel = clamp(ts.rel + 4, -100, 100); this.prog('relUp'); return `${tb.name} does you a favor.`; }
         return `${tb.name} refuses.`;
       }
@@ -1809,11 +1869,14 @@ export class Simulation {
       default: return '';
     }
   }
+  private playerHas(token: string) { return !!this.brain(this.playerId)?.traits.includes(token); }
   private doJob(roomType: string): string {
-    const job = JOB_BY_ROOM[roomType]; if (!job) return 'No work here.';
+    let job = JOB_BY_ROOM[roomType]; if (!job) return 'No work here.';
     const pl = this.playerId; const n = this.ecs.get<Needs>(pl, 'Needs')!; if (n.energy < job.energyCost) return 'Too tired to work.';
     n.energy = clamp01(n.energy - job.energyCost);
-    const s = this.social(pl)!; s.reputation = clamp(s.reputation + job.rep, -100, 100); s.respect = clamp(s.respect + job.respect, 0, 100);
+    const mul = this.playerHas('worker') ? 1.5 : this.playerHas('lazy') ? 0.6 : 1;   // trait: job payout
+    const s = this.social(pl)!; s.reputation = clamp(s.reputation + job.rep, -100, 100); s.respect = clamp(s.respect + Math.round(job.respect * mul), 0, 100);
+    job = { ...job, money: Math.max(1, Math.round(job.money * mul)) };
     this.inv(pl)!.money += job.money;
     this.brain(pl)!.action = job.name;
     this.prog('job'); this.prog('earn', job.money); if (job.respect > 0) this.prog('respect', job.respect);
@@ -1865,6 +1928,8 @@ export class Simulation {
       objectivesOk: this.objectives.length > 0,
       tierOk: typeof this.tier().name === 'string',
       snapshotOk: (() => { try { const s = this.uiSnapshot(); return !!s.stats && Array.isArray(s.objectives) && Array.isArray(s.relationships); } catch { return false; } })(),
+      setupOk: (() => { try { const rs = randomSetup(() => Math.random()); return !!rs.name && rs.traits.length === 2 && typeof rs.weakness === 'string'; } catch { return false; } })(),
+      nameInSnapshot: this.uiSnapshot().stats.name === this.brain(this.playerId)?.name,
       metrics: this.metrics
     };
   }
@@ -1892,8 +1957,8 @@ export class Simulation {
       riotPressure: this.riotPressure,
       tension: this.tension
     };
-    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay };
-    return { version: 8, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
+    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup };
+    return { version: 9, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -1910,7 +1975,7 @@ export class Simulation {
       if (!r || !r.pos || !r.brain || !r.render) continue;   // skip malformed records
       const e = this.ecs.create();
       this.ecs.set<Position>(e, 'Position', { x: num(r.pos.x, 0), z: num(r.pos.z, 0), facing: num(r.pos.facing, 0) });
-      this.ecs.set<Render>(e, 'Render', { kind: r.render.kind === 'guard' ? 'guard' : 'prisoner', color: num(r.render.color, 0xc98a3a), meshId: e });
+      this.ecs.set<Render>(e, 'Render', { kind: r.render.kind === 'guard' ? 'guard' : 'prisoner', color: num(r.render.color, 0xc98a3a), meshId: e, appearance: (r.render.appearance && typeof r.render.appearance === 'object') ? r.render.appearance : undefined });
       this.ecs.set<Agent>(e, 'Agent', { speed: num(r.agent?.speed, 2), path: null, step: 0, repathCd: 0 });
       this.ecs.set<Needs>(e, 'Needs', r.needs ?? { hunger: 0, sleep: 0, hygiene: 0, energy: 1, anger: 0, fear: 0, health: 1 });
       this.ecs.set<Brain>(e, 'Brain', { ...r.brain, role: r.brain.role === 'guard' ? 'guard' : 'prisoner', traits: Array.isArray(r.brain.traits) ? r.brain.traits : [], targetRoom: r.brain.targetRoom ?? 'cellblock', attackCd: 0, timer: 0, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle', intent: 'schedule', intentCd: 0, checkpoint: undefined, dwell: 0, roleCd: 0, bubbleCd: 0, guardRole: r.brain.role === 'guard' ? 'patrol' : undefined, mem: r.brain.role === 'guard' ? undefined : sanitizeMemory(r.brain.mem), cphase: undefined, cTimer: 0, cResult: undefined, blockT: 0, pendingAtk: undefined, lastAttacker: undefined });
@@ -1945,6 +2010,11 @@ export class Simulation {
     this.daily = (data.daily && typeof data.daily === 'object') ? data.daily : newDaily(ps2?.reputation ?? 0, ps2?.respect ?? 8, pinv2?.money ?? 0);
     this.lastSummaryDay = typeof data.lastSummaryDay === 'number' ? data.lastSummaryDay : 0;
     this.pendingSummary = null;
+    // character setup + derived difficulty (old saves get a sensible default)
+    this.setup = sanitizeSetup(data.setup);
+    const dd = diffDef(this.setup.difficulty);
+    this.diff = { heatMul: dd.heatMul, searchAt: dd.searchAt, riotMul: dd.riotMul, rewardMul: dd.rewardMul, decayMul: dd.decayMul };
+    if (this.setup.chaosIntensity === 'low') this.diff.riotMul *= 0.8; else if (this.setup.chaosIntensity === 'high') this.diff.riotMul *= 1.25;
 
     // reset object reservations, derive door states for the loaded phase (respects restored lockdown), then restore saved overrides
     for (const o of this.objs.values()) { o.reservedBy = 0; o.reservedUntil = 0; o.stash = []; o.open = !o.restricted; o.locked = false; }

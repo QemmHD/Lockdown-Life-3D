@@ -27,9 +27,10 @@ function limb(w: number, h: number, d: number, mat: THREE.Material): THREE.Group
   return g;
 }
 
-export function makeCharacter(kind: 'prisoner' | 'guard', color: number): CharView {
+export interface AppearanceOpt { skin: number; hair: number; accent: number; build: 'slim' | 'average' | 'stocky'; }
+export function makeCharacter(kind: 'prisoner' | 'guard', color: number, look?: AppearanceOpt): CharView {
   const group = new THREE.Group();
-  const scale = 1.08 + Math.random() * 0.22;
+  const scale = look ? ({ slim: 1.0, average: 1.13, stocky: 1.26 } as Record<string, number>)[look.build] ?? 1.13 : 1.08 + Math.random() * 0.22;
 
   // contact shadow
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.46, 18),
@@ -43,8 +44,8 @@ export function makeCharacter(kind: 'prisoner' | 'guard', color: number): CharVi
 
   const rig = new THREE.Group(); rig.scale.setScalar(scale); group.add(rig);
 
-  const skinMat = new THREE.MeshStandardMaterial({ color: kind === 'guard' ? THEME.guard.skin : pick(THEME.prisoners.skins), roughness: 0.8 });
-  const uniMat = new THREE.MeshStandardMaterial({ color: kind === 'guard' ? THEME.guard.uniform : color, roughness: 0.85 });
+  const skinMat = new THREE.MeshStandardMaterial({ color: look ? look.skin : (kind === 'guard' ? THEME.guard.skin : pick(THEME.prisoners.skins)), roughness: 0.8 });
+  const uniMat = new THREE.MeshStandardMaterial({ color: kind === 'guard' ? THEME.guard.uniform : (look ? look.accent : color), roughness: 0.85 });
   const legMat = new THREE.MeshStandardMaterial({ color: kind === 'guard' ? THEME.guard.trousers : THEME.prisonerTrousers, roughness: 0.85 });
   const shoeMat = new THREE.MeshStandardMaterial({ color: 0x202024, roughness: 0.8 });
 
@@ -85,8 +86,8 @@ export function makeCharacter(kind: 'prisoner' | 'guard', color: number): CharVi
     const baton = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.4, 6), new THREE.MeshStandardMaterial({ color: 0x222226 }));
     baton.position.set(0.34, 0.12, 0.06); armR.add(baton);
   } else {
-    const hairMat = new THREE.MeshStandardMaterial({ color: pick(THEME.prisoners.hair), roughness: 1 });
-    if (Math.random() > 0.25) { const hair = new THREE.Mesh(new THREE.SphereGeometry(0.205, 10, 8, 0, Math.PI * 2, 0, Math.PI / 1.7), hairMat); hair.scale.set(1, 1.05, 1); hair.position.y = 0.82; torso.add(hair); }
+    const hairMat = new THREE.MeshStandardMaterial({ color: look ? look.hair : pick(THEME.prisoners.hair), roughness: 1 });
+    if (look || Math.random() > 0.25) { const hair = new THREE.Mesh(new THREE.SphereGeometry(0.205, 10, 8, 0, Math.PI * 2, 0, Math.PI / 1.7), hairMat); hair.scale.set(1, 1.05, 1); hair.position.y = 0.82; torso.add(hair); }
   }
 
   // tap target

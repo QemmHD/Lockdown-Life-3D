@@ -1,6 +1,8 @@
 // Title screen, pause/menu overlay (tabbed: Stats/Relationships/Inventory/Objectives/Gangs/Help),
 // and the daily summary modal (Stage 3.4). Lightweight DOM/CSS — reads a sim snapshot, never writes.
 
+import { NewGameSetup, defaultSetup, randomSetup, POS_TRAITS, NEG_TRAITS, BACKSTORIES, GANG_LEANS, DIFFICULTIES, SKINS, HAIRS, ACCENTS, BUILDS, TRAIT_LABEL, backstoryDef, diffDef } from '../sim/NewGameSetup';
+
 export interface MenuHooks {
   onNewGame: () => void;
   onContinue: () => void;
@@ -9,18 +11,23 @@ export interface MenuHooks {
   onSave: () => void;
   onLoad: () => void;
   onMainMenu: () => void;
+  onBeginRun: (setup: NewGameSetup) => void;
   hasSave: () => boolean;
+  saveInfo: () => { name: string; day: number } | null;
   snapshot: () => any;
   version: string;
 }
 
-type Mode = 'hidden' | 'title' | 'pause' | 'summary';
+type Mode = 'hidden' | 'title' | 'pause' | 'summary' | 'setup';
+const GANG_NAMES: Record<string, string> = { none: 'Unaffiliated', iron_block: 'Iron Block', yard_kings: 'Yard Kings', blue_chain: 'Blue Chain', redline_crew: 'Redline Crew', north_hall: 'North Hall', cell_rats: 'Cell Rats' };
 
 export class Menus {
   private root: HTMLDivElement;
   private mode: Mode = 'hidden';
   private tab = 'objectives';
   private summary: any = null;
+  private setup: NewGameSetup = defaultSetup();
+  private step = 0;
   constructor(private hooks: MenuHooks) {
     this.root = document.createElement('div');
     this.root.id = 'menu-root';
@@ -30,6 +37,7 @@ export class Menus {
   }
 
   isOpen() { return this.mode !== 'hidden'; }
+  showSetup() { this.setup = defaultSetup(); this.setup.traits = ['tough']; this.step = 0; this.mode = 'setup'; this.render(); }
   showTitle() { this.mode = 'title'; this.render(); }
   showPause() { this.mode = 'pause'; this.render(); }
   showSummary(data: any) { this.summary = data; this.mode = 'summary'; this.render(); }
@@ -41,6 +49,8 @@ export class Menus {
     const a = el.dataset.m!;
     if (a === 'tab') { this.tab = el.dataset.tab!; this.render(); return; }
     if (a === 'help-title') { document.getElementById('m-help-title')?.classList.toggle('hidden'); return; }
+    if (a === 'pick') { this.pick(el.dataset.field!, el.dataset.val!); return; }
+    if (a === 'setup-nav') { this.nav(el.dataset.dir!); return; }
     switch (a) {
       case 'newgame': this.hooks.onNewGame(); break;
       case 'continue': this.hooks.onContinue(); break;
@@ -53,24 +63,59 @@ export class Menus {
     }
   }
 
+  // ---- setup flow ----
+  private syncInputs() {
+    const g = (id: string) => (this.root.querySelector('#' + id) as HTMLInputElement | null)?.value;
+    const nm = g('su-name'); if (nm != null) this.setup.name = nm.trim().slice(0, 16);
+    const nk = g('su-nick'); if (nk != null) this.setup.nickname = nk.trim().slice(0, 14);
+    const sd = g('su-seed'); if (sd != null) this.setup.seed = sd.trim() ? (parseInt(sd, 36) || 0) : 0;
+  }
+  private pick(field: string, val: string) {
+    const s = this.setup;
+    switch (field) {
+      case 'trait': { const i = s.traits.indexOf(val); if (i >= 0) s.traits.splice(i, 1); else if (s.traits.length < 2) s.traits.push(val); break; }
+      case 'weak': s.weakness = val; break;
+      case 'backstory': s.backstory = val; break;
+      case 'gang': s.gangLean = val; break;
+      case 'diff': s.difficulty = val; break;
+      case 'chaos': s.chaosIntensity = val; break;
+      case 'build': s.appearance.build = val as any; break;
+      case 'skin': s.appearance.skin = +val; break;
+      case 'hair': s.appearance.hair = +val; break;
+      case 'accent': s.appearance.accent = +val; break;
+      case 'tips': s.tutorialTips = val === '1'; break;
+    }
+    this.render();
+  }
+  private nav(dir: string) {
+    this.syncInputs();
+    if (dir === 'cancel') { this.showTitle(); return; }
+    if (dir === 'randname') { const N = ['Rook', 'Mason', 'Knox', 'Diesel', 'Tully', 'Vince', 'Cane', 'Marco', 'Boone', 'Reyes', 'Otis', 'Wyatt']; this.setup.name = N[Math.floor(Math.random() * N.length)]; this.render(); return; }
+    if (dir === 'randomize') { const keepSeed = this.setup.seed; this.setup = randomSetup(Math.random); this.setup.seed = keepSeed || this.setup.seed; this.render(); return; }
+    if (dir === 'begin') { if (!this.setup.name.trim()) this.setup.name = 'Knox'; this.hooks.onBeginRun(this.setup); return; }
+    this.step = Math.max(0, Math.min(4, this.step + (dir === 'next' ? 1 : -1)));
+    this.render();
+  }
+
   private render() {
     if (this.mode === 'hidden') { this.hide(); return; }
     this.root.className = '';
     if (this.mode === 'title') { this.root.innerHTML = this.title(); return; }
     if (this.mode === 'summary') { this.root.innerHTML = this.summaryCard(this.summary); return; }
+    if (this.mode === 'setup') { this.root.innerHTML = this.setupCard(); return; }
     this.root.innerHTML = this.pause();
   }
 
   private title(): string {
     const has = this.hooks.hasSave();
+    const info = has ? this.hooks.saveInfo() : null;
+    const cont = info ? `Continue: ${info.name}, Day ${info.day}` : 'Continue';
     return `<div class="m-title">
       <div class="m-logo">LOCKDOWN<span>LIFE 3D</span></div>
       <div class="m-tag">Do your time. Build a name. Survive the block.</div>
       <div class="m-menu">
-        <button class="m-btn primary" data-m="quickstart">▶ Play</button>
-        <button class="m-btn" data-m="continue" ${has ? '' : 'disabled'}>Continue</button>
-        <button class="m-btn" data-m="newgame">New Game</button>
-        <button class="m-btn" data-m="tab" data-tab="help" disabled style="display:none"></button>
+        ${has ? `<button class="m-btn primary" data-m="continue">▶ ${cont}</button><button class="m-btn" data-m="newgame">New Game</button>`
+        : `<button class="m-btn primary" data-m="newgame">▶ New Game</button><button class="m-btn" data-m="quickstart">Quick Start</button>`}
       </div>
       <div class="m-row">
         <button class="m-chip" data-m="help-title">How to Play</button>
@@ -127,6 +172,8 @@ export class Menus {
       <div>
         <div class="m-h">${st.name} <span class="m-pill">${st.tier}</span></div>
         <div class="m-sub">Day ${st.day} · ${hh}:${m.toString().padStart(2, '0')} ${ap} · ${st.room} · ${st.action}</div>
+        <div class="m-sub">${st.backstory ?? ''}${st.difficulty ? ` · ${st.difficulty}` : ''}${st.gangLean && st.gangLean !== 'Unaffiliated' ? ` · ${st.gangLean} lean` : ''}</div>
+        ${st.traits && st.traits.length ? `<div class="m-chips2">${st.traits.map((t: string) => `<span class="su-chip on">${t}</span>`).join('')}</div>` : ''}
         <div class="m-tier"><div class="m-tier-bg"><div class="m-tier-fill" style="width:${Math.round(t.progress * 100)}%"></div></div><div class="m-sub">${t.next ? `Progress to ${t.next}` : 'Top tier'} — ${t.desc}</div></div>
         ${this.bar('Health', st.health, '#e74c3c')}${this.bar('Energy', st.energy, '#2ecc71')}
         ${this.bar('Hunger', 1 - st.hunger, '#e67e22')}${this.bar('Hygiene', 1 - st.hygiene, '#3498db')}
@@ -200,6 +247,77 @@ export class Menus {
       <div><b>Save</b><span>Save/Load any time from this menu or the bottom bar.</span></div>
     </div>`;
   }
+  // ---- character creation / run setup ----
+  private swatches(field: string, colors: number[], sel: number): string {
+    return colors.map((c) => `<button class="su-sw ${c === sel ? 'on' : ''}" style="background:#${(c >>> 0).toString(16).padStart(6, '0')}" data-m="pick" data-field="${field}" data-val="${c}"></button>`).join('');
+  }
+  private cards(field: string, opts: { id: string; label: string; desc?: string }[], sel: string): string {
+    return opts.map((o) => `<button class="su-card ${o.id === sel ? 'on' : ''}" data-m="pick" data-field="${field}" data-val="${o.id}"><b>${o.label}</b>${o.desc ? `<span>${o.desc}</span>` : ''}</button>`).join('');
+  }
+  private setupStep(): string {
+    const s = this.setup;
+    switch (this.step) {
+      case 0: return `<div class="m-h">Identity</div>
+        <label class="su-l">Name</label><input id="su-name" class="su-in" maxlength="16" value="${this.esc(s.name)}" placeholder="Knox">
+        <label class="su-l">Nickname (optional)</label><input id="su-nick" class="su-in" maxlength="14" value="${this.esc(s.nickname)}" placeholder="—">
+        <label class="su-l">Seed (optional)</label><input id="su-seed" class="su-in" value="${s.seed ? s.seed.toString(36) : ''}" placeholder="random">
+        <button class="su-mini" data-m="setup-nav" data-dir="randname">🎲 Random name</button>`;
+      case 1: return `<div class="m-h">Appearance</div>
+        <label class="su-l">Skin</label><div class="su-sw-row">${this.swatches('skin', SKINS, s.appearance.skin)}</div>
+        <label class="su-l">Hair</label><div class="su-sw-row">${this.swatches('hair', HAIRS, s.appearance.hair)}</div>
+        <label class="su-l">Jumpsuit accent</label><div class="su-sw-row">${this.swatches('accent', ACCENTS, s.appearance.accent)}</div>
+        <label class="su-l">Build</label><div class="su-cards">${this.cards('build', BUILDS.map((b) => ({ id: b, label: b[0].toUpperCase() + b.slice(1) })), s.appearance.build)}</div>`;
+      case 2: return `<div class="m-h">Traits & Backstory</div>
+        <label class="su-l">Pick 2 strengths (${s.traits.length}/2)</label>
+        <div class="su-chips">${POS_TRAITS.map((t) => `<button class="su-chip ${s.traits.includes(t.id) ? 'on' : ''}" data-m="pick" data-field="trait" data-val="${t.id}" title="${t.desc}">${t.label}</button>`).join('')}</div>
+        <label class="su-l">Pick 1 weakness</label>
+        <div class="su-chips">${NEG_TRAITS.map((t) => `<button class="su-chip neg ${s.weakness === t.id ? 'on' : ''}" data-m="pick" data-field="weak" data-val="${t.id}" title="${t.desc}">${t.label}</button>`).join('')}</div>
+        <label class="su-l">Backstory</label>
+        <div class="su-cards">${this.cards('backstory', BACKSTORIES.map((b) => ({ id: b.id, label: b.name, desc: b.desc })), s.backstory)}</div>`;
+      case 3: return `<div class="m-h">Start Conditions</div>
+        <label class="su-l">Gang lean</label>
+        <div class="su-cards">${this.cards('gang', GANG_LEANS.map((g) => ({ id: g, label: GANG_NAMES[g] ?? g })), s.gangLean)}</div>
+        <label class="su-l">Difficulty</label>
+        <div class="su-cards">${this.cards('diff', DIFFICULTIES.map((d) => ({ id: d.id, label: d.name })), s.difficulty)}</div>
+        <label class="su-l">Chaos intensity</label>
+        <div class="su-cards">${this.cards('chaos', [{ id: 'low', label: 'Low' }, { id: 'normal', label: 'Normal' }, { id: 'high', label: 'High' }], s.chaosIntensity)}</div>
+        <label class="su-l">Tutorial tips</label>
+        <div class="su-cards">${this.cards('tips', [{ id: '1', label: 'On' }, { id: '0', label: 'Off' }], s.tutorialTips ? '1' : '0')}</div>`;
+      default: { // review
+        const back = backstoryDef(s.backstory); const dd = diffDef(s.difficulty);
+        const objs = back.objectives.map((o) => o === 'survive' ? 'Survive the day' : o).join(', ');
+        return `<div class="m-h">Review</div>
+          <div class="su-rev">
+            <div class="m-kv"><span>Name</span><b>${this.esc(s.nickname || s.name)}</b></div>
+            <div class="m-kv"><span>Build / look</span><b>${s.appearance.build} <span class="su-dot" style="background:#${(s.appearance.accent >>> 0).toString(16).padStart(6, '0')}"></span></b></div>
+            <div class="m-kv"><span>Strengths</span><b>${s.traits.map((t) => TRAIT_LABEL[t] ?? t).join(', ') || '—'}</b></div>
+            <div class="m-kv"><span>Weakness</span><b>${TRAIT_LABEL[s.weakness] ?? s.weakness}</b></div>
+            <div class="m-kv"><span>Backstory</span><b>${back.name}</b></div>
+            <div class="m-kv"><span>Gang lean</span><b>${GANG_NAMES[s.gangLean] ?? s.gangLean}</b></div>
+            <div class="m-kv"><span>Difficulty</span><b>${dd.name}</b></div>
+            <div class="m-kv"><span>Start</span><b>$${Math.round(back.money * dd.moneyMul)} · respect ${8 + back.respect}${back.item ? ` · ${back.item}` : ''}</b></div>
+            <div class="m-kv"><span>First objectives</span><b>${objs}</b></div>
+          </div>`;
+      }
+    }
+  }
+  private setupCard(): string {
+    const titles = ['Identity', 'Appearance', 'Traits & Backstory', 'Start Conditions', 'Review'];
+    const dots = titles.map((_, i) => `<span class="su-dotn ${i === this.step ? 'on' : ''}"></span>`).join('');
+    const last = this.step === 4;
+    return `<div class="m-overlay"><div class="m-card">
+      <div class="m-head"><b>New Run — ${titles[this.step]}</b><button class="m-x" data-m="setup-nav" data-dir="cancel">✕</button></div>
+      <div class="su-dots">${dots}</div>
+      <div class="m-content">${this.setupStep()}</div>
+      <div class="su-foot">
+        <button class="m-tab act" data-m="setup-nav" data-dir="back" ${this.step === 0 ? 'disabled' : ''}>‹ Back</button>
+        <button class="m-tab act" data-m="setup-nav" data-dir="randomize">🎲 Randomize</button>
+        ${last ? `<button class="m-btn primary su-begin" data-m="setup-nav" data-dir="begin">Begin Run ▶</button>` : `<button class="m-btn primary su-begin" data-m="setup-nav" data-dir="next">Next ›</button>`}
+      </div>
+    </div></div>`;
+  }
+  private esc(t: string) { return (t || '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c] || c)); }
+
   private summaryCard(d: any): string {
     if (!d) return '';
     const sign = (n: number) => (n > 0 ? `+${n}` : `${n}`);

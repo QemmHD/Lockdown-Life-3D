@@ -12,6 +12,35 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v3.5.0-newgame — Stage Character Creation / New Game Setup 3.5 (run identity)
+Makes **New Game** a real character/run setup. Sim authoritative, RenderSync read-only, build passes,
+0 runtime errors. New pure module `NewGameSetup.ts` + a setup flow in `ui/Menus.ts`.
+- **Setup flow** (no page reload): Identity → Appearance → Traits & Backstory → Start Conditions →
+  Review, with Back / Next / Randomize / Begin Run and a step indicator. Cancel returns to the title.
+- **Identity**: name + optional nickname + optional seed (the nickname becomes your in-game name);
+  a random-name button; text is sanitized + length-capped.
+- **Appearance**: skin / hair / jumpsuit-accent swatches + body build (slim/average/stocky), applied to
+  the player's low-poly model via a new `Appearance` on the Render component (RenderSync reads it).
+- **Traits**: pick 2 strengths + 1 weakness from 10 each (Tough/Fast/Calm/Clever/Loyal/Hard Worker/
+  Smooth Talker/Watchful/Scrappy/Quiet · Hothead/Cowardly/Unstable/Weak/Lazy/Paranoid/Clumsy/Hated/
+  Slow/Trouble Magnet). Mapped to sim tokens so they affect movement, combat, jobs, search, favours,
+  suspicion, calming, etc. — small, non-overpowered.
+- **Backstory archetypes** (8, fictional): First Timer / Street Kid / Former Worker / Yard Fighter /
+  Quiet Planner / Gang Associate / Lone Wolf / Short Fuse — each seeds starting reputation/respect/
+  suspicion/money/item, a bonus trait, a gang bias, and the first objectives.
+- **Gang lean** (standing, not membership yet): warm to a chosen crew, cool to its rivals.
+- **Difficulty** (Easy Time / Standard / Hard Time / Nightmare Block) tunes heat gain, search
+  threshold, riot pressure, objective rewards, needs decay, and starting money; plus chaos intensity
+  (low/normal/high) and tutorial-tips toggle.
+- **Review** screen summarizes everything; **Randomize** rolls a full valid identity.
+- **Apply to sim**: `Simulation.startNewRun(setup)` regenerates the world (reseed) and `applySetup`
+  writes identity/appearance/traits/standing/needs/money/items/gang lean/objectives/difficulty onto the
+  player entity. Stats/Gangs/Daily-summary menus surface the setup.
+- **Save/load v9**: persists the setup + appearance; backward-compatible with v8–v4 (old saves get a
+  default setup + standard difficulty, no crash). Title **Continue** shows the saved name + day.
+- **?debug self-test+**: setup builds/applies, name in snapshot, randomize valid, old-save migration.
+- Limitations: gang **joining** still planned; appearance is simple low-poly; no RPG class system.
+
 ## v3.4.0-ui — Stage UI/Menu/Progression 3.4 (goals, menus, day summary, reputation tiers)
 Turns the sim into a game with direction. Keeps the in-game HUD/panel; adds the missing structure
 layer. Sim authoritative, RenderSync read-only, build passes, 0 runtime errors. New pure module

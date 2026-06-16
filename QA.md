@@ -144,6 +144,18 @@ selected-object / blocked-path info to the console.
 - [ ] Save/Load (v8) keeps progression/objectives/daily stats; old saves load with defaults
 - [ ] Menus are readable in mobile landscape; existing HUD/panel still work
 
+## Character creation / new game (Stage 3.5)
+- [ ] Title "New Game" opens the setup flow (Identity → Appearance → Traits → Start → Review)
+- [ ] Name/nickname/seed entry works; random-name button works; long names don't break layout
+- [ ] Appearance swatches + build change the player's in-game model
+- [ ] Pick 2 strengths + 1 weakness; backstory selectable; choices persist across Back/Next
+- [ ] Gang lean / difficulty / chaos / tutorial-tips selectable
+- [ ] Randomize fills a valid identity; Review summarizes it
+- [ ] Begin Run drops in as that inmate: name in HUD/stats, traits applied, difficulty active, money/objectives seeded
+- [ ] No page reload; Cancel returns to title
+- [ ] Title Continue shows saved name + day; loads correctly
+- [ ] Save/load (v9) keeps the setup; an older save loads with default setup (no crash)
+
 ## Stability
 - [ ] Run a full in-game day at 4× → no runtime errors, no soft-locks
 - [ ] No leaking DOM feedback elements after many floats/bubbles

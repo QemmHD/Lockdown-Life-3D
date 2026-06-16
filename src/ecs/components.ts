@@ -4,7 +4,8 @@ import type { Entity } from './world';
 
 export interface Position { x: number; z: number; facing: number; }
 
-export interface Render { kind: 'prisoner' | 'guard'; color: number; meshId: number; }
+export interface Appearance { skin: number; hair: number; accent: number; build: 'slim' | 'average' | 'stocky'; }
+export interface Render { kind: 'prisoner' | 'guard'; color: number; meshId: number; appearance?: Appearance; }
 
 export interface Agent {
   speed: number;
