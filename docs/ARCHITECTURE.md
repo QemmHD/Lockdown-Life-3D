@@ -67,6 +67,7 @@ input (tap/drag/pinch)
 | ECS | `ecs/world.ts`, `ecs/components.ts` | entity/component store + plain-data components |
 | Sim | `sim/Simulation.ts` | authoritative systems (large — see refactor plan) |
 | Chaos | `sim/LockdownSystem.ts`, `RiotSystem.ts`, `EscapeSystem.ts`, `GuardCheckpointSystem.ts` | pure types + constants + decision functions for the chaos layer; the Simulation owns the state and orchestrates them thinly |
+| AI | `sim/AIIntent.ts`, `PrisonerAISystem.ts`, `AIMemorySystem.ts`, `GroupBehaviorSystem.ts`, `GuardAISystem.ts` | pure AI vocabulary/labels, prisoner-intent scoring, decaying memory, cluster/separation geometry, and guard routes; the Simulation gathers context and applies the chosen intents/roles |
 | World | `world/TileMap.ts`, `Pathfinding.ts`, `WorldGen.ts`, `Interactable.ts` | grid, A*, floorplan, object model |
 | Render | `render/ThreeApp.ts`, `IsoCamera.ts`, `WorldRenderer.ts`, `PropRenderer.ts`, `CharacterFactory.ts`, `RenderSync.ts`, `Feedback.ts`, `VisualTheme.ts`, `textures/` | rendering (read-only) |
 | UI | `ui/HUD.ts` | DOM overlay |
@@ -95,6 +96,15 @@ The orchestration (timers, triggers, mutations) currently lives in `Simulation.c
 friends, marked with `TODO(refactor)`. When the surface settles, promote these into stateful
 `*System` classes (one step further than the current pure modules). Keep the read-only render rule and
 the sim-owns-state rule intact through any refactor.
+
+**AI depth (Stage 3.2).** Guards carry a sticky **role** + a patrol **route** (`GuardAISystem`);
+prisoners pick a sticky **intent** via lightweight scoring (`PrisonerAISystem`) from a context the
+Simulation gathers (phase/needs/gang/nearby guards-enemies-allies/chaos), and carry a small **decaying
+memory** (`AIMemorySystem`) that drives avoidance/retaliation. `GroupBehaviorSystem` provides
+cluster/separation geometry so crowds read as loose groups. All of it is pure helpers + thin sim
+integration; transient AI (intent, memory refs) resets on load. Still **partial**: no full GOAP
+planner, no formal squad tactics, group clustering is geometric (not negotiated), and guard routes are
+fixed tables rather than learned/dynamic.
 
 **Tuning + telemetry (Stage 3.1).** Heat is an eased 0–100 value with discrete event bumps and calm
 decay; riot pressure uses hysteresis + cooldowns; lockdowns have a re-entry cooldown (severe events

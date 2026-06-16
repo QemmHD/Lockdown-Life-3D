@@ -107,6 +107,18 @@ selected-object / blocked-path info to the console.
 - [ ] Complaint/panic bubbles are throttled; prisoners resume normal schedules after chaos ends
 - [ ] `?debug` console shows a telemetry summary (`window.__game.sim.metrics`)
 
+## AI depth (Stage 3.2)
+- [ ] Guards patrol different zones over a normal day (not all clumped in one corridor)
+- [ ] Inspecting a guard shows a role (Patrolling / Holding checkpoint / Responding / Escorting / …)
+- [ ] Only one nearby guard commits to a minor incident; others keep posts
+- [ ] Inspecting a prisoner shows an intent (On routine / Socializing / Avoiding trouble / Watching / Returning to cell / Hiding …)
+- [ ] Insulting/threatening an NPC makes them avoid/grudge you afterward (memory)
+- [ ] Fearful prisoners flee a nearby brawl; brave ones watch; rivals throw "Watch it." standoffs
+- [ ] During lockdown prisoners switch to returning to cells; they recover to routines after it lifts
+- [ ] Gang allies form loose clusters (separated, not stacked on one tile)
+- [ ] Save/load (v6) keeps guard roles + prisoner intents/memory safe; no stuck NPCs
+- [ ] `?debug` metrics include guardRoleSwitches / prisonerIntentChanges / socialInteractions / standoffs
+
 ## Stability
 - [ ] Run a full in-game day at 4× → no runtime errors, no soft-locks
 - [ ] No leaking DOM feedback elements after many floats/bubbles

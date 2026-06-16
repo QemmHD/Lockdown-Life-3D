@@ -13,6 +13,11 @@ import { LockdownState, newLockdown, LOCKDOWN_SECONDS, LOCKDOWN_COOLDOWN, lockdo
 import { RiotLevel, computeRiotTarget, riotLevelHyst, tensionLabel, RIOT_WARN_CD, RIOT_EVENT_CD } from './RiotSystem';
 import { Checkpoint, buildCheckpoints } from './GuardCheckpointSystem';
 import { EscapeState, newEscape, ESCAPE_OPPORTUNITY_ROOMS, ESCAPE_COOLDOWN, rollEscapeOutcome } from './EscapeSystem';
+import { PrisonerIntent, GuardRole, INTENT_LABEL, ROLE_LABEL, GUARD_DWELL, INTENT_STICK, ROLE_STICK } from './AIIntent';
+import { choosePrisonerIntent } from './PrisonerAISystem';
+import { AIMemory, newMemory, decayMemory, rememberFoe, rememberThreat, rememberSearch, sanitizeMemory } from './AIMemorySystem';
+import { clusterOffset } from './GroupBehaviorSystem';
+import { routeFor } from './GuardAISystem';
 
 const SECONDS_PER_HOUR = 5;
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
@@ -85,7 +90,7 @@ export class Simulation {
   private escapeCd = 0;                          // cooldown between escape attempts
   private heatEventTimer = 0;                    // recent-heat-event timer (slows decay briefly)
   // lightweight playtest telemetry (?debug)
-  metrics: Record<string, number> = { fightsStarted: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0 };
+  metrics: Record<string, number> = { fightsStarted: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, orderRefusals: 0, complianceEvents: 0 };
 
   constructor(public bus: EventBus, seed = Math.floor(Math.random() * 1e9)) { this.rng = new Random(seed); }
 
@@ -137,7 +142,8 @@ export class Simulation {
     this.ecs.set<Inventory>(e, 'Inventory', { items, money: this.rng.int(0, 12) });
     this.ecs.set<Brain>(e, 'Brain', {
       role: 'prisoner', state: 'idle', name: this.rng.pick(NAME_POOL), gang, traits,
-      timer: 0, targetRoom: 'cellblock', attackCd: 0, action: 'Idle'
+      timer: 0, targetRoom: 'cellblock', attackCd: 0, action: 'Idle',
+      intent: 'schedule', intentCd: 0, mem: newMemory()
     });
     return e;
   }
@@ -150,7 +156,8 @@ export class Simulation {
     this.ecs.set<Needs>(e, 'Needs', { hunger: 0, sleep: 0, hygiene: 1, energy: 1, anger: 0, fear: 0, health: 1 });
     this.ecs.set<Brain>(e, 'Brain', {
       role: 'guard', state: 'idle', name: GUARD_NAMES[i % GUARD_NAMES.length], traits: [],
-      timer: 0, targetRoom: PATROL_ROOMS[i % PATROL_ROOMS.length], attackCd: 0
+      timer: 0, targetRoom: PATROL_ROOMS[i % PATROL_ROOMS.length], attackCd: 0,
+      guardRole: 'patrol', route: i, routeStep: 0, dwell: 0, roleCd: 0, action: 'Patrolling'
     });
     return e;
   }
@@ -423,6 +430,22 @@ export class Simulation {
       const tgt = Math.min(100, crowd + rival + restricted + this.riotPressure * 30);
       const cur = this.tension[r.id] ?? 0;
       this.tension[r.id] = cur + (tgt - cur) * Math.min(1, dt * 0.25);
+      // rival standoff: when a tense rival room boils, a couple of inmates square up (throttled, no auto-brawl)
+      if (rival && this.tension[r.id] > 55 && this.rng.chance(dt * 0.08)) this.standoff(r.id);
+    }
+  }
+  // two rivals in a room exchange a warning (bubble) — tension, not violence
+  private standoff(roomId: string) {
+    const inmates = this.prisonersInRoom(roomId).filter((e) => { const b = this.brain(e)!; return b.gang && !b.bubbleCd && b.state !== 'fight' && !b.isPlayer; });
+    for (const e of inmates) {
+      const b = this.brain(e)!;
+      const rival = inmates.find((o) => o !== e && areEnemies(b.gang, this.brain(o)!.gang));
+      if (rival != null) {
+        this.metrics.standoffs++;
+        const rp = this.pos(rival)!, p = this.pos(e)!; p.facing = Math.atan2(rp.x - p.x, rp.z - p.z);
+        this.bubble(e, this.rng.pick(['Watch it.', 'Back off.', '😠']), 'threaten', 1.4); b.bubbleCd = this.rng.range(6, 10);
+        return;
+      }
     }
   }
   private rivalsPresent(gset?: Set<string>): boolean {
@@ -528,6 +551,7 @@ export class Simulation {
       }
       ag.repathCd -= dt;
       if (b.bubbleCd) b.bubbleCd = Math.max(0, b.bubbleCd - dt);
+      if (b.mem) decayMemory(b.mem, dt);
       // walking to a claimed schedule object
       if (b.objTarget) {
         const o = this.objs.get(b.objTarget);
@@ -543,23 +567,123 @@ export class Simulation {
         }
       }
       if (!ag.path) {
-        const here = this.roomTypeAt(p);
-        // during a lockdown, head for a cell instead of chasing schedule objects
-        if (!this.lockdown.active && ag.repathCd <= 0 && this.assignScheduleTarget(e, b, p)) { ag.repathCd = 1.2; continue; }
-        if (here !== b.targetRoom && ag.repathCd <= 0) {
-          this.gotoRoom(e, b.targetRoom); ag.repathCd = 1.2; b.state = 'goto';
-          if (!ag.path) {   // destination blocked (locked door / lockdown) → wait, complain (throttled), stew
-            this.blockedCount++; this.metrics.blockedFallbacks++;
-            if (!b.bubbleCd) { this.bubble(e, this.rng.pick(['Locked!', 'Open up!', '😠', 'Let us through!']), 'insult', 1.2); b.bubbleCd = this.rng.range(5, 9); }
-            const nd = this.ecs.get<Needs>(e, 'Needs'); if (nd) nd.anger = clamp01(nd.anger + dt * 0.03);
-            b.state = 'wander';
-          }
-        } else {
-          b.state = 'wander'; b.timer -= dt;
-          if (b.timer <= 0) { if (this.rng.chance(0.5)) this.gotoRoom(e, b.targetRoom); b.timer = this.rng.range(2.5, 6); }
+        // re-evaluate a high-level intent occasionally (sticky — anti-twitch)
+        b.intentCd = (b.intentCd ?? 0) - dt;
+        if ((b.intentCd ?? 0) <= 0) {
+          const ni = this.evalIntent(e, b, p);
+          if (ni !== b.intent) { b.intent = ni; this.metrics.prisonerIntentChanges++; }
+          b.intentCd = INTENT_STICK + this.rng.float() * 1.5;
+          b.action = INTENT_LABEL[ni] ?? 'Idle';
         }
+        this.actOnIntent(e, b, p, dt);
       }
     }
+  }
+
+  // build a context and pick the prisoner's intent (pure scorer in PrisonerAISystem)
+  private evalIntent(e: Entity, b: Brain, p: Position): PrisonerIntent {
+    const nd = this.ecs.get<Needs>(e, 'Needs')!;
+    const social = ['free', 'yard', 'breakfast', 'lunch', 'dinner'].includes(this.phaseId);
+    const fight = this.nearestFight(p, 6.5);
+    const enemy = this.nearestEnemy(e, b, p, 5.5);
+    const ally = this.nearestAlly(e, b, p, 5.5);
+    const guard = this.nearestGuard(e, 4) != null;
+    return choosePrisonerIntent({
+      phase: this.phaseId, lockdown: this.lockdown.active, riot: this.riotLevel,
+      anger: nd.anger, fear: nd.fear, enemyNear: !!enemy, fightNear: !!fight, allyNear: !!ally,
+      tough: b.traits.includes('tough') || b.traits.includes('fighter') || b.traits.includes('aggressive'),
+      coward: b.traits.includes('cowardly') || b.traits.includes('weak'),
+      social, guardNear: guard
+    }, this.rng.float());
+  }
+  // carry out the chosen intent (movement/state mutations)
+  private actOnIntent(e: Entity, b: Brain, p: Position, dt: number) {
+    const ag = this.ecs.get<Agent>(e, 'Agent')!;
+    switch (b.intent as PrisonerIntent) {
+      case 'returnCell':
+        if (this.roomTypeAt(p) === 'cellblock') { b.state = 'idle'; break; }
+        if (ag.repathCd <= 0) { this.gotoRoom(e, 'cellblock'); ag.repathCd = 1.2; b.state = 'goto'; if (!ag.path) this.blockedComplain(e, b, dt); }
+        break;
+      case 'fleeDanger': { const f = this.nearestFight(p, 8); if (f) this.moveAwayFrom(e, p, f.x, f.z); else b.intent = 'schedule'; const nd = this.ecs.get<Needs>(e, 'Needs'); if (nd) nd.fear = clamp01(nd.fear + dt * 0.04); break; }
+      case 'avoidEnemy': { const en = this.nearestEnemy(e, b, p, 6); if (en) this.moveAwayFrom(e, p, en.x, en.z); else b.intent = 'schedule'; break; }
+      case 'watchFight': { const f = this.nearestFight(p, 9); if (f) { p.facing = Math.atan2(f.x - p.x, f.z - p.z); ag.path = null; } else b.intent = 'schedule'; break; }
+      case 'hide': ag.path = null; break;
+      case 'comply': ag.path = null; break;
+      case 'group': case 'socialize': if (!this.gotoGroup(e, b, p)) this.scheduleStep(e, b, p, dt); break;
+      case 'schedule': default: this.scheduleStep(e, b, p, dt); break;
+    }
+  }
+  // original schedule behaviour (object anchor → room → local wander)
+  private scheduleStep(e: Entity, b: Brain, p: Position, dt: number) {
+    const ag = this.ecs.get<Agent>(e, 'Agent')!; const here = this.roomTypeAt(p);
+    if (!this.lockdown.active && ag.repathCd <= 0 && this.assignScheduleTarget(e, b, p)) { ag.repathCd = 1.2; return; }
+    if (here !== b.targetRoom && ag.repathCd <= 0) {
+      this.gotoRoom(e, b.targetRoom); ag.repathCd = 1.2; b.state = 'goto';
+      if (!ag.path) this.blockedComplain(e, b, dt);
+    } else if (here === b.targetRoom) {
+      b.state = 'wander'; b.timer -= dt;
+      if (b.timer <= 0) { if (this.rng.chance(0.5)) this.gotoRoom(e, b.targetRoom); b.timer = this.rng.range(2.5, 6); }
+    }
+  }
+  private blockedComplain(e: Entity, b: Brain, dt: number) {
+    this.blockedCount++; this.metrics.blockedFallbacks++;
+    const nd = this.ecs.get<Needs>(e, 'Needs');
+    if (!b.bubbleCd) {
+      // angry inmates during a lockdown may refuse the order rather than just grumble
+      const refuse = this.lockdown.active && nd && nd.anger > 0.65 && this.riotLevel !== 'calm';
+      if (refuse) { this.metrics.orderRefusals++; this.bubble(e, this.rng.pick(['I\'m not going!', 'No!', '😡']), 'threaten', 1.4); }
+      else this.bubble(e, this.rng.pick(['Locked!', 'Open up!', '😠', 'Let us through!']), 'insult', 1.2);
+      b.bubbleCd = this.rng.range(5, 9);
+    }
+    if (nd) nd.anger = clamp01(nd.anger + dt * 0.03);
+    b.state = 'wander';
+  }
+  // ---- nearby-entity scans (cheap; population ~18) + simple avoidance moves ----
+  private nearestFight(p: Position, range: number): Position | null {
+    let best: Position | null = null, bd = range;
+    for (const e of this.ecs.query('Brain', 'Position')) { const b = this.brain(e)!; if (b.state !== 'fight') continue; const q = this.pos(e)!; const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = q; } }
+    return best;
+  }
+  private nearestEnemy(e: Entity, b: Brain, p: Position, range: number): Position | null {
+    let best: Position | null = null, bd = range;
+    for (const o of this.ecs.query('Brain', 'Position')) {
+      if (o === e) continue; const ob = this.brain(o)!; if (ob.role !== 'prisoner') continue;
+      const hostile = areEnemies(b.gang, ob.gang) || (b.mem && (b.mem.foe === o || b.mem.threat === o));
+      if (!hostile) continue;
+      const q = this.pos(o)!; const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = q; }
+    }
+    return best;
+  }
+  private nearestAlly(e: Entity, b: Brain, p: Position, range: number): Entity | null {
+    if (!b.gang) return null;
+    let best: Entity | null = null, bd = range;
+    for (const o of this.ecs.query('Brain', 'Position')) {
+      if (o === e) continue; const ob = this.brain(o)!; if (ob.role !== 'prisoner' || ob.gang !== b.gang || ob.state === 'fight') continue;
+      const q = this.pos(o)!; const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = o; }
+    }
+    return best;
+  }
+  private moveAwayFrom(e: Entity, p: Position, fx: number, fz: number) {
+    const ag = this.ecs.get<Agent>(e, 'Agent')!; if (ag.path || ag.repathCd > 0) return;
+    const ang = Math.atan2(p.x - fx, p.z - fz);
+    for (const dist of [4, 3, 2]) {
+      const wx = p.x + Math.sin(ang) * dist, wz = p.z + Math.cos(ang) * dist;
+      const idx = this.map.worldToIdx(wx, wz);
+      if (idx >= 0 && this.map.walkable[idx]) { const path = this.path(this.map.worldToIdx(p.x, p.z), idx, e); if (path && path.length) { ag.path = path; ag.step = 0; ag.repathCd = 1; return; } }
+    }
+    p.facing = ang; ag.repathCd = 0.6;   // cornered — at least face away
+  }
+  // walk near a same-gang ally and form a loose cluster (separated by index)
+  private gotoGroup(e: Entity, b: Brain, p: Position): boolean {
+    const ag = this.ecs.get<Agent>(e, 'Agent')!; if (ag.path || ag.repathCd > 0) return true;
+    const ally = this.nearestAlly(e, b, p, 10); if (ally == null) return false;
+    const ap = this.pos(ally)!; if (Math.hypot(ap.x - p.x, ap.z - p.z) < 2.2) { p.facing = Math.atan2(ap.x - p.x, ap.z - p.z); ag.repathCd = 1.5; return true; }
+    const off = clusterOffset((e % 5) + 1, 1.4);
+    const wx = ap.x + off.dx, wz = ap.z + off.dz; const idx = this.map.worldToIdx(wx, wz);
+    const goal = idx >= 0 && this.map.walkable[idx] ? idx : this.map.worldToIdx(ap.x, ap.z);
+    const path = this.path(this.map.worldToIdx(p.x, p.z), goal, e);
+    ag.repathCd = 1.5; if (path && path.length) { ag.path = path; ag.step = 0; this.metrics.socialInteractions++; return true; }
+    return false;
   }
   // pick the nearest *reachable* free interactable for the current schedule phase; claim + route.
   // Tries candidates in distance order so one unreachable object doesn't make the NPC give up.
@@ -608,7 +732,11 @@ export class Simulation {
       const p = this.ecs.get<Position>(e, 'Position')!;
       ag.repathCd -= dt;
 
+      if (b.bubbleCd) b.bubbleCd = Math.max(0, b.bubbleCd - dt);
+      if (b.roleCd) b.roleCd = Math.max(0, b.roleCd - dt);
+
       if (b.state === 'respond' && b.foe != null) {
+        this.setGuardRole(b, 'response');
         const fp = this.ecs.get<Position>(b.foe, 'Position');
         const fb = this.ecs.get<Brain>(b.foe, 'Brain');
         if (!fp || !fb || (fb.state !== 'fight')) { this.endRespond(e, b); continue; }
@@ -619,6 +747,7 @@ export class Simulation {
       }
       // visible search: walk to suspect, then run a timed search
       if (b.state === 'searching' && b.foe != null) {
+        this.setGuardRole(b, 'search');
         const tgt = b.foe; const tp = this.pos(tgt); const tb = this.brain(tgt);
         if (!tp || !tb) { b.state = 'idle'; b.foe = undefined; ag.path = null; continue; }
         const d = Math.hypot(tp.x - p.x, tp.z - p.z);
@@ -633,6 +762,7 @@ export class Simulation {
       }
       // visible escort to solitary
       if (b.state === 'escorting' && b.escortTarget != null) {
+        this.setGuardRole(b, 'escort');
         const tgt = b.escortTarget; const tp = this.pos(tgt); const tb = this.brain(tgt);
         b.actTimer = (b.actTimer ?? 14) - dt;
         const so = this.pickRoomOfType('solitary'); const sc = this.map.toWorld(so.x + (so.w >> 1), so.y + (so.h >> 1));
@@ -649,10 +779,11 @@ export class Simulation {
       // CHAOS: during lockdown/alarm/riot, man a checkpoint post (or push toward the tensest area in a riot)
       if (this.checkpoints.length && (this.lockdown.active || this.alarm.active || this.riotLevel !== 'calm')) {
         let dest: { x: number; z: number } | null = null;
-        if (this.riotLevel === 'event') { const hot = this.hottestRoom(); if (hot) { const r = this.rooms.find((rr) => rr.id === hot)!; dest = this.map.toWorld(r.x + (r.w >> 1), r.y + (r.h >> 1)); } }
-        if (!dest) { if (b.checkpoint == null) b.checkpoint = e % this.checkpoints.length; dest = this.checkpoints[b.checkpoint]; }
+        // in a riot, only ~half the guards converge on the hottest area; the rest hold posts (no pile-up)
+        if (this.riotLevel === 'event' && (e % 2 === 0)) { const hot = this.hottestRoom(); if (hot) { const r = this.rooms.find((rr) => rr.id === hot)!; dest = this.map.toWorld(r.x + (r.w >> 1), r.y + (r.h >> 1)); this.setGuardRole(b, 'riot'); } }
+        if (!dest) { if (b.checkpoint == null) b.checkpoint = e % this.checkpoints.length; dest = this.checkpoints[b.checkpoint]; this.setGuardRole(b, this.lockdown.active ? 'lockdown' : 'checkpoint'); }
         const at = Math.hypot(p.x - dest.x, p.z - dest.z) <= 1.8;
-        if (at) { ag.path = null; b.action = 'At checkpoint'; }
+        if (at) { ag.path = null; }
         else if (!ag.path && ag.repathCd <= 0) {
           ag.repathCd = 0.8;
           const path = this.path(this.map.worldToIdx(p.x, p.z), this.map.worldToIdx(dest.x, dest.z), e);
@@ -661,21 +792,35 @@ export class Simulation {
         }
         continue;
       }
-      // patrol — sometimes man a guard post (desk/console), otherwise sweep an area or checkpoint
+      // CALM: cycle a patrol route post-by-post with a dwell at each; one guard mans the desk
       if (!ag.path) {
         b.checkpoint = undefined;
-        b.timer -= dt;
-        if (b.timer <= 0) {
-          if (this.rng.chance(0.3) && this.guardToPost(e, b, p)) { b.timer = this.rng.range(3, 6); }
-          else { b.targetRoom = PATROL_ROOMS[Math.floor(this.rng.float() * PATROL_ROOMS.length)]; this.gotoRoom(e, b.targetRoom); b.timer = this.rng.range(3, 6); }
+        b.dwell = (b.dwell ?? 0) - dt;
+        if ((b.dwell ?? 0) > 0) {
+          // dwelling at a post — face the nearest door/desk so guards look like they're watching
+          this.setGuardRole(b, (e % 4 === 0) ? 'desk' : 'patrol');
+          let bx = 0, bz = 0, bd = 4;
+          for (const o of this.objs.values()) { if (o.type !== 'desk' && o.type !== 'door' && o.type !== 'gate') continue; const d = Math.hypot(o.ix - p.x, o.iz - p.z); if (d < bd) { bd = d; bx = o.x; bz = o.z; } }
+          if (bd < 4) p.facing = Math.atan2(bx - p.x, bz - p.z);
         } else {
-          // standing at a post: face the nearest guard desk/console
-          let best: Interactable | null = null, bd = 3;
-          for (const o of this.objs.values()) { if (o.type !== 'desk') continue; const d = Math.hypot(o.ix - p.x, o.iz - p.z); if (d < bd) { bd = d; best = o; } }
-          if (best) p.facing = Math.atan2(best.x - p.x, best.z - p.z);
+          this.setGuardRole(b, (e % 4 === 0) ? 'desk' : 'patrol');
+          // one guard (index 0 of its route family) prefers the security desk
+          if (e % 4 === 0 && this.rng.chance(0.5) && this.guardToPost(e, b, p)) { b.dwell = GUARD_DWELL + this.rng.range(0, 3); }
+          else {
+            const route = routeFor(b.route ?? 0);
+            b.routeStep = ((b.routeStep ?? 0) + 1) % route.length;
+            b.targetRoom = route[b.routeStep];
+            this.gotoRoom(e, b.targetRoom);
+            b.dwell = GUARD_DWELL + this.rng.range(0, 2.5);
+          }
         }
       }
     }
+  }
+  // change a guard's role + readable action label; counts a switch for telemetry (sticky)
+  private setGuardRole(b: Brain, role: GuardRole) {
+    if (b.guardRole === role) return;
+    b.guardRole = role; b.action = ROLE_LABEL[role]; this.metrics.guardRoleSwitches++; b.roleCd = ROLE_STICK;
   }
   // route a guard to a guard desk/console anchor (security or intake) and stand post there
   private guardToPost(e: Entity, b: Brain, p: Position): boolean {
@@ -769,6 +914,7 @@ export class Simulation {
       const chance = 0.25 + an.anger * 0.5 + (rivals ? 0.4 : 0) + (ab.traits.includes('aggressive') ? 0.2 : 0);
       if (this.rng.float() < chance) {
         ab.state = 'fight'; ab.foe = bb; bbr.state = 'fight'; bbr.foe = a; ab.attackCd = 0.3; bbr.attackCd = 0.5;
+        if (ab.mem) rememberFoe(ab.mem, bb); if (bbr.mem) rememberFoe(bbr.mem, a);   // they remember the brawl
         this.bus.emit('alert', { type: 'fight', text: `${ab.name} and ${bbr.name} are fighting!` });
         this.dispatchGuard(a);
         this.registerFight(a);
@@ -999,6 +1145,7 @@ export class Simulation {
     if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down') return 'You can\'t act right now.';
     switch (key) {
       case 'comply':
+        this.metrics.complianceEvents++;
         ps.suspicion = clamp(ps.suspicion - 18, 0, 100); this.riotPressure = clamp01(this.riotPressure - 0.03);
         this.bubble(pl, 'Yes, sir.', 'talk', 1.0); this.floatBy(pl, 'Complied', '#9fe0a0'); return 'You comply with orders.';
       case 'returncell': {
@@ -1291,6 +1438,7 @@ export class Simulation {
       this.bubble(guard, 'Clean.', 'search', 1.2); this.floatBy(target, 'Clean', '#9fe0a0');
       this.bus.emit('alert', { type: 'search', text: `${tb.name} searched — clean` });
     }
+    if (tb.mem) rememberSearch(tb.mem);          // the prisoner remembers being searched
     if (tb.state === 'beingSearched') tb.state = 'idle';
   }
 
@@ -1321,7 +1469,8 @@ export class Simulation {
     if (wb.isPlayer && ws) { ws.reputation = clamp(ws.reputation + 7, -100, 100); this.bus.emit('alert', { type: 'rep', text: `You beat ${lb.name}! Respect rises.` }); }
     if (lb.isPlayer && ls) { ls.reputation = clamp(ls.reputation - 6, -100, 100); this.bus.emit('alert', { type: 'rep', text: `You were beaten by ${wb.name}.` }); this.escortLoserToInfirmaryOrSolitary(); }
     if (ls) ls.respect = clamp(ls.respect - 4, 0, 100);
-    // the loser remembers the player
+    // the loser remembers who beat them (and especially the player)
+    if (lb.mem) rememberFoe(lb.mem, winner, 45);
     if (wb.isPlayer && ls) ls.rel = clamp(ls.rel - 30, -100, 100);
     // guards may discipline the player for fighting if seen
     if (wb.isPlayer || lb.isPlayer) {
@@ -1358,12 +1507,14 @@ export class Simulation {
         ps.suspicion = clamp(ps.suspicion + 12, 0, 100); ps.reputation = clamp(ps.reputation + 2, -100, 100); return `You argue with ${tb.name}. Suspicion rises.`;
       case 'insult': {
         if (ts) ts.rel = clamp(ts.rel - 18, -100, 100);
+        if (tb.mem) rememberThreat(tb.mem, pl);    // they'll avoid/retaliate against you later
         ps.reputation = clamp(ps.reputation + 2, -100, 100);
         const aggr = tb.traits.includes('aggressive') || (ts ? ts.respect : 0) > ps.respect + 10;
         if (aggr && this.rng.chance(0.6)) { this.startPlayerFight(target); return `${tb.name} takes a swing at you!`; }
         return `You insult ${tb.name}. They glare back.`;
       }
       case 'threaten': {
+        if (tb.mem) rememberThreat(tb.mem, pl);
         const win = ps.respect + ps.reputation * 0.3 > (ts ? ts.respect : 30);
         if (win || tb.traits.includes('cowardly')) { if (ts) { ts.rel = clamp(ts.rel - 8, -100, 100); } ps.reputation = clamp(ps.reputation + 4, -100, 100); this.ecs.get<Needs>(target, 'Needs')!.fear = clamp01(this.ecs.get<Needs>(target, 'Needs')!.fear + 0.3); return `${tb.name} backs down.`; }
         ps.reputation = clamp(ps.reputation - 2, -100, 100);
@@ -1451,6 +1602,13 @@ export class Simulation {
       for (const cp of this.checkpoints) if (this.path(start, this.map.worldToIdx(cp.x, cp.z), guard)) { guardToCheckpoint = true; break; }
     }
     let lockdownSane = true; try { sanitizeLockdown(this.serialize().lockdown); } catch { lockdownSane = false; }
+    // AI invariants (Stage 3.2): guards carry a role, prisoners carry an intent + memory
+    let guardsWithRole = 0, guards = 0, prisonersWithIntent = 0, prisoners = 0;
+    for (const e of this.ecs.query('Brain')) {
+      const b = this.brain(e)!;
+      if (b.role === 'guard') { guards++; if (b.guardRole) guardsWithRole++; }
+      else { prisoners++; if (b.intent && b.mem) prisonersWithIntent++; }
+    }
     return {
       playerOk: this.brain(this.playerId)?.isPlayer === true,
       mapOk: !!this.map && this.map.width > 0,
@@ -1459,7 +1617,10 @@ export class Simulation {
       doorsMapped, npcPathOk, saveOk,
       checkpoints: this.checkpoints.length, guardToCheckpoint,
       riotPressureValid: typeof this.riotPressure === 'number' && isFinite(this.riotPressure),
-      riotLevel: this.riotLevel, lockdownSane
+      riotLevel: this.riotLevel, lockdownSane,
+      guardsHaveRole: guards > 0 && guardsWithRole === guards,
+      prisonersHaveIntent: prisoners > 0 && prisonersWithIntent === prisoners,
+      metrics: this.metrics
     };
   }
 
@@ -1486,7 +1647,7 @@ export class Simulation {
       riotPressure: this.riotPressure,
       tension: this.tension
     };
-    return { version: 5, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos };
+    return { version: 6, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -1506,7 +1667,7 @@ export class Simulation {
       this.ecs.set<Render>(e, 'Render', { kind: r.render.kind === 'guard' ? 'guard' : 'prisoner', color: num(r.render.color, 0xc98a3a), meshId: e });
       this.ecs.set<Agent>(e, 'Agent', { speed: num(r.agent?.speed, 2), path: null, step: 0, repathCd: 0 });
       this.ecs.set<Needs>(e, 'Needs', r.needs ?? { hunger: 0, sleep: 0, hygiene: 0, energy: 1, anger: 0, fear: 0, health: 1 });
-      this.ecs.set<Brain>(e, 'Brain', { ...r.brain, role: r.brain.role === 'guard' ? 'guard' : 'prisoner', traits: Array.isArray(r.brain.traits) ? r.brain.traits : [], targetRoom: r.brain.targetRoom ?? 'cellblock', attackCd: 0, timer: 0, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle' });
+      this.ecs.set<Brain>(e, 'Brain', { ...r.brain, role: r.brain.role === 'guard' ? 'guard' : 'prisoner', traits: Array.isArray(r.brain.traits) ? r.brain.traits : [], targetRoom: r.brain.targetRoom ?? 'cellblock', attackCd: 0, timer: 0, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle', intent: 'schedule', intentCd: 0, checkpoint: undefined, dwell: 0, roleCd: 0, bubbleCd: 0, guardRole: r.brain.role === 'guard' ? 'patrol' : undefined, mem: r.brain.role === 'guard' ? undefined : sanitizeMemory(r.brain.mem) });
       this.ecs.set<Social>(e, 'Social', r.social ?? { reputation: 0, respect: 20, suspicion: 0, rel: 0 });
       this.ecs.set<Inventory>(e, 'Inventory', { items: Array.isArray(r.inv?.items) ? r.inv.items.filter((id: any) => typeof id === 'string') : [], money: num(r.inv?.money, 0) });
       if (r.isPlayer || r.brain.isPlayer) this.playerId = e;

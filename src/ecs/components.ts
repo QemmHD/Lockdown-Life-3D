@@ -42,6 +42,15 @@ export interface Brain {
   objTarget?: string;      // interactable id this NPC is walking to / using (schedule)
   checkpoint?: number;     // guard: assigned checkpoint index during lockdown/alarm
   bubbleCd?: number;       // cooldown before this NPC may emit another complaint/panic bubble
+  // ---- Stage 3.2 AI ----
+  guardRole?: string;      // guard: current role (patrol/checkpoint/response/escort/search/desk/lockdown/riot)
+  route?: number;          // guard: assigned patrol-route index
+  routeStep?: number;      // guard: position within the route
+  dwell?: number;          // guard: time left holding the current route post
+  roleCd?: number;         // guard: stickiness — min time before switching role again
+  intent?: string;         // prisoner: current high-level intent (AIIntent.PrisonerIntent)
+  intentCd?: number;       // prisoner: time left before re-evaluating intent
+  mem?: import('../sim/AIMemorySystem').AIMemory;  // prisoner: lightweight memory
 }
 
 // Reputation / standing / suspicion. On the player: reputation+respect drive the loop;
