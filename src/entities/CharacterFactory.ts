@@ -165,6 +165,10 @@ export class CharacterRig {
       sc.position.set(0.1 * h, 0.04 * h, 0.18 * h);
       this.head.add(sc);
     }
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.1 * h, 0.13 * h, 0.16 * h, 8), skinMat);
+    neck.position.y = 0.63 * h;
+    neck.castShadow = true;
+    this.torso.add(neck);
     this.torso.add(this.head);
 
     this.parts = { torso: this.torso, head: this.head };
@@ -210,14 +214,19 @@ export class CharacterRig {
 
   private makeLimb(w: number, hgt: number, d: number, m: THREE.Material, handMat?: THREE.Material): THREE.Group {
     const g = new THREE.Group();
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, d), m);
+    // rounded capsule limb instead of a hard box — softer, more anatomical silhouette
+    const radius = Math.min(w, d) * 0.5;
+    const len = Math.max(0.02, hgt - radius * 2);
+    const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(radius, len, 3, 8), m);
     mesh.position.y = -hgt / 2;
     mesh.castShadow = true;
-    shell(mesh, 1.12);
+    shell(mesh, 1.14);
     g.add(mesh);
     if (handMat) {
-      const hand = new THREE.Mesh(new THREE.BoxGeometry(w * 1.1, w * 1.1, d * 1.1), handMat);
+      const hand = new THREE.Mesh(new THREE.SphereGeometry(radius * 1.25, 8, 6), handMat);
       hand.position.y = -hgt;
+      hand.castShadow = true;
+      shell(hand, 1.16);
       g.add(hand);
     }
     return g;

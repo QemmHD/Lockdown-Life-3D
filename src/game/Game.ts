@@ -35,7 +35,7 @@ import { InventoryUI } from '../ui/InventoryUI';
 
 type Mode = 'menu' | 'playing' | 'paused' | 'dialogue' | 'inventory' | 'event' | 'activity';
 
-const VERSION = '1.5.0';
+const VERSION = '1.6.0';
 const INTERACT_RANGE = 2.4;
 const SCHEDULE_IDS = SCHEDULE.map((p) => p.id);
 const PHASE_START: Record<string, number> = Object.fromEntries(SCHEDULE.map((p) => [p.id, p.startHour]));
@@ -208,6 +208,10 @@ export class Game {
     this.dirLight = dir;
     const hemi = new THREE.HemisphereLight(0xbfd4ff, 0x3a3a30, 0.32);
     this.scene.add(hemi);
+    // cool rim/back light for silhouette separation
+    const rim = new THREE.DirectionalLight(0x8fb4ff, 0.4);
+    rim.position.set(-45, 28, -34);
+    this.scene.add(rim);
 
     // warm follow spotlight that keeps a focused pool of light on the player
     const spot = new THREE.SpotLight(0xffe6c0, 3.2, 22, Math.PI / 4.5, 0.6, 1.2);

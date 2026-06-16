@@ -480,15 +480,22 @@ export class PrisonMap {
     }
   }
 
+  lamps: THREE.Mesh[] = [];
   private buildLights() {
     const positions: [number, number][] = [
       [-40, 0], [0, 0], [40, 0], [-30, -14], [10, -14], [-30, 14], [10, 14], [52, -14]
     ];
+    const lampGeo = new THREE.BoxGeometry(1.6, 0.18, 0.5);
     for (const [x, z] of positions) {
       const pl = new THREE.PointLight(0xfff2cc, 0.5, 30, 1.6);
       pl.position.set(x, 5.5, z);
       this.root.add(pl);
       this.flicker.push(pl);
+      // emissive fixture so the bloom pass has bright sources to glow
+      const lamp = new THREE.Mesh(lampGeo, new THREE.MeshStandardMaterial({ color: 0x222218, emissive: 0xfff2cc, emissiveIntensity: 2.2 }));
+      lamp.position.set(x, 5.4, z);
+      this.root.add(lamp);
+      this.lamps.push(lamp);
     }
   }
 
@@ -519,6 +526,12 @@ export class PrisonMap {
       pl.intensity = base + Math.sin(time * 9 + i * 2.3) * 0.06 + (Math.random() < 0.02 ? -0.25 : 0);
       if (lockdown) pl.color.setHex(0xff5544);
       else pl.color.setHex(0xfff2cc);
+      const lamp = this.lamps[i];
+      if (lamp) {
+        const m = lamp.material as THREE.MeshStandardMaterial;
+        m.emissive.setHex(lockdown ? 0xff3322 : 0xfff2cc);
+        m.emissiveIntensity = (lockdown ? 1.6 : 2.2) + Math.sin(time * 9 + i * 2.3) * 0.4;
+      }
     }
     // steam drifting
     for (const s of this.steamPuffs) {

@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.6.0 — "Sharper Steel" (graphics overhaul II)
+- **Rebuilt character models**: blocky box limbs replaced with rounded **capsule** arms/legs,
+  **sphere hands**, and a **neck** for a softer, more anatomical low-poly silhouette (outlines and
+  animation rig preserved).
+- **Ground-truth ambient occlusion (GTAO)** added to the post stack for grounded contact shadows in
+  corners and under props (best-effort; skipped automatically if unsupported).
+- **Emissive light fixtures**: ceiling lamps now glow and feed the bloom pass (and flicker red on
+  lockdown) for a moodier, more lit-up block.
+- **Cool rim/back light** for stronger silhouette separation against the environment.
+
 ## v1.5.0 — "Every Sentence Is Different" (procedural systems pass)
 A deep randomness layer so every save plays differently — without breaking the playable layout.
 - **Seeded runs**: a `mulberry32` RNG (`randomFloat/int/choice/weighted/chance/shuffle/vary`). Every
