@@ -69,6 +69,8 @@ input (tap/drag/pinch)
 | Chaos | `sim/LockdownSystem.ts`, `RiotSystem.ts`, `EscapeSystem.ts`, `GuardCheckpointSystem.ts` | pure types + constants + decision functions for the chaos layer; the Simulation owns the state and orchestrates them thinly |
 | AI | `sim/AIIntent.ts`, `PrisonerAISystem.ts`, `AIMemorySystem.ts`, `GroupBehaviorSystem.ts`, `GuardAISystem.ts` | pure AI vocabulary/labels, prisoner-intent scoring, decaying memory, cluster/separation geometry, and guard routes; the Simulation gathers context and applies the chosen intents/roles |
 | Combat | `sim/CombatSystem.ts` | pure attack tables (windup/recovery/hit-chance/damage/knockback), attack selection, and hit/block/dodge/miss resolution; the Simulation runs the per-fighter phase machine, RenderSync animates the phases read-only |
+| Progression | `sim/Progression.ts` | pure reputation tiers, objective templates/roll, daily-summary rating; the Simulation owns live progression/objectives/daily state and a `prog()` event hook |
+| Menus | `ui/Menus.ts` | title screen, tabbed pause overlay (Stats/People/Inventory/Objectives/Gangs/Help), and daily-summary modal — reads `Simulation.uiSnapshot()`, never writes |
 | World | `world/TileMap.ts`, `Pathfinding.ts`, `WorldGen.ts`, `Interactable.ts` | grid, A*, floorplan, object model |
 | Render | `render/ThreeApp.ts`, `IsoCamera.ts`, `WorldRenderer.ts`, `PropRenderer.ts`, `CharacterFactory.ts`, `RenderSync.ts`, `Feedback.ts`, `VisualTheme.ts`, `textures/` | rendering (read-only) |
 | UI | `ui/HUD.ts` | DOM overlay |
@@ -106,6 +108,13 @@ cluster/separation geometry so crowds read as loose groups. All of it is pure he
 integration; transient AI (intent, memory refs) resets on load. Still **partial**: no full GOAP
 planner, no formal squad tactics, group clustering is geometric (not negotiated), and guard routes are
 fixed tables rather than learned/dynamic.
+
+**UI / progression (Stage 3.4).** `Progression.ts` is pure (tiers/objectives/daily rating); the
+Simulation owns `progression`, `objectives`, `daily`, and a `prog(kind)` hook called at existing event
+sites — no new event bus. `Menus.ts` is a read-only DOM view of `Simulation.uiSnapshot()` (title /
+pause tabs / day-summary). The game boots paused at the title; the loop surfaces `pendingSummary` once
+per day. Save v8 persists progression/objectives/daily. Still **partial**: no gang **joining**, no
+character creation, settings is a placeholder, objectives are a fixed rotating pool (not generated).
 
 **Combat feel (Stage 3.3).** Fights are a per-fighter **phase machine** (squareUp/windup/strike/
 recover + reaction phases block/dodge/hitReact/stumble/down) driven in `Simulation.combatSystem`;

@@ -39,6 +39,7 @@ export class HUD {
       </div>
       <div id="chaos-banner" class="hidden"></div>
       <div id="alert-feed"></div>
+      <div id="obj-tracker" class="hidden"></div>
       <div id="action-bar" style="display:none"><div class="ab-label"></div><div class="ab-track"><div class="ab-fill"></div></div></div>
       <div id="panel" class="hidden"></div>
       <div id="bottombar">
@@ -48,7 +49,7 @@ export class HUD {
         <button data-b="load" class="hud-btn"><span class="b-ico">▤</span><span class="b-lbl">Load</span></button>
       </div>`;
     document.getElementById('ui-root')!.appendChild(this.root);
-    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'chip-lock', 'tb-lock', 'chaos-banner', 'alert-feed', 'panel', 'speed-x', 'alarm'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
+    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'chip-lock', 'tb-lock', 'chaos-banner', 'alert-feed', 'obj-tracker', 'panel', 'speed-x', 'alarm'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
     this.root.querySelectorAll('#bottombar button').forEach((b) => {
       const k = (b as HTMLElement).dataset.b!;
       b.addEventListener('click', () => {
@@ -97,6 +98,19 @@ export class HUD {
   }
 
   clearAlerts() { this.els['alert-feed'].innerHTML = ''; this.alertSeen.clear(); }
+  // compact always-on objective tracker (tier chip + up to 3 active goals); re-renders only on change
+  private objSig = '';
+  setObjectives(objectives: { text: string; goal: number; progress: number; done: boolean }[], tier: { name: string }) {
+    const active = objectives.filter((o) => !o.done).slice(0, 3);
+    const sig = tier.name + '|' + objectives.map((o) => `${o.text}:${o.progress}/${o.goal}:${o.done ? 1 : 0}`).join(',');
+    if (sig === this.objSig) return; this.objSig = sig;
+    const el = this.els['obj-tracker'];
+    if (!objectives.length) { el.classList.add('hidden'); return; }
+    el.classList.remove('hidden');
+    const rows = active.map((o) => `<div class="ot-row">○ ${o.text}${o.goal > 1 ? ` <i>${o.progress}/${o.goal}</i>` : ''}</div>`).join('');
+    const doneN = objectives.filter((o) => o.done).length;
+    el.innerHTML = `<div class="ot-head">${tier.name} · Objectives ${doneN}/${objectives.length}</div>${rows || '<div class="ot-row done">All done ✓</div>'}`;
+  }
   private alertSeen = new Map<string, number>();   // text -> last-shown timestamp (dedupe)
   alert(text: string, type = 'info') {
     const now = performance.now();

@@ -12,6 +12,35 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v3.4.0-ui — Stage UI/Menu/Progression 3.4 (goals, menus, day summary, reputation tiers)
+Turns the sim into a game with direction. Keeps the in-game HUD/panel; adds the missing structure
+layer. Sim authoritative, RenderSync read-only, build passes, 0 runtime errors. New pure module
+`Progression.ts` (tiers/objectives/daily rating) + DOM `ui/Menus.ts`.
+- **Title screen**: Play / Continue (if a save exists) / New Game / How to Play + version. The game now
+  boots paused at a title over the dimmed world instead of dropping straight in.
+- **Pause/menu overlay** (bottom Pause button): tabbed — Objectives / Stats / People / Inventory /
+  Gangs / Help / Settings, plus Save / Load / Resume / Main Menu. Game pauses while open; mobile-readable.
+- **Stats screen**: needs bars, money/respect/reputation/suspicion/heat, gang, discipline/solitary, the
+  reputation **tier** + progress bar, and lifetime totals (days survived, objectives, jobs, fights W/L,
+  searches, solitary, lockdowns, contraband).
+- **Reputation/respect tiers**: Nobody → Known Face → Respected → Feared → Influential → Prison Legend,
+  from a combined standing score, with a progress bar and light effects (better favor odds, stronger
+  threats, more willing trades at higher tiers).
+- **Objectives v1**: 3–4 daily goals (eat / wash / job / talk / earn $ / +respect / train / return to
+  cell during lockdown + a "survive the day without solitary" goal), event-driven progress, small
+  rewards, an always-on **HUD objective tracker**, completion alerts.
+- **Daily summary**: an end-of-day card at the day rollover (rep/respect/money change, fights, jobs,
+  searches, solitary, lockdowns, objectives, a flavour rating: Quiet Day → Lockdown Magnet) — shown once.
+- **Relationships / Inventory / Gangs screens**: read the live sim — who feels how about you (+ memory
+  hints), carried items with risk/concealment/value/contraband warning, and gang standing/territory/allies.
+- **Help overlay**: concise "How to Play" on the title and in the menu.
+- **Progression data model**: lifetime totals tracked via a central `prog()` hook on existing events
+  (eat/wash/job/talk/fight/search/contraband/solitary/lockdown/escape/day/money/respect/relationship).
+- **Save/load v8**: persists progression, objectives, daily stats, last-summary day. Backward-compatible
+  with v7/v6/v5/v4 (older saves get sensible defaults).
+- **?debug self-test+**: progression/objectives/tier/snapshot checks; telemetry includes objectives
+  completed + summaries shown.
+
 ## v3.3.0-combat — Stage Combat/Animation Feel 3.3 (phased fights, reactions, physical feel)
 Combat-feel pass — fights now have rhythm, defence, knockback, and readable animation. No new
 progression/economy. Sim authoritative, RenderSync read-only, build passes, 0 runtime errors. New

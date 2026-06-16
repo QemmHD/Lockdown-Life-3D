@@ -132,6 +132,18 @@ selected-object / blocked-path info to the console.
 - [ ] Save/load during a fight → no one stuck in windup/fight; outcomes (health/respect/memory) persist
 - [ ] `?debug` metrics include attacks/hits/misses/blocks/dodges/knockdowns/guardInterrupts/playerCombatChoices
 
+## UI / menus / progression (Stage 3.4)
+- [ ] Game boots to a title screen (Play / Continue / New Game / How to Play); doesn't drop straight in
+- [ ] Play starts the game; Continue loads a save; New Game clears + restarts
+- [ ] Bottom Pause opens the tabbed menu (game pauses); Resume closes it
+- [ ] Stats tab shows needs/money/respect/reputation/suspicion/heat + reputation tier + lifetime totals
+- [ ] Objectives tab lists daily goals; HUD objective tracker shows active goals; goals complete on events
+- [ ] People/Inventory/Gangs tabs populate from the live sim
+- [ ] A day rollover shows the end-of-day summary once (rating + changes)
+- [ ] Reputation tier rises with reputation/respect (Nobody → … → Prison Legend)
+- [ ] Save/Load (v8) keeps progression/objectives/daily stats; old saves load with defaults
+- [ ] Menus are readable in mobile landscape; existing HUD/panel still work
+
 ## Stability
 - [ ] Run a full in-game day at 4× → no runtime errors, no soft-locks
 - [ ] No leaking DOM feedback elements after many floats/bubbles

@@ -10,6 +10,7 @@ import { EventBus } from './EventBus';
 import { InputManager } from './InputManager';
 import { SaveManager } from './SaveManager';
 import { HUD, PanelInfo, PanelAction } from '../ui/HUD';
+import { Menus } from '../ui/Menus';
 import { Entity } from '../ecs/world';
 import { Brain, Needs, Position, Agent, Social, Inventory } from '../ecs/components';
 import { phaseAt, GANG_MAP } from '../data/content';
@@ -28,6 +29,7 @@ export class Game {
   private sync: RenderSync;
   private feedback!: Feedback;
   private hud: HUD;
+  private menus!: Menus;
   private clock = new THREE.Clock();
   private acc = 0;
   private speedIdx = 0;
@@ -65,7 +67,7 @@ export class Game {
     this.cam.focus(sp ? sp.x : 0, sp ? sp.z : 0);
 
     this.hud = new HUD({
-      onPause: () => { this.paused = !this.paused; this.hud.setSpeed(this.paused ? '❚❚' : SPEEDS[this.speedIdx] + '×'); },
+      onPause: () => this.openMenu(),
       onSpeed: () => { this.speedIdx = (this.speedIdx + 1) % SPEEDS.length; this.paused = false; this.hud.setSpeed(SPEEDS[this.speedIdx] + '×'); },
       onSave: () => { const ok = SaveManager.save(this.sim.serialize()); this.hud.alert(ok ? 'Game saved' : 'Save failed (storage unavailable)', ok ? 'guard' : 'fight'); },
       onLoad: () => this.load(),
@@ -75,6 +77,21 @@ export class Game {
       onItem: (key) => { const r = this.sim.dropItem(key); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; this.refreshPanel(); }
     });
     this.select(this.playerEntity);   // panel shows the player by default
+
+    // menus / title / pause / daily summary (Stage 3.4)
+    this.menus = new Menus({
+      onNewGame: () => { SaveManager.clear(); location.reload(); },
+      onContinue: () => { this.load(); this.closeMenu(); },
+      onQuickStart: () => this.closeMenu(),
+      onResume: () => this.closeMenu(),
+      onSave: () => { const ok = SaveManager.save(this.sim.serialize()); this.hud.alert(ok ? 'Game saved' : 'Save failed', ok ? 'guard' : 'fight'); },
+      onLoad: () => { this.load(); this.closeMenu(); },
+      onMainMenu: () => { this.menus.showTitle(); this.paused = true; },
+      hasSave: () => SaveManager.has(),
+      snapshot: () => this.sim.uiSnapshot(),
+      version: 'v3.4.0-ui'
+    });
+    this.menus.showTitle(); this.paused = true;   // start at the title screen
 
     this.bus.on('pan', ({ dx, dy }) => this.cam.pan(dx, dy));
     this.bus.on('zoom', ({ factor }) => this.cam.zoomBy(factor));
@@ -300,6 +317,9 @@ export class Game {
     this.refreshPanel();
   }
 
+  private openMenu() { if (this.menus.isOpen()) return; this.menus.showPause(); this.paused = true; }
+  private closeMenu() { this.menus.hide(); this.paused = false; this.hud.setSpeed(SPEEDS[this.speedIdx] + '×'); }
+
   private load() {
     const data = SaveManager.load();
     if (!data) { this.hud.alert('No save found', 'fight'); return; }
@@ -406,6 +426,9 @@ export class Game {
       lockdown: this.sim.lockdown.active, lockdownTimer: this.sim.lockdown.timer, lockdownReason: this.sim.lockdown.reason,
       alarm: this.sim.alarm.active, level: this.sim.riotLevel, objective: this.sim.playerObjective
     });
+    // objective tracker (throttled with the panel) + once-a-day summary modal
+    if (this.panelTimer >= 0.14) this.hud.setObjectives(this.sim.objectives, this.sim.tier());
+    if (this.sim.pendingSummary && !this.menus.isOpen()) { this.menus.showSummary(this.sim.takeSummary()); this.paused = true; }
 
     this.app.renderer.render(this.app.scene, this.cam.camera);
     requestAnimationFrame(this.loop);
