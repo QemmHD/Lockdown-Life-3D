@@ -6,6 +6,8 @@ export type EscapeOutcome = 'caught' | 'interrupted' | 'abandoned' | 'success';
 
 // Abstract opportunity zones (perimeter/service transitions). The yard gate is the main one.
 export const ESCAPE_OPPORTUNITY_ROOMS = ['yard', 'intake', 'storage'];
+// quiet window (sim-seconds) after any escape attempt before another can occur (keeps it rare)
+export const ESCAPE_COOLDOWN = 60;
 
 export interface EscapeState {
   active: boolean;

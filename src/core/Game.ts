@@ -247,17 +247,15 @@ export class Game {
   // (see Simulation.requestNearestObjectAction) — not a room-only stat change. If nothing is
   // reachable the sim returns a clear reason ("Find a bed.", "No reachable shower.", …).
   private playerActions(_e: Entity): PanelAction[] {
-    const a: PanelAction[] = [
-      { key: 'rest', label: 'Rest', kind: 'object' },
-      { key: 'wash', label: 'Wash', kind: 'object' },
-      { key: 'eat', label: 'Eat', kind: 'object' },
-      { key: 'train', label: 'Train', kind: 'object' },
-      { key: 'work', label: 'Work', kind: 'object' }
-    ];
-    // chaos context actions (Comply / Return to Cell / Hide / Calm Down / Help Guard / Attempt Escape)
-    for (const c of this.sim.playerChaosActions()) {
-      a.push({ key: c.key, label: c.label, kind: c.key === 'escape' ? 'risky' : 'guard', disabled: c.disabled, reason: c.reason, danger: c.key === 'escape' });
+    const a: PanelAction[] = [];
+    const chaos = this.sim.playerChaosActions();
+    // during a lockdown the needs stations are out of reach — lead with the chaos actions only
+    if (!this.sim.lockdown.active) {
+      a.push({ key: 'rest', label: 'Rest', kind: 'object' }, { key: 'wash', label: 'Wash', kind: 'object' },
+        { key: 'eat', label: 'Eat', kind: 'object' }, { key: 'train', label: 'Train', kind: 'object' }, { key: 'work', label: 'Work', kind: 'object' });
     }
+    // chaos context actions (Comply / Return to Cell / Hide / Calm Down / Help Guard / Attempt Escape)
+    for (const c of chaos) a.push({ key: c.key, label: c.label, kind: c.key === 'escape' ? 'risky' : 'guard', disabled: c.disabled, reason: c.reason, danger: c.key === 'escape' });
     return a;
   }
   private npcActions(e: Entity, role: string): PanelAction[] {
@@ -305,6 +303,7 @@ export class Game {
     this.sync.setEcs(this.sim.ecs);
     this.playerEntity = this.sim.player();
     this.panelDirty = true;
+    this.hud.clearAlerts();             // drop any stale alert lines from before the load
     this.select(this.playerEntity);
     this.hud.alert('Game loaded', 'guard');
   }
@@ -390,10 +389,9 @@ export class Game {
       if (this.selectedObj) this.refreshObjectPanel(); else this.refreshPanel();
       this.panelDirty = false; this.panelTimer = 0.15;
     }
-    // chaos-driven HUD: riot pressure + heat (alarm/lockdown), lockdown chip + chaos banner
+    // chaos-driven HUD: eased heat + riot pressure, lockdown chip + chaos banner
     const riot = this.sim.riotPressure;
-    const heat = (this.sim.alarm.active ? 70 : 0) + (this.sim.lockdown.active ? 30 : 0);
-    this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, heat, riot);
+    this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, this.sim.heat, riot);
     this.hud.setAlarm(this.sim.alarm.active || this.sim.riotLevel === 'event' ? 1 : riot);
     this.hud.setChaos({
       lockdown: this.sim.lockdown.active, lockdownTimer: this.sim.lockdown.timer, lockdownReason: this.sim.lockdown.reason,

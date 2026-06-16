@@ -95,3 +95,9 @@ The orchestration (timers, triggers, mutations) currently lives in `Simulation.c
 friends, marked with `TODO(refactor)`. When the surface settles, promote these into stateful
 `*System` classes (one step further than the current pure modules). Keep the read-only render rule and
 the sim-owns-state rule intact through any refactor.
+
+**Tuning + telemetry (Stage 3.1).** Heat is an eased 0–100 value with discrete event bumps and calm
+decay; riot pressure uses hysteresis + cooldowns; lockdowns have a re-entry cooldown (severe events
+override); alerts are deduped with categories. `Simulation.metrics` is a lightweight counter map
+(fights, searches, lockdowns, alarms, riot warnings/events, escapes, blocked fallbacks, …) read via
+`?debug` for playtest summaries — not gameplay state, safe to ignore in save/load.

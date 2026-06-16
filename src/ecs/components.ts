@@ -41,6 +41,7 @@ export interface Brain {
   actTimer?: number;       // generic in-progress action timer (guard search etc.)
   objTarget?: string;      // interactable id this NPC is walking to / using (schedule)
   checkpoint?: number;     // guard: assigned checkpoint index during lockdown/alarm
+  bubbleCd?: number;       // cooldown before this NPC may emit another complaint/panic bubble
 }
 
 // Reputation / standing / suspicion. On the player: reputation+respect drive the loop;

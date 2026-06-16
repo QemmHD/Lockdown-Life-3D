@@ -224,9 +224,10 @@ versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARC
 - **Area tension** per room (Calm → Critical) from crowding + gang rivalry.
 - **Abstract escape** (fictional only): rare NPC attempts, plus a player **Attempt Escape** near a gate/perimeter with caught/interrupted/abandoned/prototype-success outcomes.
 - **Player chaos actions**: Comply, Return to Cell, Hide, Calm Down, Help Guard.
+- **Tuning (3.1)**: eased Heat that decays when calm, smoothed riot pressure with hysteresis + cooldowns, lockdown re-entry cooldown, deduped alerts, contextual player panel, and `?debug` playtest telemetry (`sim.metrics`).
 
 ## Planned next
-Deeper riot warfare and an event director, then balance/feel or iOS (Capacitor) packaging prep.
+Deeper guard/prisoner AI or combat/animation feel, then iOS (Capacitor) packaging prep.
 
 ---
 

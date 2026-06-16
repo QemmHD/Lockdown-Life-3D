@@ -94,7 +94,18 @@ selected-object / blocked-path info to the console.
 - [ ] Area tension shows on the door/object panel ("Area: Tense/Dangerous") in crowded/rival rooms
 - [ ] Player chaos actions appear during chaos (Comply / Return to Cell / Hide / Calm Down / Help Guard)
 - [ ] Attempt Escape appears only near the yard gate / perimeter; resolves caught/interrupted/abandoned/success
-- [ ] Save during a lockdown, then load → lockdown/alarm/riot/tension restored, no crash, no stuck NPCs
+- [ ] Save during a lockdown, then load → lockdown/alarm/riot/tension/heat restored, no crash, no stuck NPCs
+
+## Chaos balance / feel (Stage 3.1)
+- [ ] Calm first day with no player trouble: Heat stays well under 50, no lockdown loop
+- [ ] Alert feed doesn't spam duplicate LOCKDOWN/ALARM lines (deduped; clear STARTED/LIFTED/ACTIVE transitions)
+- [ ] Heat rises on fights/contraband/escape and decays during calm time (not pinned at 100)
+- [ ] Riot pressure moves smoothly; warning more common than a full event; both have cooldowns
+- [ ] After a lockdown lifts, a new one doesn't immediately start unless a severe event happens
+- [ ] Alarm vignette is noticeable but not overwhelming; door lamps flash without cluttering the map
+- [ ] Player panel isn't a wall of buttons during lockdown (needs hidden, chaos actions lead)
+- [ ] Complaint/panic bubbles are throttled; prisoners resume normal schedules after chaos ends
+- [ ] `?debug` console shows a telemetry summary (`window.__game.sim.metrics`)
 
 ## Stability
 - [ ] Run a full in-game day at 4× → no runtime errors, no soft-locks
