@@ -156,6 +156,18 @@ selected-object / blocked-path info to the console.
 - [ ] Title Continue shows saved name + day; loads correctly
 - [ ] Save/load (v9) keeps the setup; an older save loads with default setup (no crash)
 
+## Gangs / factions (Stage 3.6)
+- [ ] Player starts unaffiliated; gang lean seeds some standing
+- [ ] Building standing (talk/favour/trade with members) raises standing; rivals drop
+- [ ] At high standing + respect a crew invites you (alert + "Decide whether to join" objective)
+- [ ] Inspect a member → Ask About Gang / Accept Invite / Decline; accepting sets membership
+- [ ] After joining: rank shows, allies warm/cluster, rivals cold; Gangs tab shows membership/rank/perks/standing
+- [ ] Crew goals appear and complete; completing one raises standing + can rank you up
+- [ ] Attacking a member lowers that crew's standing
+- [ ] Leave Gang works (standing penalty); rivals/standoffs still function
+- [ ] Daily summary / stats reflect gang standing & rank
+- [ ] Save/load (v10) restores membership/rank/standing; an older save migrates to unaffiliated
+
 ## Stability
 - [ ] Run a full in-game day at 4× → no runtime errors, no soft-locks
 - [ ] No leaking DOM feedback elements after many floats/bubbles

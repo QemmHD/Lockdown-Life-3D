@@ -24,12 +24,12 @@ low-poly geometry** — no external art/audio assets.
 - **TypeScript** (strict)
 - **Three.js** for rendering (orthographic isometric camera)
 - **DOM / CSS** overlay HUD (no UI framework)
-- **`localStorage`** saves (versioned, currently v4)
+- **`localStorage`** saves (versioned, currently v10)
 - **Procedural low-poly geometry** built at runtime (no model/texture/audio files)
 - A small **ECS-lite** simulation (`src/ecs` + `src/sim`)
 
-There is **no** audio, no WebGL post-processing pipeline, no character-creation flow, and no
-keyboard/gamepad controls in the current build.
+There is **no** audio and no WebGL post-processing pipeline in the current build; controls are
+touch/mouse only (no keyboard/gamepad).
 
 ---
 
@@ -106,7 +106,7 @@ and route through doors. Guards patrol, man guard desks, respond to fights, sear
 | **North Hall** | Green | Cell block | allies: Iron Block |
 | **Cell Rats** | Tan | Cafeteria / Cell block | allies: Blue Chain |
 
-Gangs are purely fictional game data. Joining gangs is **not** implemented yet (see Planned).
+Gangs are purely fictional game data. You can build standing with a crew, get invited, and **join** one — gaining a rank, perks, crew goals, and rival consequences (Stage 3.6).
 
 ---
 
@@ -130,7 +130,7 @@ Gangs are purely fictional game data. Joining gangs is **not** implemented yet (
 - Object reservations (NPC + player) with safety auto-release
 - **Chaos layer**: lockdowns, alarm state, riot pressure, area tension, guard checkpoints, blocked-prisoner reactions, abstract escape attempts, and player chaos actions
 - World feedback: floating text + speech/icon bubbles, selection/highlight rings, action progress bar, chaos banner + alarm vignette
-- Save / load v5 (`localStorage`) incl. chaos state
+- Save / load (`localStorage`, versioned) incl. chaos / progression / setup state
 - Touch + mouse: tap, drag-pan, pinch/wheel-zoom
 
 - **Guard AI v2**: roles (patrol/checkpoint/response/escort/search/desk/lockdown/riot) + patrol routes + coordinated response (no pile-on)
@@ -138,6 +138,7 @@ Gangs are purely fictional game data. Joining gangs is **not** implemented yet (
 - **Combat feel**: phased fights (squareUp/windup/strike/block/dodge/hitReact/stumble/down/recover), attack types, knockback, knockdown, player combat panel, guard interruption, crowd reactions
 - **Structure layer**: title screen, tabbed pause menu (Stats/People/Inventory/Objectives/Gangs/Help), reputation tiers, daily objectives + HUD tracker, end-of-day summary, progression totals
 - **Character creation**: new-game setup (name/appearance/traits/backstory/gang-lean/difficulty), randomize, run identity applied to the player
+- **Faction progression**: build standing → NPC gang invite → join, ranks (Associate→Shot Caller), crew goals, small perks, rival consequences, Gangs menu
 
 **Partial**
 - Guard AI (roles + routes + checkpoints, but no formal squad tactics / dynamic routes)
@@ -150,9 +151,9 @@ Gangs are purely fictional game data. Joining gangs is **not** implemented yet (
 - Balance / tuning · Mobile UI polish
 
 **Planned / Future**
-- Deeper riot warfare, **gang joining** (lean exists), event director
+- Deeper riot warfare, event director, deeper gang hierarchy/squad commands
 - Economy/contraband depth, settings menu, audio
-- Deeper appearance / cosmetics
+- World expansion / more areas, deeper appearance / cosmetics
 - Real audio / SFX
 - More animation
 - Capacitor / iOS `.ipa` packaging
@@ -223,7 +224,7 @@ versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARC
 - Single hand-authored prison (no procedural prison generation).
 - Guard/NPC AI is intentionally light; deeper planning is a future stage.
 - The chaos layer is a first vertical slice — riot *events* are small and controlled, not full riot warfare.
-- No audio, no character creation yet.
+- No audio yet. Character creation, menus, objectives, reputation tiers, and gang lean exist; gang joining is added in Stage 3.6.
 - Balance is rough and subject to change.
 - The follow camera reframes the subject slightly left of centre so the right-side panel doesn't cover it.
 
@@ -237,7 +238,7 @@ versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARC
 - **Tuning (3.1)**: eased Heat that decays when calm, smoothed riot pressure with hysteresis + cooldowns, lockdown re-entry cooldown, deduped alerts, contextual player panel, and `?debug` playtest telemetry (`sim.metrics`).
 
 ## Planned next
-Economy/contraband depth, gang joining/faction progression, or audio/polish — then iOS (Capacitor) packaging prep.
+Economy/contraband depth, audio/polish, or world expansion — then iOS (Capacitor) packaging prep.
 
 ---
 

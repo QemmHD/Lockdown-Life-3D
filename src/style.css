@@ -152,6 +152,7 @@ button { font-family: inherit; cursor: pointer; }
 .m-item.contra .m-item-n { color: #ff8a7a; }
 .m-warn { background: rgba(192,57,43,0.18); border: 1px solid #c0392b; border-radius: 8px; padding: 7px 10px; font-size: 12px; margin-bottom: 8px; }
 .m-note { opacity: 0.6; font-size: 13px; padding: 10px 0; }
+.m-label2 { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; opacity: 0.55; margin: 12px 0 5px; }
 .m-help-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; } @media (max-width: 620px){ .m-help-grid{ grid-template-columns:1fr; } }
 .m-help-grid div { font-size: 12px; } .m-help-grid b { display: block; color: var(--accent); margin-bottom: 1px; } .m-help-grid span { opacity: 0.75; }
 

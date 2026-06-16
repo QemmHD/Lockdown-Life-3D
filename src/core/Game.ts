@@ -90,6 +90,9 @@ export class Game {
       onLoad: () => { this.load(); this.closeMenu(); },
       onMainMenu: () => { this.menus.showTitle(); this.paused = true; },
       onBeginRun: (setup) => this.beginRun(setup),
+      onAcceptInvite: () => { const inv = this.sim.gang.invite; if (inv) { const r = this.sim.requestGangAction(inv.by, 'acceptinvite'); if (r) this.hud.alert(r, 'player'); } },
+      onDeclineInvite: () => { const inv = this.sim.gang.invite; if (inv) { const r = this.sim.requestGangAction(inv.by, 'declineinvite'); if (r) this.hud.alert(r, 'info'); } },
+      onLeaveGang: () => { const r = this.sim.leaveGang(); if (r) this.hud.alert(r, 'info'); },
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
@@ -242,9 +245,10 @@ export class Game {
     if (!b || !n || !s) { this.hud.showPanel(null); return; }
     const isPlayer = !!b.isPlayer;
     const gang = b.gang ? GANG_MAP[b.gang] : undefined;
+    const gi = !isPlayer ? this.sim.gangInfoFor(e) : null;
     const meta = isPlayer
-      ? [`Rep ${Math.round(s.reputation)}`, `Respect ${Math.round(s.respect)}`, `Suspicion ${Math.round(s.suspicion)}`, `$${inv?.money ?? 0}`]
-      : [`Respect ${Math.round(s.respect)}`, `Toward you: ${this.relWord(s.rel)}`];
+      ? [`Rep ${Math.round(s.reputation)}`, `Respect ${Math.round(s.respect)}`, `Suspicion ${Math.round(s.suspicion)}`, `$${inv?.money ?? 0}`, ...(this.sim.gang.membership ? [`${GANG_MAP[this.sim.gang.membership].name}: ${['None', 'Associate', 'Member', 'Trusted', 'Enforcer', 'Shot Caller'][this.sim.gang.rank]}`] : [])]
+      : [`Respect ${Math.round(s.respect)}`, `Toward you: ${this.relWord(s.rel)}`, ...(gi ? [`${gi.gang}: ${gi.label}${gi.relation !== 'neutral' ? ` (${gi.relation})` : ''}`] : [])];
     const items = (inv?.items ?? []).map((id) => ({ icon: ITEMS[id]?.icon ?? '▪', name: ITEMS[id]?.name ?? id, contraband: isContraband(id), key: id }));
     const actions: PanelAction[] = isPlayer ? this.playerActions(e) : this.npcActions(e, b.role);
     const info: PanelInfo = {
@@ -286,19 +290,25 @@ export class Game {
     if (role === 'guard') return [{ key: 'talk', label: 'Talk', kind: 'social' }, { key: 'comply', label: 'Comply', kind: 'guard' }, { key: 'argue', label: 'Argue', kind: 'risky' }];
     const tinv = this.sim.ecs.get<Inventory>(e, 'Inventory');
     const canTrade = !!tinv && tinv.items.length > 0;
-    return [
+    const a: PanelAction[] = [
       { key: 'talk', label: 'Talk', kind: 'social' },
       { key: 'trade', label: 'Trade', kind: 'social', disabled: !canTrade, reason: canTrade ? '' : 'they have nothing to trade' },
-      { key: 'favor', label: 'Favor', kind: 'social' },
-      { key: 'insult', label: 'Insult', kind: 'risky' },
-      { key: 'threaten', label: 'Threaten', kind: 'risky' },
-      { key: 'fight', label: 'Fight', kind: 'risky', danger: true },
-      { key: 'backoff', label: 'Back Off' }
+      { key: 'favor', label: 'Favor', kind: 'social' }
     ];
+    // gang actions when this inmate has a crew
+    const gi = this.sim.gangInfoFor(e);
+    if (gi) {
+      if (gi.inviteActive) { a.push({ key: 'acceptinvite', label: 'Accept Invite', kind: 'guard' }, { key: 'declineinvite', label: 'Decline', kind: 'social' }); }
+      else if (gi.canAsk) a.push({ key: 'askgang', label: 'Ask About Gang', kind: 'social' });
+      if (gi.relation === 'ally') a.push({ key: 'helpmember', label: 'Help Member', kind: 'social' });
+    }
+    a.push({ key: 'insult', label: 'Insult', kind: 'risky' }, { key: 'threaten', label: 'Threaten', kind: 'risky' }, { key: 'fight', label: 'Fight', kind: 'risky', danger: true }, { key: 'backoff', label: 'Back Off' });
+    return a;
   }
   private static SELF_KEYS = ['rest', 'wash', 'eat', 'train', 'work'];
   private static CHAOS_KEYS = ['comply', 'returncell', 'hide', 'calm', 'helpguard'];
   private static COMBAT_KEYS = ['strike', 'heavy', 'shove', 'block'];
+  private static GANG_KEYS = ['askgang', 'acceptinvite', 'declineinvite', 'helpmember'];
   private doAction(key: string) {
     this.panelDirty = true;
     if (this.selectedObj) {
@@ -312,6 +322,7 @@ export class Game {
     const fighting = isPlayerSel && this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.state === 'fight';
     let status: string;
     if (fighting && (Game.COMBAT_KEYS.includes(key) || key === 'backoff')) status = this.sim.requestCombatAction(key);
+    else if (!isPlayerSel && Game.GANG_KEYS.includes(key)) status = this.sim.requestGangAction(sel, key);
     else if (isPlayerSel && key === 'escape') status = this.sim.requestEscape();
     else if (isPlayerSel && Game.CHAOS_KEYS.includes(key)) status = this.sim.requestChaosAction(key);
     // player "convenience" needs actions route to the nearest reachable real object (not room shortcuts)

@@ -12,6 +12,9 @@ export interface MenuHooks {
   onLoad: () => void;
   onMainMenu: () => void;
   onBeginRun: (setup: NewGameSetup) => void;
+  onAcceptInvite: () => void;
+  onDeclineInvite: () => void;
+  onLeaveGang: () => void;
   hasSave: () => boolean;
   saveInfo: () => { name: string; day: number } | null;
   snapshot: () => any;
@@ -37,6 +40,7 @@ export class Menus {
   }
 
   isOpen() { return this.mode !== 'hidden'; }
+  refresh() { if (this.mode !== 'hidden') this.render(); }
   showSetup() { this.setup = defaultSetup(); this.setup.traits = ['tough']; this.step = 0; this.mode = 'setup'; this.render(); }
   showTitle() { this.mode = 'title'; this.render(); }
   showPause() { this.mode = 'pause'; this.render(); }
@@ -51,6 +55,9 @@ export class Menus {
     if (a === 'help-title') { document.getElementById('m-help-title')?.classList.toggle('hidden'); return; }
     if (a === 'pick') { this.pick(el.dataset.field!, el.dataset.val!); return; }
     if (a === 'setup-nav') { this.nav(el.dataset.dir!); return; }
+    if (a === 'accept-invite') { this.hooks.onAcceptInvite(); this.render(); return; }
+    if (a === 'decline-invite') { this.hooks.onDeclineInvite(); this.render(); return; }
+    if (a === 'leave-gang') { this.hooks.onLeaveGang(); this.render(); return; }
     switch (a) {
       case 'newgame': this.hooks.onNewGame(); break;
       case 'continue': this.hooks.onContinue(); break;
@@ -226,12 +233,24 @@ export class Menus {
     return `<div class="m-h">Inventory</div>${warn}${rows}<div class="m-sub">Tap an item in the in-game panel to drop it; hide contraband in a bed/locker/shelf.</div>`;
   }
   private gangTab(s: any): string {
-    const rows = s.gangs.map((g: any) => `<div class="m-gang">
+    const f = s.faction;
+    let head = '';
+    if (f.membership) {
+      head = `<div class="m-h">${f.membership} <span class="m-pill">${f.rank}</span></div>
+        <div class="m-sub">Crew goals done: ${f.goalsDone} · perks below. <button class="su-mini" data-m="leave-gang">Leave Gang</button></div>
+        <div class="m-chips2">${f.perks.map((p: string) => `<span class="su-chip on">${p}</span>`).join('') || '<span class="m-note">No perks yet.</span>'}</div>`;
+    } else if (f.invite) {
+      head = `<div class="m-warn">📨 The <b>${f.invite.gang}</b> want you in. <div class="su-cards" style="margin-top:8px"><button class="su-card on" data-m="accept-invite"><b>Accept Invite</b></button><button class="su-card" data-m="decline-invite"><b>Decline</b></button></div></div>`;
+    } else {
+      head = `<div class="m-h">Gangs</div><div class="m-sub">Build standing with a crew (talk, favours, time in turf) until they invite you in.</div>`;
+    }
+    const goals = f.goals && f.goals.length ? `<div class="m-label2">Crew goals</div>${f.goals.map((o: any) => `<div class="m-obj ${o.done ? 'done' : ''}"><span class="m-obj-c">${o.done ? '✓' : '○'}</span><span class="m-obj-t">${o.text}${o.goal > 1 ? ` <i>(${o.progress}/${o.goal})</i>` : ''}</span></div>`).join('')}` : '';
+    const rows = f.standings.map((g: any) => `<div class="m-gang">
       <span class="m-gang-d" style="color:#${(g.color >>> 0).toString(16).padStart(6, '0')}">●</span>
-      <span class="m-gang-n">${g.name} <i>· ${g.territory}</i></span>
-      <span class="m-gang-s">you: ${g.standing} · ${g.members} members</span>
+      <span class="m-gang-n">${g.name}${g.ally ? ' <i>· your crew</i>' : g.rival ? ' <i>· rival</i>' : ''} <i>· ${g.territory}</i></span>
+      <span class="m-gang-s">${g.label} (${g.value})</span>
     </div>`).join('');
-    return `<div class="m-h">Gangs</div><div class="m-sub">Fictional crews and how they regard you. (Joining a gang is planned.)</div>${rows}`;
+    return `${head}<div class="m-label2">Standing</div>${rows}${goals}`;
   }
   private helpBody(): string {
     return `<div class="m-help-grid">
