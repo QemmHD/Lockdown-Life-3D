@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.0.0-sim.2 — Stage Visual 1.0 (art-direction pass)
+Pure visual upgrade — the Milestone-1 sim is untouched and RenderSync stays read-only.
+- **VisualTheme.ts** — single source of truth for all colors, lighting, camera, and UI values.
+- **Procedural textures** (CanvasTexture, no downloads): `createConcreteTexture`, `createTileTexture`
+  (with wet-puddle sheen), `createGrimeTexture`, `createWarningStripeTexture` — noise, seams, cracks,
+  stains, worn paths, hazard stripes.
+- **Camera/lighting** — tighter iso framing + zoom limits; ambient + key + hemisphere lights; moody
+  per-room point lights (warm cafeteria, cold cells/hallways, blue-gray showers, dark guard room).
+- **Floors & walls** — every room has an identifiable textured floor + grime overlay; walls are now
+  layered (textured body + lighter top cap); barred metal door frames; hazard stripes at restricted
+  doors.
+- **PropRenderer.ts + auto room dressing** — beds/toilets/lockers (cells), tables/benches/counter/
+  trash (cafeteria), benches/weights/pull-up bar/dirt (yard), shower heads/drains (showers), desk+
+  monitors/cabinet (guard room), ceiling lamps/pipes/signs (hallway). Shared geometries/materials.
+- **Characters** — capsules replaced with low-poly people (head, torso, chest, arms with hands, legs,
+  shoes, eyes, hair; guards get cap, badge, baton). Body-size/skin/hair variation, contact shadow.
+- **Animation** — idle breathing, walk leg/arm swing + lean, fight jabs, knocked-down pose, pulsing
+  selection ring, bouncing status icons (all derived from sim state, read-only).
+- **FX** — riot-driven red alarm vignette, fight impact rings.
+- **HUD** — prison-themed dark/metal buttons (icon + label, pressed state, safe-area), HEAT/RIOT
+  severity chips, styled alert feed; large mobile tap targets.
+
 ## v2.0.0-sim.1 — Prison SIM engine (architecture pivot, Milestone 1)
 Reworked toward a living isometric **prison management sim** (Prison Architect/RimWorld-style:
 autonomous agents, tap-to-select, schedules) on a clean **ECS-lite engine**, keeping Vite + TS +

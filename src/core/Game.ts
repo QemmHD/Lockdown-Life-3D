@@ -3,6 +3,7 @@ import { ThreeApp } from '../render/ThreeApp';
 import { IsoCamera } from '../render/IsoCamera';
 import { RenderSync } from '../render/RenderSync';
 import { buildPrison } from '../render/WorldRenderer';
+import { dressRooms } from '../render/PropRenderer';
 import { Simulation } from '../sim/Simulation';
 import { EventBus } from './EventBus';
 import { InputManager } from './InputManager';
@@ -38,6 +39,7 @@ export class Game {
     this.sim = new Simulation(this.bus);
     this.sim.generate();
     buildPrison(this.app.scene, this.sim.map, this.sim.rooms);
+    dressRooms(this.app.scene, this.sim.map, this.sim.rooms);
     this.sync = new RenderSync(this.app.scene, this.sim.ecs);
     this.cam.focus(0, 0);
 
@@ -54,6 +56,7 @@ export class Game {
     this.bus.on('zoom', ({ factor }) => this.cam.zoomBy(factor));
     this.bus.on('tap', ({ x, y }) => this.onTap(x, y));
     this.bus.on('alert', ({ text, type }) => this.hud.alert(text, type));
+    this.bus.on('impact', ({ x, z }) => this.addImpact(x, z));
 
     window.addEventListener('resize', () => { this.app.resize(); this.cam.resize(); });
     this.loop();
@@ -97,6 +100,25 @@ export class Game {
     this.hud.alert('Game loaded', 'guard');
   }
 
+  private fxRings: { mesh: THREE.Mesh; life: number }[] = [];
+  private addImpact(x: number, z: number) {
+    const mesh = new THREE.Mesh(
+      new THREE.RingGeometry(0.2, 0.34, 18),
+      new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false })
+    );
+    mesh.rotation.x = -Math.PI / 2; mesh.position.set(x, 1.0, z);
+    this.app.scene.add(mesh);
+    this.fxRings.push({ mesh, life: 0 });
+  }
+  private updateFx(dt: number) {
+    for (let i = this.fxRings.length - 1; i >= 0; i--) {
+      const f = this.fxRings[i]; f.life += dt;
+      const s = 1 + f.life * 10; f.mesh.scale.set(s, s, s);
+      (f.mesh.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.9 - f.life * 3);
+      if (f.life > 0.35) { this.app.scene.remove(f.mesh); (f.mesh.material as THREE.Material).dispose(); this.fxRings.splice(i, 1); }
+    }
+  }
+
   private riotRisk(): number {
     const ps = this.sim.ecs.query('Needs', 'Brain').filter((e) => this.sim.ecs.get<Brain>(e, 'Brain')!.role === 'prisoner');
     if (!ps.length) return 0;
@@ -114,8 +136,11 @@ export class Game {
     while (this.acc >= FIXED && steps < 8) { this.sim.step(FIXED); this.acc -= FIXED; steps++; }
 
     this.sync.update(dt, this.selected, t);
+    this.updateFx(dt);
     if (this.selected != null) this.refreshPanel();
-    this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, 0, this.riotRisk());
+    const riot = this.riotRisk();
+    this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, 0, riot);
+    this.hud.setAlarm(riot);
 
     this.app.renderer.render(this.app.scene, this.cam.camera);
     requestAnimationFrame(this.loop);

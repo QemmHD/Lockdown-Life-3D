@@ -7,6 +7,7 @@ export interface Room {
   x: number; y: number; w: number; h: number;  // tile bounds
   color: number;
   security: number;
+  door?: number;   // door tile index (none for hallway)
 }
 
 export interface PrisonLayout {
@@ -18,7 +19,7 @@ export interface PrisonLayout {
 const W = 44, H = 30;
 
 // Hand-authored, readable layout for the milestone (procedural variants come later).
-const ROOM_DEFS: (Omit<Room, 'x' | 'y' | 'w' | 'h'> & { x: number; y: number; w: number; h: number; door: [number, number] })[] = [
+const ROOM_DEFS: (Omit<Room, 'x' | 'y' | 'w' | 'h' | 'door'> & { x: number; y: number; w: number; h: number; door: [number, number] })[] = [
   { id: 'hallway', name: 'Hallway', type: 'hallway', x: 2, y: 13, w: 40, h: 4, color: 0x4a4a52, security: 1, door: [0, 0] },
   { id: 'cellblock', name: 'Cell Block', type: 'cellblock', x: 2, y: 2, w: 18, h: 10, color: 0x55585f, security: 2, door: [11, 12] },
   { id: 'cafeteria', name: 'Cafeteria', type: 'cafeteria', x: 22, y: 2, w: 20, h: 10, color: 0x6b6256, security: 1, door: [32, 12] },
@@ -43,6 +44,7 @@ export function generatePrison(): PrisonLayout {
     if (d.id !== 'hallway') {
       const k = map.idx(d.door[0], d.door[1]);
       map.walkable[k] = 1; map.room[k] = 0; doorIdx.push(k); // door tile joins the hallway
+      rooms[rooms.length - 1].door = k;
     }
   });
 

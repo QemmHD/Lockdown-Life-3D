@@ -1,13 +1,14 @@
 import * as THREE from 'three';
+import { THEME } from './VisualTheme';
 
 // Orthographic isometric camera with mobile pan/zoom. Fixed yaw so depth sorting stays stable.
 export class IsoCamera {
   camera: THREE.OrthographicCamera;
   private target = new THREE.Vector3(0, 0, 0);
-  private zoom = 18;
-  private minZoom = 8;
-  private maxZoom = 36;
-  private offset = new THREE.Vector3(24, 30, 24);
+  private zoom = THEME.camera.zoom;
+  private minZoom = THEME.camera.min;
+  private maxZoom = THEME.camera.max;
+  private offset = new THREE.Vector3(THEME.camera.offset.x, THEME.camera.offset.y, THEME.camera.offset.z);
   // ground-plane basis for screen-aligned panning
   private right = new THREE.Vector3();
   private fwd = new THREE.Vector3();

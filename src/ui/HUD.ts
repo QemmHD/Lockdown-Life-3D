@@ -16,23 +16,28 @@ export class HUD {
     this.root = document.createElement('div');
     this.root.id = 'hud';
     this.root.innerHTML = `
+      <div id="alarm"></div>
       <div id="topbar">
-        <div class="tb-block"><div class="tb-big" id="tb-phase">Wake-Up</div><div class="tb-sub"><span id="tb-day">Day 1</span> · <span id="tb-time">6:00</span></div></div>
+        <div class="tb-block">
+          <div class="tb-label">SCHEDULE</div>
+          <div class="tb-big" id="tb-phase">Wake-Up</div>
+          <div class="tb-sub"><span id="tb-day">Day 1</span> · <span id="tb-time">6:00</span></div>
+        </div>
         <div class="tb-block right">
-          <div class="tb-chip">Heat <b id="tb-heat">0</b></div>
-          <div class="tb-chip">Riot <b id="tb-riot">0%</b></div>
+          <div class="tb-chip" id="chip-heat"><span>HEAT</span><b id="tb-heat">0</b></div>
+          <div class="tb-chip" id="chip-riot"><span>RIOT</span><b id="tb-riot">0%</b></div>
         </div>
       </div>
       <div id="alert-feed"></div>
       <div id="panel" class="hidden"></div>
       <div id="bottombar">
-        <button data-b="pause" class="hud-btn">⏸</button>
-        <button data-b="speed" class="hud-btn"><span id="speed-x">1×</span></button>
-        <button data-b="save" class="hud-btn">💾</button>
-        <button data-b="load" class="hud-btn">📂</button>
+        <button data-b="pause" class="hud-btn"><span class="b-ico">⏸</span><span class="b-lbl">Pause</span></button>
+        <button data-b="speed" class="hud-btn"><span class="b-ico" id="speed-x">1×</span><span class="b-lbl">Speed</span></button>
+        <button data-b="save" class="hud-btn"><span class="b-ico">▣</span><span class="b-lbl">Save</span></button>
+        <button data-b="load" class="hud-btn"><span class="b-ico">▤</span><span class="b-lbl">Load</span></button>
       </div>`;
     document.getElementById('ui-root')!.appendChild(this.root);
-    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'alert-feed', 'panel', 'speed-x'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
+    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'alert-feed', 'panel', 'speed-x', 'alarm'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
     this.root.querySelectorAll('#bottombar button').forEach((b) => {
       const k = (b as HTMLElement).dataset.b!;
       b.addEventListener('click', () => {
@@ -52,8 +57,11 @@ export class HUD {
     this.els['tb-time'].textContent = `${hh}:${m.toString().padStart(2, '0')} ${ampm}`;
     this.els['tb-heat'].textContent = String(Math.round(heat));
     this.els['tb-riot'].textContent = Math.round(riot * 100) + '%';
+    this.els['chip-riot'].className = 'tb-chip ' + (riot > 0.66 ? 'sev-high' : riot > 0.33 ? 'sev-mid' : '');
+    this.els['chip-heat'].className = 'tb-chip ' + (heat > 66 ? 'sev-high' : heat > 33 ? 'sev-mid' : '');
   }
   setSpeed(label: string) { this.els['speed-x'].textContent = label; }
+  setAlarm(level: number) { this.els['alarm'].style.opacity = level > 0.7 ? String((level - 0.7) * 2) : '0'; }
 
   alert(text: string, type = 'info') {
     const feed = this.els['alert-feed'];

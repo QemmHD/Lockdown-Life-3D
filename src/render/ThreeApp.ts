@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { THEME } from './VisualTheme';
 
 // Owns renderer + scene + lights. Draws only; never mutates simulation state.
 export class ThreeApp {
@@ -12,24 +13,25 @@ export class ThreeApp {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    this.renderer.toneMappingExposure = 1.12;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.scene.background = new THREE.Color(0x0a0c10);
-    this.scene.fog = new THREE.Fog(0x0a0c10, 60, 130);
+    this.scene.background = new THREE.Color(THEME.bg);
+    this.scene.fog = new THREE.Fog(THEME.fog.color, THEME.fog.near, THEME.fog.far);
 
-    const amb = new THREE.AmbientLight(0x9aa3b8, 0.95);
-    this.scene.add(amb);
-    const dir = new THREE.DirectionalLight(0xfff0d8, 1.1);
-    dir.position.set(30, 50, 20);
+    this.scene.add(new THREE.AmbientLight(THEME.lights.ambient, THEME.lights.ambientI));
+
+    const dir = new THREE.DirectionalLight(THEME.lights.key, THEME.lights.keyI);
+    dir.position.set(26, 44, 18);
     dir.castShadow = true;
     dir.shadow.mapSize.set(2048, 2048);
-    const d = 40;
+    const d = 38;
     dir.shadow.camera.left = -d; dir.shadow.camera.right = d;
     dir.shadow.camera.top = d; dir.shadow.camera.bottom = -d;
-    dir.shadow.camera.near = 1; dir.shadow.camera.far = 150;
+    dir.shadow.camera.near = 1; dir.shadow.camera.far = 140;
     dir.shadow.bias = -0.0004;
     this.scene.add(dir);
-    this.scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x33342c, 0.4));
+
+    this.scene.add(new THREE.HemisphereLight(THEME.lights.hemiSky, THEME.lights.hemiGround, THEME.lights.hemiI));
   }
 
   resize() { this.renderer.setSize(window.innerWidth, window.innerHeight); }
