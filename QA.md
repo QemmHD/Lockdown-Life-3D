@@ -82,6 +82,20 @@ selected-object / blocked-path info to the console.
 - [ ] Alert feed doesn't overflow the screen
 - [ ] No page scroll/zoom while playing
 
+## Chaos layer (Stage 3.0)
+- [ ] Trigger a lockdown (repeated fights / serious contraband, or `window.__game.sim.startLockdown('manual',2)` with `?debug`)
+- [ ] Lockdown locks cafeteria/yard/shower doors; cell-block doors stay open; LOCK chip + banner show
+- [ ] Prisoners head back toward cells; ones blocked by a locked door wait/complain (don't loop forever)
+- [ ] Guards move to checkpoint posts (security desk / door junctions), not all clumped
+- [ ] Alarm shows red vignette + flashing locked-door lamps + alert-feed message
+- [ ] Lockdown ends on its timer: doors re-derive, reservations clear, prisoners re-route, no stuck NPCs
+- [ ] Riot pressure (RIOT %) rises with anger/hunger/fights/blocked, falls with calm/met needs
+- [ ] Riot warning appears at high pressure; a small riot event is controlled (not permanent)
+- [ ] Area tension shows on the door/object panel ("Area: Tense/Dangerous") in crowded/rival rooms
+- [ ] Player chaos actions appear during chaos (Comply / Return to Cell / Hide / Calm Down / Help Guard)
+- [ ] Attempt Escape appears only near the yard gate / perimeter; resolves caught/interrupted/abandoned/success
+- [ ] Save during a lockdown, then load → lockdown/alarm/riot/tension restored, no crash, no stuck NPCs
+
 ## Stability
 - [ ] Run a full in-game day at 4× → no runtime errors, no soft-locks
 - [ ] No leaking DOM feedback elements after many floats/bubbles

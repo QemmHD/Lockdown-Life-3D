@@ -66,6 +66,7 @@ input (tap/drag/pinch)
 | Core | `core/Game.ts`, `EventBus.ts`, `InputManager.ts`, `SaveManager.ts`, `Random.ts` | loop, input, glue, persistence I/O, RNG |
 | ECS | `ecs/world.ts`, `ecs/components.ts` | entity/component store + plain-data components |
 | Sim | `sim/Simulation.ts` | authoritative systems (large — see refactor plan) |
+| Chaos | `sim/LockdownSystem.ts`, `RiotSystem.ts`, `EscapeSystem.ts`, `GuardCheckpointSystem.ts` | pure types + constants + decision functions for the chaos layer; the Simulation owns the state and orchestrates them thinly |
 | World | `world/TileMap.ts`, `Pathfinding.ts`, `WorldGen.ts`, `Interactable.ts` | grid, A*, floorplan, object model |
 | Render | `render/ThreeApp.ts`, `IsoCamera.ts`, `WorldRenderer.ts`, `PropRenderer.ts`, `CharacterFactory.ts`, `RenderSync.ts`, `Feedback.ts`, `VisualTheme.ts`, `textures/` | rendering (read-only) |
 | UI | `ui/HUD.ts` | DOM overlay |
@@ -83,10 +84,14 @@ when it next needs surgery, split it along these seams (each is already a fairly
 - **PrisonerAISystem** — schedule targeting, object use, wander.
 - **SaveSerializer** — `serialize` / `hydrate` + versioned migrations.
 
-Planned new systems (Stage Chaos 3.0 and beyond), to be built as their own modules:
+Chaos layer (Stage 3.0) — shipped as **pure helper modules** with thin Simulation integration:
 
-- **LockdownSystem** — facility-wide lock + guard reroute, built on DoorSystem + ScheduleSystem.
-- **RiotSystem** — escalation/contagion of anger, group fights, control loss.
-- **Escape** — multi-objective escape routes leveraging doors/gates.
+- **LockdownSystem** — `LockdownState` + duration/door policy + defensive load.
+- **RiotSystem** — riot-pressure target + level thresholds + tension labels.
+- **EscapeSystem** — abstract opportunity zones + fictional outcome roll (no real-world methods).
+- **GuardCheckpointSystem** — builds checkpoint anchors from rooms/doors.
 
-Keep the read-only render rule and the sim-owns-state rule intact through any refactor.
+The orchestration (timers, triggers, mutations) currently lives in `Simulation.chaosSystem` and
+friends, marked with `TODO(refactor)`. When the surface settles, promote these into stateful
+`*System` classes (one step further than the current pure modules). Keep the read-only render rule and
+the sim-owns-state rule intact through any refactor.

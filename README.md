@@ -127,23 +127,21 @@ Gangs are purely fictional game data. Joining gangs is **not** implemented yet (
 - Interactable props (beds, sinks, showers, toilets, tables, counters, weights, pull-ups, desks, shelves, trash, lockers)
 - Doors / gates as real pathfinding blockers + schedule-driven open/lock + schedule anchors for NPCs
 - Object reservations (NPC + player) with safety auto-release
-- World feedback: floating text + speech/icon bubbles, selection/highlight rings, action progress bar
-- Save / load v4 (`localStorage`)
+- **Chaos layer**: lockdowns, alarm state, riot pressure, area tension, guard checkpoints, blocked-prisoner reactions, abstract escape attempts, and player chaos actions
+- World feedback: floating text + speech/icon bubbles, selection/highlight rings, action progress bar, chaos banner + alarm vignette
+- Save / load v5 (`localStorage`) incl. chaos state
 - Touch + mouse: tap, drag-pan, pinch/wheel-zoom
 
 **Partial**
-- Guard AI (patrol / respond / search / escort / man desks — but no formal checkpoint rotation)
+- Guard AI (patrol / respond / search / escort / desks / checkpoints — no rich role scheduling)
+- Riot event (small controlled flare-up, not a full riot-warfare sim)
 - NPC object use (light; schedule-anchor driven, no deep daily planning)
 - Door permissions (open/closed/locked/restricted/guard-pass; `broken/jammed` & finer roles are placeholders)
-- Jobs (small fixed rewards)
-- Contraband hiding/searching economy (no dynamic prices)
-- Mobile UI polish
-- Balance / tuning
+- Jobs / contraband economy (small fixed rewards, no dynamic prices)
+- Balance / tuning · Mobile UI polish
 
 **Planned / Future**
-- Lockdowns, riots, escape attempts (Stage Chaos 3.0)
-- Deeper guard patrols / event director
-- Gang joining & faction storylines
+- Deeper riot warfare, factions joining, event director
 - Character creation
 - Real audio / SFX
 - More animation
@@ -214,12 +212,21 @@ versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARC
 ## Known limitations
 - Single hand-authored prison (no procedural prison generation).
 - Guard/NPC AI is intentionally light; deeper planning is a future stage.
-- No audio, no character creation, no riots/escape/lockdown systems yet.
+- The chaos layer is a first vertical slice — riot *events* are small and controlled, not full riot warfare.
+- No audio, no character creation yet.
 - Balance is rough and subject to change.
 - The follow camera reframes the subject slightly left of centre so the right-side panel doesn't cover it.
 
-## Planned next (Stage Chaos 3.0)
-Lockdowns, riots, and escape attempts — built on the existing doors/gates, schedule, and AI systems.
+## Chaos layer (Stage 3.0)
+- **Lockdowns** lock recreational areas, send prisoners back to cells, post guards at checkpoints, and lift on a timer.
+- **Alarm** state (red vignette + flashing door lamps) fires on escape attempts, riots, serious fights/contraband.
+- **Riot pressure** (the RIOT meter) builds from prisoner mood + incidents and eases with met needs; it can reach a warning and, rarely, a small riot event.
+- **Area tension** per room (Calm → Critical) from crowding + gang rivalry.
+- **Abstract escape** (fictional only): rare NPC attempts, plus a player **Attempt Escape** near a gate/perimeter with caught/interrupted/abandoned/prototype-success outcomes.
+- **Player chaos actions**: Comply, Return to Cell, Hide, Calm Down, Help Guard.
+
+## Planned next
+Deeper riot warfare and an event director, then balance/feel or iOS (Capacitor) packaging prep.
 
 ---
 
