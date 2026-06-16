@@ -35,6 +35,9 @@ export class Game {
   private paused = false;
   private selected: Entity | null = null;
   private playerEntity: Entity = 0;
+  private selectedObj: string | null = null;
+  private objHits: THREE.Object3D[] = [];
+  private objHighlight!: THREE.Mesh;
 
   constructor(canvas: HTMLCanvasElement) {
     this.app = new ThreeApp(canvas);
@@ -45,7 +48,13 @@ export class Game {
     this.sim = new Simulation(this.bus);
     this.sim.generate();
     buildPrison(this.app.scene, this.sim.map, this.sim.rooms);
-    dressRooms(this.app.scene, this.sim.map, this.sim.rooms);
+    const dressed = dressRooms(this.app.scene, this.sim.map, this.sim.rooms);
+    const doors = this.buildDoorObjects();        // register doors/gates as interactables
+    this.objHits = [...dressed.hitMeshes, ...doors.hitMeshes];
+    this.sim.setInteractables([...dressed.interactables, ...doors.defs]);
+    // selection highlight ring under the picked object
+    this.objHighlight = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.78, 28), new THREE.MeshBasicMaterial({ color: 0x9fe0ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+    this.objHighlight.rotation.x = -Math.PI / 2; this.objHighlight.position.y = 0.07; this.objHighlight.visible = false; this.app.scene.add(this.objHighlight);
     this.sync = new RenderSync(this.app.scene, this.sim.ecs);
     this.feedback = new Feedback();
     // character-focused camera: clamp to the prison, follow the player prisoner
@@ -79,19 +88,67 @@ export class Game {
     this.loop();
   }
 
+  // register each room's door/gate as an interactable object (+ invisible hitbox)
+  private buildDoorObjects(): { defs: any[]; hitMeshes: THREE.Object3D[] } {
+    const defs: any[] = []; const hitMeshes: THREE.Object3D[] = [];
+    const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+    const geo = new THREE.BoxGeometry(1.4, 2.4, 1.4);
+    for (const r of this.sim.rooms) {
+      if (r.door == null) continue;
+      const t = this.sim.map.tileXY(r.door); const w = this.sim.map.toWorld(t.x, t.y);
+      const id = 'door_' + r.id;
+      defs.push({ id, type: r.gate ? 'gate' : 'door', name: r.name + (r.gate ? ' Gate' : ' Door'), room: r.id, x: w.x, z: w.z, ix: w.x, iz: w.z, facing: 0, restricted: r.security >= 3 });
+      const hb = new THREE.Mesh(geo, mat); hb.position.set(w.x, 1.2, w.z); hb.userData.objId = id; this.app.scene.add(hb); hitMeshes.push(hb);
+    }
+    return { defs, hitMeshes };
+  }
+
   private onTap(x: number, y: number) {
     const ray = this.cam.raycaster(x, y);
     const e = this.sync.pick(ray);
     if (e != null) { this.select(e); return; }
+    const objId = this.pickObject(ray);
+    if (objId) { this.selectObject(objId); return; }
     // empty floor → walk the player there + drop a destination marker
     const g = this.cam.screenToGround(x, y);
-    if (g) { const dest = this.sim.playerMoveTo(g.x, g.z); if (dest) this.setMarker(dest.x, dest.z); }
+    if (g) { const dest = this.sim.playerMoveTo(g.x, g.z); if (dest) this.setMarker(dest.x, dest.z); else if (g) this.setInvalidMarker(g.x, g.z); }
+  }
+  private pickObject(ray: THREE.Raycaster): string | null {
+    const hits = ray.intersectObjects(this.objHits, false);
+    for (const h of hits) { const id = h.object.userData.objId; if (id) return id as string; }
+    return null;
+  }
+  private selectObject(id: string) {
+    this.selectedObj = id; this.selected = null;
+    const o = this.sim.getObj(id);
+    if (o) { this.objHighlight.position.set(o.x, 0.07, o.z); this.objHighlight.visible = true; }
+    this.refreshObjectPanel();
   }
   // camera always follows the player prisoner; selection only changes the inspected panel
   private followTarget(): Entity { return this.playerEntity; }
   private select(e: Entity | null) {
     this.selected = e ?? this.playerEntity;
+    this.selectedObj = null; this.objHighlight.visible = false;
     this.refreshPanel();
+  }
+  private refreshObjectPanel() {
+    const id = this.selectedObj; if (!id) return;
+    const o = this.sim.getObj(id); if (!o) { this.selectedObj = null; this.objHighlight.visible = false; return; }
+    const room = this.sim.rooms.find((r) => r.id === o.room);
+    const meta: string[] = [];
+    if (o.restricted) meta.push('Restricted');
+    if ((o.type === 'door' || o.type === 'gate')) meta.push(o.open ? 'Open' : 'Closed');
+    if (o.stash.length) meta.push(`Hidden: ${o.stash.length}`);
+    const actions: PanelAction[] = this.sim.objActions(id).map((a) => ({
+      key: a.key, label: a.label, disabled: a.disabled, reason: a.reason,
+      kind: (a.key === 'search' || a.key === 'hide' || a.key === 'take') ? 'risky' : 'object',
+      danger: false
+    }));
+    this.hud.showPanel({
+      name: o.name, role: 'Object', player: false, object: true,
+      gang: undefined, gangColor: undefined, state: (o.type === 'door' || o.type === 'gate') ? (o.open ? 'open' : 'closed') : 'idle',
+      room: room?.name ?? '', traits: [], meta, needs: [], items: [], actions
+    });
   }
   private hex(n: number) { return '#' + (n >>> 0).toString(16).padStart(6, '0'); }
   private refreshPanel() {
@@ -151,6 +208,12 @@ export class Game {
     ];
   }
   private doAction(key: string) {
+    if (this.selectedObj) {
+      const status = this.sim.requestObjectAction(this.selectedObj, key);
+      if (status) this.hud.alert(status, 'info');
+      this.refreshObjectPanel();
+      return;
+    }
     const sel = this.selected ?? this.playerEntity;
     const status = this.sim.requestAction(sel, key as InteractAction);
     if (status) this.hud.alert(status, key === 'fight' ? 'fight' : 'info');
@@ -176,7 +239,13 @@ export class Game {
       this.marker = new THREE.Mesh(new THREE.RingGeometry(0.25, 0.42, 20), new THREE.MeshBasicMaterial({ color: 0x9fe0ff, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
       this.marker.rotation.x = -Math.PI / 2; this.app.scene.add(this.marker);
     }
+    (this.marker.material as THREE.MeshBasicMaterial).color.setHex(0x9fe0ff);
     this.marker.position.set(x, 0.06, z); this.marker.visible = true; this.markerLife = 1.5;
+  }
+  private setInvalidMarker(x: number, z: number) {
+    this.setMarker(x, z);
+    if (this.marker) (this.marker.material as THREE.MeshBasicMaterial).color.setHex(0xff5a4d);
+    this.markerLife = 0.5;
   }
   private updateMarker(dt: number) {
     if (!this.marker || !this.marker.visible) return;
@@ -237,7 +306,7 @@ export class Game {
     }
     this.cam.tick(dt);
 
-    this.refreshPanel();
+    if (this.selectedObj) this.refreshObjectPanel(); else this.refreshPanel();
     const riot = this.riotRisk();
     this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, 0, riot);
     this.hud.setAlarm(riot);

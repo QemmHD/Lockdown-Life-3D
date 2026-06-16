@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TileMap } from '../world/TileMap';
 import { Room } from '../world/WorldGen';
+import { InteractableDef, ObjType } from '../world/Interactable';
 
 // Dresses rooms with simple-but-readable prison furniture. Visual only (sim ignores it).
 // Shared geometries/materials keep draw cost low.
@@ -61,6 +62,26 @@ export function dressRooms(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
   const W = map.width, H = map.height;
   const place = (g: THREE.Object3D, x: number, z: number, rotY = 0) => { g.position.x = x; g.position.z = z; g.rotation.y = rotY; root.add(g); };
 
+  // interactable registration: builds a def + an invisible, finger-friendly hitbox
+  const interactables: InteractableDef[] = [];
+  const hitMeshes: THREE.Object3D[] = [];
+  const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+  const hitGeo = new THREE.BoxGeometry(1.2, 2, 1.2);
+  let oid = 0;
+  const reg = (type: ObjType, name: string, x: number, z: number, r: Room, jobRoom?: string) => {
+    const cx = r.x + r.w / 2 - W / 2, cz = r.y + r.h / 2 - H / 2;
+    let ix = x, iz = z; const t = map.worldToTile(x, z);
+    if (!map.isWalkable(t.x, t.y)) {
+      for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [-1, -1]]) {
+        if (map.isWalkable(t.x + dx, t.y + dy)) { const w = map.toWorld(t.x + dx, t.y + dy); ix = w.x; iz = w.z; break; }
+      }
+    }
+    let facing = Math.atan2(x - ix, z - iz); if (!isFinite(facing) || (x === ix && z === iz)) facing = Math.atan2(cx - ix, cz - iz);
+    const id = 'obj' + (oid++);
+    interactables.push({ id, type, name, room: r.id, x, z, ix, iz, facing, restricted: r.security >= 3, jobRoom });
+    const hb = new THREE.Mesh(hitGeo, hitMat); hb.position.set(x, 1, z); hb.userData.objId = id; root.add(hb); hitMeshes.push(hb);
+  };
+
   for (const r of rooms) {
     const minX = r.x - W / 2, maxX = r.x + r.w - W / 2;
     const minZ = r.y - H / 2, maxZ = r.y + r.h - H / 2;
@@ -72,27 +93,26 @@ export function dressRooms(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
         const cols = Math.max(3, Math.floor((r.w - 2) / 3.2));
         for (let i = 0; i < cols; i++) {
           const x = minX + 2 + i * 3.2;
-          // top row cell
-          place(bed(), x, minZ + 1.5);
-          place(toilet(), x + 1.1, minZ + 1.2, Math.PI);
-          place(sink(), x + 1.1, minZ + 2.2, Math.PI);
+          place(bed(), x, minZ + 1.5); reg('bed', 'Bunk', x, minZ + 1.5, r);
+          place(toilet(), x + 1.1, minZ + 1.2, Math.PI); reg('toilet', 'Toilet', x + 1.1, minZ + 1.2, r);
+          place(sink(), x + 1.1, minZ + 2.2, Math.PI); reg('sink', 'Sink', x + 1.1, minZ + 2.2, r);
           if (i > 0) place(barPartition(), x - 1.6, minZ + 1.6, Math.PI / 2);
           // bottom row cell
-          place(bed(), x, maxZ - 1.5, Math.PI);
-          place(toilet(), x + 1.1, maxZ - 1.2);
-          place(locker(), x - 1.1, maxZ - 1.4);
+          place(bed(), x, maxZ - 1.5, Math.PI); reg('bed', 'Bunk', x, maxZ - 1.5, r);
+          place(toilet(), x + 1.1, maxZ - 1.2); reg('toilet', 'Toilet', x + 1.1, maxZ - 1.2, r);
+          place(locker(), x - 1.1, maxZ - 1.4); reg('locker', 'Locker', x - 1.1, maxZ - 1.4, r);
           if (i > 0) place(barPartition(), x - 1.6, maxZ - 1.6, Math.PI / 2);
         }
         break;
       }
       case 'intake': {
         place(scanner(), cx, minZ + 1.6);
-        place(desk(), cx, maxZ - 1.4, Math.PI);
+        place(desk(), cx, maxZ - 1.4, Math.PI); reg('desk', 'Intake Desk', cx, maxZ - 1.4, r);
         break;
       }
       case 'storage': {
-        place(shelf(), minX + 1.2, cz, Math.PI / 2);
-        place(shelf(), maxX - 1.2, cz, -Math.PI / 2);
+        place(shelf(), minX + 1.2, cz, Math.PI / 2); reg('shelf', 'Supply Shelf', minX + 1.2, cz, r, 'storage');
+        place(shelf(), maxX - 1.2, cz, -Math.PI / 2); reg('shelf', 'Supply Shelf', maxX - 1.2, cz, r, 'storage');
         break;
       }
       case 'solitary': {
@@ -101,26 +121,30 @@ export function dressRooms(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
         break;
       }
       case 'cafeteria': {
-        place(counter(), cx, minZ + 1.2);
-        for (let row = 0; row < 2; row++) for (let i = 0; i < 3; i++) { const tx = minX + 3 + i * 4.2, tz = cz + 0.3 + row * 2.6; place(table(), tx, tz); place(tray(0, 0.78, 0), tx - 0.5, tz); place(tray(0, 0.78, 0), tx + 0.5, tz - 0.2); }
-        place(trash(), maxX - 1, maxZ - 1); place(trash(), minX + 1, maxZ - 1);
+        place(counter(), cx, minZ + 1.2); reg('counter', 'Serving Counter', cx, minZ + 2.0, r, 'cafeteria');
+        for (let row = 0; row < 2; row++) for (let i = 0; i < 3; i++) { const tx = minX + 3 + i * 4.2, tz = cz + 0.3 + row * 2.6; place(table(), tx, tz); place(tray(0, 0.78, 0), tx - 0.5, tz); place(tray(0, 0.78, 0), tx + 0.5, tz - 0.2); reg('table', 'Dining Table', tx, tz, r); }
+        place(trash(), maxX - 1, maxZ - 1); reg('trash', 'Trash Can', maxX - 1, maxZ - 1, r);
+        place(trash(), minX + 1, maxZ - 1);
         break;
       }
       case 'yard': {
         place(bench(), minX + 3, minZ + 1.5); place(bench(), minX + 3, maxZ - 1.5); place(bench(), maxX - 4, cz);
-        place(weights(), cx + 2, cz); place(weights(), cx + 2, cz + 2.2);
-        place(pullup(), maxX - 3, minZ + 2);
-        place(dirtPatch(), cx - 2, cz + 1); place(dirtPatch(), cx + 3, maxZ - 2); place(dirtPatch(), minX + 4, maxZ - 3);
+        place(weights(), cx + 2, cz); reg('weights', 'Weight Bench', cx + 2, cz, r);
+        place(weights(), cx + 2, cz + 2.2); reg('weights', 'Weight Bench', cx + 2, cz + 2.2, r);
+        place(pullup(), maxX - 3, minZ + 2); reg('pullup', 'Pull-up Bar', maxX - 3, minZ + 2, r);
+        place(dirtPatch(), cx - 2, cz + 1); reg('job', 'Yard Cleanup', cx - 2, cz + 1, r, 'yard');
+        place(dirtPatch(), cx + 3, maxZ - 2); place(dirtPatch(), minX + 4, maxZ - 3);
         for (let x = minX + 1; x <= maxX - 1; x += 3) place(fencePost(), x, maxZ - 0.4);
         break;
       }
       case 'shower': {
-        for (let i = 0; i < 4; i++) { place(showerHead(), minX + 1.2, minZ + 1.2 + i * 1.2, Math.PI / 2); place(drain(), minX + 3, minZ + 1.2 + i * 1.2); }
-        place(puddle(), minX + 3, minZ + 2); place(puddle(), minX + 2.4, maxZ - 2); place(puddle(), cx, cz);
+        for (let i = 0; i < 4; i++) { place(showerHead(), minX + 1.2, minZ + 1.2 + i * 1.2, Math.PI / 2); reg('shower', 'Shower', minX + 2, minZ + 1.2 + i * 1.2, r); place(drain(), minX + 3, minZ + 1.2 + i * 1.2); }
+        place(puddle(), minX + 3, minZ + 2); reg('job', 'Mop the floor', cx, cz, r, 'shower');
+        place(puddle(), minX + 2.4, maxZ - 2); place(puddle(), cx, cz);
         break;
       }
       case 'guardroom': {
-        place(desk(), cx, minZ + 1.4);
+        place(desk(), cx, minZ + 1.4); reg('desk', 'Security Console', cx, minZ + 2.2, r);
         place(chair(), cx, minZ + 2.6);
         place(cabinet(), maxX - 1, maxZ - 1); place(cabinet(), maxX - 1.8, maxZ - 1);
         place(securityLight(), minX + 0.6, minZ + 0.6); (root.children[root.children.length - 1] as THREE.Object3D).position.y = 2.6;
@@ -136,5 +160,5 @@ export function dressRooms(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
     }
   }
   scene.add(root);
-  return root;
+  return { root, interactables, hitMeshes };
 }

@@ -2,7 +2,7 @@
 export interface PanelAction { key: string; label: string; danger?: boolean; kind?: 'social' | 'risky' | 'guard' | 'object'; disabled?: boolean; reason?: string; }
 export interface PanelItem { icon: string; name: string; contraband: boolean; key: string; }
 export interface PanelInfo {
-  name: string; role: string; player: boolean; gang?: string; gangColor?: string;
+  name: string; role: string; player: boolean; object?: boolean; gang?: string; gangColor?: string;
   state: string; room: string; traits: string[];
   meta: string[];                  // chips: Rep 5 · Respect 8 · …
   needs: { label: string; value: number; color: string }[];
@@ -94,6 +94,18 @@ export class HUD {
     if (!info) { p.classList.add('hidden'); return; }
     p.classList.remove('hidden');
     p.classList.toggle('is-player', info.player);
+    if (info.object) {
+      const chips = info.meta.map((m) => `<span class="chip">${m}</span>`).join('');
+      const acts = info.actions.map((a) => `<button class="act ${a.kind ? 'k-' + a.kind : ''} ${a.disabled ? 'disabled' : ''}" data-act="${a.key}" ${a.disabled ? 'disabled' : ''} title="${a.reason || ''}">${a.label}</button>`).join('');
+      p.innerHTML = `<div class="panel-head"><b>🔧 ${info.name}</b><button id="panel-x">✕</button></div>
+        <div class="panel-sub">Object · ${info.state}</div>
+        <div class="panel-room">📍 ${info.room}</div>
+        <div class="panel-chips">${chips}</div>
+        <div class="panel-actions">${acts}</div>`;
+      (p.querySelector('#panel-x') as HTMLElement).onclick = () => this.hooks.onDeselect();
+      p.querySelectorAll('[data-act]').forEach((b) => (b as HTMLElement).onclick = () => this.hooks.onAction((b as HTMLElement).dataset.act!));
+      return;
+    }
     const bars = info.needs.map((n) => `<div class="need"><span>${n.label}</span><div class="need-bg"><div class="need-fill" style="width:${Math.round(n.value * 100)}%;background:${n.color}"></div></div></div>`).join('');
     const chips = info.meta.map((m) => `<span class="chip">${m}</span>`).join('');
     const gangTag = info.gang ? `<span class="gangtag" style="color:${info.gangColor || '#bbb'}">●</span> ${info.gang}` : 'Unaffiliated';

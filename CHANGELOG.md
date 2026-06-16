@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.2.0-interaction — Stage Interaction 2.2 (props are real interactable objects)
+Props are no longer just decoration — they're tappable world objects with their own actions, reservations,
+and state. Sim stays authoritative (interactions mutate the Simulation, RenderSync read-only), camera/
+layout/visuals preserved, build passes, 0 runtime errors.
+- **Interactable registry** (`src/world/Interactable.ts`): every important prop has an id, type, room,
+  world position, **interaction point** (where you stand), facing, per-type actions, reservation, and
+  hidden-stash/open state. Owned live by the Simulation.
+- **Real hitboxes**: `PropRenderer.dressRooms` registers beds/toilets/sinks/showers/counters/tables/
+  weights/pull-up bars/desks/shelves/trash + yard & shower jobs, each with an invisible tap hitbox.
+- **Object panel**: tapping a prop opens an object-specific panel (name, room, state chips) with
+  context actions — Rest/Use/Wash/Eat/Train/Work/Inspect/Hide/Search — disabled with a reason when
+  unavailable (in use, nothing to hide, nothing hidden, staff-only).
+- **Walk-to-interaction-point**: actions make the player **walk to the object's interaction tile →
+  face the object → perform a timed action → apply → release** (not "inside" the prop).
+- **Object-based needs**: Rest/Wash/Eat/Train/Work now run against a specific object instead of a room.
+- **Reservation**: one prisoner per bed/shower/toilet/etc.; reservations clear on cancel, on completion,
+  and on load.
+- **Doors & gates as objects**: each door tile registers a door/gate object with **Inspect** and **Use**
+  (open/closed state), restricted/staff-only flagging.
+- **Contraband stashes**: beds/toilets/lockers/shelves/trash support **Hide** (stash a contraband item),
+  **Search** (reveal a stash), and **Take** — abstract game data only.
+- **World jobs**: shelves/yard/shower jobs are object-targeted work points.
+- **Light NPC use**: idle NPCs grab a free nearby bed/shower/weights/table, reserve it, hold the pose,
+  then release — sharing the same reservation system.
+- **Feedback**: selected-object highlight ring, invalid-tap (red) marker vs move (blue) marker,
+  status bubbles + reward floats on perform.
+- **Save/load** (version 3): persists hidden stashes and door open state; clears all reservations and
+  resets transient action state on load. Older saves load safely.
+
 ## v2.1.1-feel — Stage Gameplay Feel 2.1 (physical, animated, readable actions)
 Game-feel pass: the Milestone-2 systems now visibly happen in the world (sim authoritative, RenderSync
 read-only, build passes, 0 runtime errors).
