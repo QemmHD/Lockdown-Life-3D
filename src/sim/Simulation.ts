@@ -13,6 +13,10 @@ const SECONDS_PER_HOUR = 5;
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
 const RESTRICTED = ['guardroom', 'intake', 'storage', 'solitary'];
 export type InteractAction = 'talk' | 'insult' | 'threaten' | 'trade' | 'favor' | 'fight' | 'backoff' | 'comply' | 'argue' | 'rest' | 'wash' | 'eat' | 'train' | 'work' | 'pickup' | 'use';
+const SELF_ACTIONS: InteractAction[] = ['rest', 'wash', 'eat', 'train', 'work'];
+const ACTION_DUR: Record<string, number> = { talk: 0.8, insult: 0.9, threaten: 1.0, trade: 1.1, favor: 1.0, comply: 0.6, argue: 0.8, rest: 1.4, wash: 1.4, eat: 1.5, train: 1.4, work: 1.8 };
+const ACTION_STATE: Record<string, string> = { talk: 'talking', comply: 'talking', argue: 'threatening', insult: 'threatening', threaten: 'threatening', trade: 'trading', favor: 'trading', rest: 'resting', wash: 'washing', eat: 'eating', train: 'training', work: 'working' };
+const SAY: Record<string, string> = { talk: "What's up?", insult: '😠', threaten: 'Back off!', trade: 'Trade?', favor: 'A favor?', comply: 'Yes, sir.', argue: '😤', rest: '😴', wash: '🚿', eat: '🍽️', train: '🏋️', work: '💪' };
 
 // The authoritative game world. Decides what happens; render only reflects it.
 export class Simulation {
@@ -205,6 +209,35 @@ export class Simulation {
         else if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, b.foe); ag.repathCd = 0.6; }
         continue;
       }
+      // visible search: walk to suspect, then run a timed search
+      if (b.state === 'searching' && b.foe != null) {
+        const tgt = b.foe; const tp = this.pos(tgt); const tb = this.brain(tgt);
+        if (!tp || !tb) { b.state = 'idle'; b.foe = undefined; ag.path = null; continue; }
+        const d = Math.hypot(tp.x - p.x, tp.z - p.z);
+        if (d > 2.2) { if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, tgt); ag.repathCd = 0.6; } }
+        else {
+          ag.path = null; p.facing = Math.atan2(tp.x - p.x, tp.z - p.z); tp.facing = Math.atan2(p.x - tp.x, p.z - tp.z);
+          if (b.actTimer == null) { b.actTimer = 1.6; this.bubble(e, 'Search!', 'search', 1.6); tb.state = 'beingSearched'; }
+          b.actTimer -= dt;
+          if (b.actTimer <= 0) { this.doSearchResult(e, tgt); if (b.state === 'searching') { b.state = 'idle'; b.foe = undefined; } b.actTimer = undefined; }
+        }
+        continue;
+      }
+      // visible escort to solitary
+      if (b.state === 'escorting' && b.escortTarget != null) {
+        const tgt = b.escortTarget; const tp = this.pos(tgt); const tb = this.brain(tgt);
+        b.actTimer = (b.actTimer ?? 14) - dt;
+        const so = this.pickRoomOfType('solitary'); const sc = this.map.toWorld(so.x + (so.w >> 1), so.y + (so.h >> 1));
+        if (!tp || !tb) { b.state = 'idle'; b.escortTarget = undefined; ag.path = null; continue; }
+        if (!ag.path && ag.repathCd <= 0) { const gi = this.map.worldToIdx(p.x, p.z), si = this.map.worldToIdx(sc.x, sc.z); const path = gi >= 0 && si >= 0 ? findPath(this.map, gi, si) : null; ag.path = path && path.length ? path : null; ag.step = 0; ag.repathCd = 1; }
+        // the escorted prisoner follows just behind the guard
+        const fx = p.x - Math.sin(p.facing) * 0.9, fz = p.z - Math.cos(p.facing) * 0.9;
+        tp.x += (fx - tp.x) * Math.min(1, dt * 6); tp.z += (fz - tp.z) * Math.min(1, dt * 6); tp.facing = p.facing;
+        if (Math.hypot(p.x - sc.x, p.z - sc.z) < 3 || (b.actTimer ?? 0) <= 0) {
+          this.sendToSolitary(e, tgt, 'disciplined'); b.state = 'idle'; b.escortTarget = undefined; b.actTimer = undefined; ag.path = null;
+        }
+        continue;
+      }
       // patrol
       if (!ag.path) {
         b.timer -= dt;
@@ -225,6 +258,14 @@ export class Simulation {
     ag.path = path && path.length ? path : null; ag.step = 0;
   }
   private endRespond(e: Entity, b: Brain) { b.state = 'idle'; b.foe = undefined; this.ecs.get<Agent>(e, 'Agent')!.path = null; b.timer = 0; }
+  // nearby idle inmates turn to watch a brawl
+  private faceWatchers(x: number, z: number) {
+    for (const e of this.ecs.query('Brain', 'Position')) {
+      const b = this.brain(e)!; if (b.role !== 'prisoner' || (b.state !== 'idle' && b.state !== 'wander')) continue;
+      const p = this.pos(e)!; const d = Math.hypot(p.x - x, p.z - z);
+      if (d > 1 && d < 6) p.facing = Math.atan2(x - p.x, z - p.z);
+    }
+  }
 
   // ---------- combat ----------
   private combatSystem(dt: number) {
@@ -248,9 +289,13 @@ export class Simulation {
         if (b.attackCd <= 0) {
           b.attackCd = 0.8;
           const fn = this.ecs.get<Needs>(b.foe, 'Needs')!;
-          const power = 0.12 * (b.traits.includes('tough') ? 1.3 : 1) * (b.traits.includes('weak') ? 0.6 : 1);
+          let power = 0.12 * (b.traits.includes('tough') ? 1.3 : 1) * (b.traits.includes('weak') ? 0.6 : 1);
+          const weapon = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.combat ?? 0).reduce((a, c) => Math.max(a, c), 0);
+          power += weapon * 0.02;
           fn.health = clamp01(fn.health - power);
           this.bus.emit('impact', { x: fp.x, z: fp.z });
+          this.bus.emit('float', { x: fp.x, z: fp.z, text: `-${Math.round(power * 100)}`, color: '#ff7a6a' });
+          this.faceWatchers(fp.x, fp.z);
           if (fn.health <= 0.2) {
             fb.state = 'down'; fb.timer = 6; fb.foe = undefined;
             b.state = 'idle'; b.foe = undefined;
@@ -335,7 +380,9 @@ export class Simulation {
   // direct player movement (tap-to-move). Returns the world point walked to, or null.
   playerMoveTo(wx: number, wz: number): { x: number; z: number } | null {
     const pl = this.playerId; const pb = this.brain(pl)!;
-    if (pb.state === 'solitary' || pb.state === 'down') return null;
+    if (pb.state === 'solitary' || pb.state === 'down' || pb.state === 'escorted') return null;
+    if (this.act && this.act.phase === 'perform') return null;   // locked mid-action
+    this.act = null;                                              // tapping cancels a queued action
     if (pb.state === 'fight') { pb.state = 'idle'; pb.foe = undefined; }
     const idx = this.map.worldToIdx(wx, wz);
     if (idx < 0 || !this.map.walkable[idx]) return null;
@@ -344,6 +391,84 @@ export class Simulation {
     const ag = this.ecs.get<Agent>(pl, 'Agent')!; ag.path = path && path.length ? path : null; ag.step = 0;
     pb.action = 'Walking';
     const t = this.map.tileXY(idx); return this.map.toWorld(t.x, t.y);
+  }
+
+  // ---------- deferred action flow (walk → face → perform → apply → feedback) ----------
+  private act: { action: InteractAction; target: Entity; phase: 'approach' | 'perform'; timer: number; dur: number; applied: boolean } | null = null;
+  actionProgress() { return this.act && this.act.phase === 'perform' ? 1 - this.act.timer / this.act.dur : 0; }
+  actionLabel() { return this.act ? this.act.action : ''; }
+
+  private bubble(e: Entity, text: string, kind = 'talk', dur = 1.4) { this.bus.emit('bubble', { e, text, kind, dur }); }
+  private floatBy(e: Entity, text: string, color: string) { const p = this.pos(e); if (p) this.bus.emit('float', { x: p.x, z: p.z, text, color }); }
+  private faceTo(a: Entity, b: Entity) { const pa = this.pos(a), pb = this.pos(b); if (pa && pb) pa.facing = Math.atan2(pb.x - pa.x, pb.z - pa.z); }
+
+  // UI entry point: returns a status string (e.g. "Walking closer…")
+  requestAction(target: Entity, action: InteractAction): string {
+    const pl = this.playerId; const pb = this.brain(pl)!; const ps = this.social(pl)!;
+    if (pb.state === 'solitary' || pb.state === 'escorted') return 'You can\'t act right now.';
+    if (action === 'backoff') { this.act = null; if (pb.state === 'fight') { pb.state = 'idle'; pb.foe = undefined; } pb.action = 'Idle'; ps.reputation = clamp(ps.reputation - 1, -100, 100); this.bubble(pl, '…', 'talk', 0.8); return 'You back off.'; }
+    if (action === 'fight') { this.act = null; this.startPlayerFight(target); return 'Fight!'; }
+    const self = SELF_ACTIONS.includes(action);
+    const dur = ACTION_DUR[action] ?? 0.9;
+    this.act = { action, target: self ? pl : target, phase: self ? 'perform' : 'approach', timer: dur, dur, applied: false };
+    if (self) { this.beginPerform(); return ''; }
+    if (this.dist(pl, target) <= 2.6) { this.act.phase = 'perform'; this.beginPerform(); return ''; }
+    const tp = this.pos(target)!; this.playerMoveToKeepAction(tp.x, tp.z);
+    return `Walking up to ${this.brain(target)?.name ?? 'them'}…`;
+  }
+  // path the player without cancelling the queued action
+  private playerMoveToKeepAction(wx: number, wz: number) {
+    const pl = this.playerId; const idx = this.map.worldToIdx(wx, wz); if (idx < 0) return;
+    const start = this.map.worldToIdx(this.pos(pl)!.x, this.pos(pl)!.z);
+    const path = start >= 0 ? findPath(this.map, start, idx) : null;
+    const ag = this.ecs.get<Agent>(pl, 'Agent')!; ag.path = path && path.length ? path : null; ag.step = 0;
+    this.brain(pl)!.action = 'Approaching';
+  }
+  private beginPerform() {
+    const a = this.act!; const pl = this.playerId; const pb = this.brain(pl)!;
+    this.ecs.get<Agent>(pl, 'Agent')!.path = null;
+    pb.state = (ACTION_STATE[a.action] as any) ?? 'idle';
+    pb.action = a.action.charAt(0).toUpperCase() + a.action.slice(1);
+    if (SELF_ACTIONS.includes(a.action)) this.bubble(pl, SAY[a.action] ?? '', 'job', a.dur + 0.2);
+    else { this.faceTo(pl, a.target); this.faceTo(a.target, pl); this.bubble(a.action === 'comply' || a.action === 'argue' ? pl : a.target, SAY[a.action] ?? '…', a.action, a.dur + 0.2); }
+  }
+  private updatePlayerAction(dt: number) {
+    if (!this.act) return;
+    const pl = this.playerId; const pb = this.brain(pl)!;
+    if (pb.state === 'down' || pb.state === 'solitary' || pb.state === 'escorted') { this.act = null; return; }
+    const a = this.act;
+    if (a.phase === 'approach') {
+      const tb = this.brain(a.target); if (!tb) { this.act = null; pb.action = 'Idle'; return; }
+      this.faceTo(pl, a.target);
+      if (this.dist(pl, a.target) <= 2.6) { a.phase = 'perform'; a.timer = a.dur; this.beginPerform(); }
+      else if (!this.ecs.get<Agent>(pl, 'Agent')!.path) { const tp = this.pos(a.target)!; this.playerMoveToKeepAction(tp.x, tp.z); }
+    } else {
+      if (!SELF_ACTIONS.includes(a.action)) this.faceTo(pl, a.target);
+      a.timer -= dt;
+      if (a.timer <= 0 && !a.applied) { a.applied = true; this.applyAction(a); this.act = null; }
+    }
+  }
+  private applyAction(a: { action: InteractAction; target: Entity }) {
+    const pl = this.playerId; const pb = this.brain(pl)!; const ps = this.social(pl)!; const pinv = this.inv(pl)!;
+    const beforeRep = ps.reputation, beforeResp = ps.respect, beforeSusp = ps.suspicion, beforeMoney = pinv.money;
+    let result = '';
+    if (SELF_ACTIONS.includes(a.action)) result = this.selfAction(a.action);
+    else result = this.resolveTarget(a.target, a.action);
+    // floating feedback from the deltas
+    const dR = Math.round(ps.reputation - beforeRep), dRe = Math.round(ps.respect - beforeResp), dS = Math.round(ps.suspicion - beforeSusp), dM = pinv.money - beforeMoney;
+    if (dR) this.floatBy(pl, `${dR > 0 ? '+' : ''}${dR} Rep`, dR > 0 ? '#6dff9e' : '#ff7a6a');
+    if (dRe) this.floatBy(pl, `${dRe > 0 ? '+' : ''}${dRe} Respect`, dRe > 0 ? '#ffd24a' : '#ff7a6a');
+    if (dS > 0) this.floatBy(pl, `Suspicion +${dS}`, '#ff7a6a');
+    if (dM) this.floatBy(pl, `$${dM > 0 ? '+' : ''}${dM}`, '#9fe0a0');
+    // target reaction bubble
+    if (!SELF_ACTIONS.includes(a.action)) {
+      const back = /back|scare|deal|favor|nothing/i.test(result);
+      if (a.action === 'insult') this.bubble(a.target, '😠', 'insult', 1.2);
+      else if (a.action === 'threaten') this.bubble(a.target, back ? '😨' : '😤', 'threaten', 1.2);
+      else if (a.action === 'trade') this.bubble(a.target, 'Deal.', 'trade', 1.2);
+    }
+    if (pb.state !== 'fight' && pb.state !== 'down') { pb.state = 'idle'; pb.action = 'Idle'; }
+    if (result) this.bus.emit('actionResult', { text: result });
   }
 
   // ---------- player living systems: suspicion, search, discipline, solitary ----------
@@ -363,6 +488,8 @@ export class Simulation {
       return;
     }
 
+    this.updatePlayerAction(dt);
+
     // suspicion accrues in restricted zones / when carrying contraband
     const room = this.roomTypeAt(pp);
     let rise = 0;
@@ -371,44 +498,62 @@ export class Simulation {
     if (pb.state === 'fight') rise += dt * 8;
     ps.suspicion = clamp(ps.suspicion + rise - dt * 0.6, 0, 100);
 
-    // a nearby guard may stop & search a suspicious player
+    // a nearby guard moves in to search a suspicious player (visible)
     this.suspTimer -= dt;
-    if (this.suspTimer <= 0 && ps.suspicion > 45) {
-      this.suspTimer = 4;
-      const guard = this.nearestGuard(pl, 6);
-      if (guard != null) this.searchPrisoner(guard, pl);
+    if (this.suspTimer <= 0 && ps.suspicion > 45 && pb.state !== 'beingSearched' && pb.state !== 'fight') {
+      this.suspTimer = 6;
+      const guard = this.nearestGuard(pl, 9);
+      if (guard != null) this.beginSearch(guard, pl);
     }
   }
 
   private nearestGuard(target: Entity, range: number): Entity | null {
     let best: Entity | null = null, bd = range;
     for (const g of this.ecs.query('Brain', 'Position')) {
-      const b = this.brain(g)!; if (b.role !== 'guard' || b.state === 'respond') continue;
+      const b = this.brain(g)!;
+      if (b.role !== 'guard' || b.state === 'respond' || b.state === 'searching' || b.state === 'escorting') continue;
       const d = this.dist(g, target); if (d < bd) { bd = d; best = g; }
     }
     return best;
   }
 
-  searchPrisoner(guard: Entity, target: Entity) {
+  // a guard walks over and performs a visible, timed search
+  private beginSearch(guard: Entity, target: Entity) {
+    const gb = this.brain(guard)!; const tb = this.brain(target)!;
+    gb.state = 'searching'; gb.foe = target; gb.actTimer = undefined;
+    tb.state = 'beingSearched';
+    this.ecs.get<Agent>(target, 'Agent')!.path = null;
+    this.bus.emit('alert', { type: 'search', text: `${gb.name} moves to search ${tb.name}` });
+  }
+  private doSearchResult(guard: Entity, target: Entity) {
     const inv = this.inv(target); const ps = this.social(target); const tb = this.brain(target);
     if (!inv || !ps || !tb) return;
-    this.bus.emit('alert', { type: 'search', text: `${this.name(guard)} searches ${tb.name}` });
     const contraband = inv.items.filter(isContraband);
     let found: string | null = null;
-    for (const id of contraband) {
-      const chance = 0.75 - ITEMS[id].concealment * 0.6;   // alert guard vs concealment
-      if (this.rng.float() < chance) { found = id; break; }
-    }
+    for (const id of contraband) { if (this.rng.float() < 0.78 - ITEMS[id].concealment * 0.6) { found = id; break; } }
     if (found) {
       inv.items.splice(inv.items.indexOf(found), 1);
-      this.bus.emit('alert', { type: 'search', text: `Contraband found: ${ITEMS[found].name} — confiscated!` });
-      if (tb.isPlayer) ps.reputation = clamp(ps.reputation + 4, -100, 100); // notoriety
-      if (ITEMS[found].risk >= 0.7) this.sendToSolitary(guard, target, 'caught with serious contraband');
-      else { ps.suspicion = clamp(ps.suspicion - 25, 0, 100); }
+      this.bus.emit('alert', { type: 'search', text: `Contraband found on ${tb.name}: ${ITEMS[found].name} — confiscated!` });
+      this.bubble(guard, 'Found it.', 'search', 1.4); this.floatBy(target, 'Contraband!', '#ff7a6a');
+      if (tb.isPlayer) ps.reputation = clamp(ps.reputation + 4, -100, 100);
+      if (ITEMS[found].risk >= 0.7) { this.beginEscort(guard, target, 'serious contraband'); return; }
+      ps.suspicion = clamp(ps.suspicion - 30, 0, 100);
     } else {
-      ps.suspicion = clamp(ps.suspicion - 20, 0, 100);
-      this.bus.emit('alert', { type: 'search', text: `${tb.name} searched — nothing found` });
+      ps.suspicion = clamp(ps.suspicion - 22, 0, 100);
+      this.bubble(guard, 'Clean.', 'search', 1.2); this.floatBy(target, 'Clean', '#9fe0a0');
+      this.bus.emit('alert', { type: 'search', text: `${tb.name} searched — clean` });
     }
+    if (tb.state === 'beingSearched') tb.state = 'idle';
+  }
+
+  // guard escorts a prisoner to solitary (walks over, prisoner follows, then placed)
+  private beginEscort(guard: Entity, target: Entity, reason: string) {
+    const gb = this.brain(guard)!; const tb = this.brain(target)!;
+    gb.state = 'escorting'; gb.escortTarget = target; gb.actTimer = 14; // safety timeout
+    tb.state = 'escorted'; tb.foe = undefined; this.ecs.get<Agent>(target, 'Agent')!.path = null;
+    this.ecs.get<Agent>(guard, 'Agent')!.path = null;
+    this.bus.emit('alert', { type: 'discipline', text: `${gb.name} is escorting ${tb.name} to solitary — ${reason}` });
+    this.bubble(guard, 'Move it.', 'search', 1.6);
   }
 
   sendToSolitary(guard: Entity, target: Entity, reason: string) {
@@ -432,8 +577,8 @@ export class Simulation {
     if (wb.isPlayer && ls) ls.rel = clamp(ls.rel - 30, -100, 100);
     // guards may discipline the player for fighting if seen
     if (wb.isPlayer || lb.isPlayer) {
-      const g = this.nearestGuard(this.playerId, 8);
-      if (g != null && this.rng.chance(0.5)) this.sendToSolitary(g, this.playerId, 'fighting');
+      const g = this.nearestGuard(this.playerId, 10);
+      if (g != null && this.rng.chance(0.5)) this.beginEscort(g, this.playerId, 'fighting');
     }
   }
   private escortLoserToInfirmaryOrSolitary() {
@@ -448,18 +593,13 @@ export class Simulation {
     return ['talk', 'insult', 'threaten', 'trade', 'favor', 'fight', 'backoff'];
   }
 
-  interact(target: Entity, action: InteractAction): string {
+  // applies an in-range interaction result (called by the action machine after walk+face+timer)
+  private resolveTarget(target: Entity, action: InteractAction): string {
     const pl = this.playerId;
-    const pb = this.brain(pl)!; if (pb.state === 'solitary') return 'You are in solitary.';
+    const pb = this.brain(pl)!;
     const tb = this.brain(target); const ps = this.social(pl);
     if (!tb || !ps) return '';
-    if (this.dist(pl, target) > 3.2 && action !== 'backoff') {
-      const tp = this.pos(target)!; this.playerMoveTo(tp.x, tp.z); return `Moving closer to ${tb.name}…`;
-    }
     const ts = this.social(target);
-    const facePlayer = () => { const tp = this.pos(target)!, pp = this.pos(pl)!; pp.facing = Math.atan2(tp.x - pp.x, tp.z - pp.z); };
-    facePlayer();
-
     switch (action) {
       case 'talk':
         if (ts) ts.rel = clamp(ts.rel + 6, -100, 100);
@@ -557,8 +697,10 @@ export class Simulation {
   hydrate(data: any) {
     if (!data?.ents) return;
     this.ecs = new ECS();
+    this.act = null;
     this.day = data.day ?? 1; this.hour = data.hour ?? 6; this.phaseId = data.phaseId ?? 'wake';
     this.playerId = 0;
+    const safeState = (s: string) => (s === 'solitary' ? 'solitary' : 'idle');
     for (const r of data.ents) {
       if (!r.pos || !r.brain || !r.render) continue;
       const e = this.ecs.create();
@@ -566,7 +708,7 @@ export class Simulation {
       this.ecs.set(e, 'Render', r.render);
       this.ecs.set(e, 'Agent', r.agent ?? { speed: 2, path: null, step: 0, repathCd: 0 });
       this.ecs.set(e, 'Needs', r.needs ?? { hunger: 0, sleep: 0, hygiene: 0, energy: 1, anger: 0, fear: 0, health: 1 });
-      this.ecs.set(e, 'Brain', { ...r.brain, foe: undefined, escortTarget: undefined, state: r.brain.state === 'fight' ? 'idle' : r.brain.state });
+      this.ecs.set(e, 'Brain', { ...r.brain, foe: undefined, escortTarget: undefined, actTimer: undefined, state: safeState(r.brain.state), action: 'Idle' });
       this.ecs.set(e, 'Social', r.social ?? { reputation: 0, respect: 20, suspicion: 0, rel: 0 });
       this.ecs.set(e, 'Inventory', r.inv ?? { items: [], money: 0 });
       if (r.isPlayer || r.brain.isPlayer) this.playerId = e;

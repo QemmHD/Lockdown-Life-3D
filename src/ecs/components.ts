@@ -18,7 +18,9 @@ export interface Needs {
   anger: number; fear: number; health: number;
 }
 
-export type BrainState = 'idle' | 'goto' | 'wander' | 'fight' | 'respond' | 'down' | 'solitary';
+export type BrainState = 'idle' | 'goto' | 'wander' | 'fight' | 'respond' | 'down' | 'solitary'
+  | 'talking' | 'threatening' | 'trading' | 'working' | 'resting' | 'washing' | 'eating' | 'training'
+  | 'searching' | 'beingSearched' | 'escorting' | 'escorted' | 'backoff';
 
 export interface Brain {
   role: 'prisoner' | 'guard';
@@ -36,6 +38,7 @@ export interface Brain {
   discipline?: 'none' | 'solitary';
   discTimer?: number;      // seconds left in solitary
   escortTarget?: Entity;   // guard escorting this prisoner
+  actTimer?: number;       // generic in-progress action timer (guard search etc.)
 }
 
 // Reputation / standing / suspicion. On the player: reputation+respect drive the loop;

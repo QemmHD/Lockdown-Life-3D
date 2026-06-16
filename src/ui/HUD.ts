@@ -1,5 +1,5 @@
 // DOM/overlay UI (lightweight; React + Zustand can replace this later without touching sim).
-export interface PanelAction { key: string; label: string; danger?: boolean; }
+export interface PanelAction { key: string; label: string; danger?: boolean; kind?: 'social' | 'risky' | 'guard' | 'object'; disabled?: boolean; reason?: string; }
 export interface PanelItem { icon: string; name: string; contraband: boolean; key: string; }
 export interface PanelInfo {
   name: string; role: string; player: boolean; gang?: string; gangColor?: string;
@@ -37,6 +37,7 @@ export class HUD {
         </div>
       </div>
       <div id="alert-feed"></div>
+      <div id="action-bar" style="display:none"><div class="ab-label"></div><div class="ab-track"><div class="ab-fill"></div></div></div>
       <div id="panel" class="hidden"></div>
       <div id="bottombar">
         <button data-b="pause" class="hud-btn"><span class="b-ico">⏸</span><span class="b-lbl">Pause</span></button>
@@ -70,6 +71,13 @@ export class HUD {
   }
   setSpeed(label: string) { this.els['speed-x'].textContent = label; }
   setAlarm(level: number) { this.els['alarm'].style.opacity = level > 0.7 ? String((level - 0.7) * 2) : '0'; }
+  setAction(label: string, progress: number) {
+    const bar = this.root.querySelector('#action-bar') as HTMLElement;
+    if (!label || progress <= 0) { bar.style.display = 'none'; return; }
+    bar.style.display = 'block';
+    (bar.querySelector('.ab-label') as HTMLElement).textContent = label.charAt(0).toUpperCase() + label.slice(1) + '…';
+    (bar.querySelector('.ab-fill') as HTMLElement).style.width = Math.round(progress * 100) + '%';
+  }
 
   alert(text: string, type = 'info') {
     const feed = this.els['alert-feed'];
@@ -92,7 +100,7 @@ export class HUD {
     const items = info.items.length
       ? info.items.map((it) => `<button class="inv-item ${it.contraband ? 'contra' : ''}" data-item="${it.key}" title="tap to drop">${it.icon} ${it.name}${it.contraband ? ' ⚠' : ''}</button>`).join('')
       : '<span class="inv-empty">empty</span>';
-    const acts = info.actions.map((a) => `<button class="act ${a.danger ? 'danger' : ''}" data-act="${a.key}">${a.label}</button>`).join('');
+    const acts = info.actions.map((a) => `<button class="act ${a.danger ? 'danger' : ''} ${a.kind ? 'k-' + a.kind : ''} ${a.disabled ? 'disabled' : ''}" data-act="${a.key}" ${a.disabled ? 'disabled' : ''} title="${a.reason || ''}">${a.label}</button>`).join('');
     p.innerHTML = `
       <div class="panel-head"><b>${info.player ? '★ ' : ''}${info.name}</b><button id="panel-x">✕</button></div>
       <div class="panel-sub">${info.role} · <span class="gangtag-wrap">${gangTag}</span> · <span class="state">${info.state}</span></div>

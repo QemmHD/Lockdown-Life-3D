@@ -1,5 +1,26 @@
 # Changelog
 
+## v2.1.1-feel — Stage Gameplay Feel 2.1 (physical, animated, readable actions)
+Game-feel pass: the Milestone-2 systems now visibly happen in the world (sim authoritative, RenderSync
+read-only, build passes, 0 runtime errors).
+- **Deferred action flow**: choosing an action makes the player **walk into range → face the target →
+  lock into a timed action (progress bar) → apply the result → return to idle**. No more instant panel changes.
+- **Action states** (talking/threatening/trading/working/resting/washing/eating/training/searching/
+  beingSearched/escorting/escorted) shown in the panel + a bottom progress bar.
+- **Facing**: characters turn to face interaction/fight/search targets and movement direction.
+- **Floating feedback**: world-anchored +Rep / +Respect / Suspicion+ / $± / damage numbers near characters.
+- **Speech/icon bubbles** above characters for talk/insult/threaten/trade/search/work + reactions (😠/😨).
+- **Visible guard search**: guard walks over, both stop & face, "Search!" bubble + timed search, then
+  Clean / Found-it result, confiscation, and floating cue.
+- **Visible escort to solitary**: guard walks to the prisoner, the prisoner follows behind to solitary,
+  then is placed (with a safety timeout).
+- **Combat feel**: fighters face off, impact rings + damage floats, weapon items add hit power, and
+  nearby inmates turn to watch.
+- **Object/self actions** (Rest/Wash/Eat/Train/Work) play a short timed action with a bubble + reward float.
+- **UI**: color-coded action buttons (social/risky/guard/object), disabled actions with reasons
+  (e.g. "nothing to trade"), current-action progress bar, "Walking up to…" status.
+- **Save/load**: transient action/search/escort states safely reset to idle on load (no crashes).
+
 ## v2.1.0-gameplay.2 — Stage Gameplay 2.0 (playable prison-life loop)
 First real gameplay layer; sim stays authoritative (interactions mutate sim, RenderSync read-only),
 camera/layout/visuals preserved, build passes, 0 runtime errors.

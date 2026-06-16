@@ -59,6 +59,22 @@ button { font-family: inherit; cursor: pointer; }
 .act { flex: 1 1 auto; min-width: 64px; background: linear-gradient(180deg, #3a3f49, #1c1f26); color: var(--ink); border: 1px solid #4b515c; border-radius: 8px; padding: 8px 6px; font-size: 12px; font-weight: 600; }
 .act:active { background: linear-gradient(180deg, var(--accent), #b87a18); color: #1a1206; }
 .act.danger { border-color: #c0392b; } .act.danger:active { background: #c0392b; color: #fff; }
+.act.k-social { border-color: #3f7fa5; } .act.k-risky { border-color: #c97a2a; } .act.k-guard { border-color: #6f86b0; } .act.k-object { border-color: #5f8a5f; }
+.act.disabled { opacity: 0.4; filter: grayscale(0.6); }
+.act.disabled:active { background: linear-gradient(180deg, #3a3f49, #1c1f26); color: var(--ink); }
+
+/* world feedback */
+#fx-layer { position: absolute; inset: 0; pointer-events: none; z-index: 9; overflow: hidden; }
+.float-fx { position: absolute; transform: translate(-50%, -50%); font-weight: 800; font-size: 15px; text-shadow: 0 2px 3px #000; white-space: nowrap; }
+.bubble-fx { position: absolute; transform: translate(-50%, -100%); background: rgba(20,22,28,0.94); border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; padding: 3px 9px; font-size: 12px; font-weight: 600; white-space: nowrap; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
+.bubble-insult { border-color: #e0413a; } .bubble-threaten { border-color: #e08a3a; } .bubble-trade { border-color: #3f7fa5; } .bubble-search { border-color: #6f86b0; } .bubble-job { border-color: #5f8a5f; }
+
+/* current-action progress */
+#action-bar { position: absolute; bottom: 86px; left: 50%; transform: translateX(-50%); width: 180px; background: var(--panel); border: 1px solid rgba(255,255,255,0.15); border-radius: 9px; padding: 6px 10px; text-align: center; }
+.ab-label { font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+.ab-track { height: 7px; background: rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; }
+.ab-fill { height: 100%; background: var(--accent); width: 0; transition: width 0.08s linear; }
+
 .needs { display: flex; flex-direction: column; gap: 5px; }
 .need { display: flex; align-items: center; gap: 6px; }
 .need span { font-size: 10px; width: 56px; opacity: 0.8; }

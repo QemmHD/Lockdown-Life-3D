@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ThreeApp } from '../render/ThreeApp';
 import { IsoCamera } from '../render/IsoCamera';
 import { RenderSync } from '../render/RenderSync';
+import { Feedback } from '../render/Feedback';
 import { buildPrison } from '../render/WorldRenderer';
 import { dressRooms } from '../render/PropRenderer';
 import { Simulation } from '../sim/Simulation';
@@ -26,6 +27,7 @@ export class Game {
   private input: InputManager;
   private sim: Simulation;
   private sync: RenderSync;
+  private feedback!: Feedback;
   private hud: HUD;
   private clock = new THREE.Clock();
   private acc = 0;
@@ -45,6 +47,7 @@ export class Game {
     buildPrison(this.app.scene, this.sim.map, this.sim.rooms);
     dressRooms(this.app.scene, this.sim.map, this.sim.rooms);
     this.sync = new RenderSync(this.app.scene, this.sim.ecs);
+    this.feedback = new Feedback();
     // character-focused camera: clamp to the prison, follow the player prisoner
     this.cam.setBounds(this.sim.map.width / 2 - 5, this.sim.map.height / 2 - 5);
     this.playerEntity = this.sim.player();
@@ -68,6 +71,9 @@ export class Game {
     this.bus.on('tap', ({ x, y }) => this.onTap(x, y));
     this.bus.on('alert', ({ text, type }) => this.hud.alert(text, type));
     this.bus.on('impact', ({ x, z }) => this.addImpact(x, z));
+    this.bus.on('float', ({ x, z, text, color }) => this.feedback.float(x, z, text, color));
+    this.bus.on('bubble', ({ e, text, kind, dur }) => this.feedback.bubble(e, text, kind, dur));
+    this.bus.on('actionResult', ({ text }) => this.hud.alert(text, 'info'));
 
     window.addEventListener('resize', () => { this.app.resize(); this.cam.resize(); });
     this.loop();
@@ -122,25 +128,32 @@ export class Game {
   private playerActions(e: Entity): PanelAction[] {
     const room = this.sim.roomTypeAt(this.sim.ecs.get<Position>(e, 'Position')!);
     const a: PanelAction[] = [];
-    if (room === 'cellblock') a.push({ key: 'rest', label: 'Rest' });
-    if (room === 'shower') a.push({ key: 'wash', label: 'Wash' });
-    if (room === 'cafeteria') a.push({ key: 'eat', label: 'Eat' });
-    if (room === 'yard') a.push({ key: 'train', label: 'Train' });
-    if (JOB_BY_ROOM[room]) a.push({ key: 'work', label: JOB_BY_ROOM[room].verb });
+    if (room === 'cellblock') a.push({ key: 'rest', label: 'Rest', kind: 'object' });
+    if (room === 'shower') a.push({ key: 'wash', label: 'Wash', kind: 'object' });
+    if (room === 'cafeteria') a.push({ key: 'eat', label: 'Eat', kind: 'object' });
+    if (room === 'yard') a.push({ key: 'train', label: 'Train', kind: 'object' });
+    if (JOB_BY_ROOM[room]) a.push({ key: 'work', label: JOB_BY_ROOM[room].verb, kind: 'object' });
+    if (!a.length) a.push({ key: 'work', label: 'No actions here', disabled: true, reason: 'move to a room with facilities' });
     return a;
   }
-  private npcActions(_e: Entity, role: string): PanelAction[] {
-    if (role === 'guard') return [{ key: 'talk', label: 'Talk' }, { key: 'comply', label: 'Comply' }, { key: 'argue', label: 'Argue' }];
-    return [{ key: 'talk', label: 'Talk' }, { key: 'trade', label: 'Trade' }, { key: 'favor', label: 'Favor' },
-      { key: 'insult', label: 'Insult' }, { key: 'threaten', label: 'Threaten' }, { key: 'fight', label: 'Fight', danger: true }, { key: 'backoff', label: 'Back Off' }];
+  private npcActions(e: Entity, role: string): PanelAction[] {
+    if (role === 'guard') return [{ key: 'talk', label: 'Talk', kind: 'social' }, { key: 'comply', label: 'Comply', kind: 'guard' }, { key: 'argue', label: 'Argue', kind: 'risky' }];
+    const tinv = this.sim.ecs.get<Inventory>(e, 'Inventory');
+    const canTrade = !!tinv && tinv.items.length > 0;
+    return [
+      { key: 'talk', label: 'Talk', kind: 'social' },
+      { key: 'trade', label: 'Trade', kind: 'social', disabled: !canTrade, reason: canTrade ? '' : 'they have nothing to trade' },
+      { key: 'favor', label: 'Favor', kind: 'social' },
+      { key: 'insult', label: 'Insult', kind: 'risky' },
+      { key: 'threaten', label: 'Threaten', kind: 'risky' },
+      { key: 'fight', label: 'Fight', kind: 'risky', danger: true },
+      { key: 'backoff', label: 'Back Off' }
+    ];
   }
   private doAction(key: string) {
     const sel = this.selected ?? this.playerEntity;
-    const selfKeys = ['rest', 'wash', 'eat', 'train', 'work'];
-    let result: string;
-    if (selfKeys.includes(key)) result = this.sim.selfAction(key as InteractAction);
-    else result = this.sim.interact(sel, key as InteractAction);
-    if (result) this.hud.alert(result, key === 'fight' ? 'fight' : 'info');
+    const status = this.sim.requestAction(sel, key as InteractAction);
+    if (status) this.hud.alert(status, key === 'fight' ? 'fight' : 'info');
     this.refreshPanel();
   }
 
@@ -149,6 +162,7 @@ export class Game {
     if (!data) { this.hud.alert('No save found', 'fight'); return; }
     this.sim.hydrate(data);
     this.sync.reset();
+    this.feedback.reset();
     this.sync.setEcs(this.sim.ecs);
     this.playerEntity = this.sim.player();
     this.select(this.playerEntity);
@@ -209,6 +223,8 @@ export class Game {
     this.sync.update(dt, this.selected, t);
     this.updateFx(dt);
     this.updateMarker(dt);
+    this.feedback.update(dt, this.cam.camera, (e) => this.sync.worldOf(e));
+    this.hud.setAction(this.sim.actionLabel(), this.sim.actionProgress());
 
     // character-focused follow: always track the player prisoner with a small movement lead
     const ft = this.followTarget();
