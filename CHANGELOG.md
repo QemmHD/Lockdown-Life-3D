@@ -12,6 +12,34 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v3.2.0-ai — Stage AI 3.2 (deeper guard/prisoner AI, memory, group behaviour)
+AI-depth pass — guards and prisoners now have roles, intents, memory, and light group behaviour.
+Sim authoritative, RenderSync read-only, build passes, 0 runtime errors. New **pure AI modules**:
+`AIIntent.ts`, `PrisonerAISystem.ts`, `AIMemorySystem.ts`, `GroupBehaviorSystem.ts`,
+`GuardAISystem.ts` (types/labels/scoring/routes); the Simulation stays the orchestrator.
+- **Guard roles v2**: patrol / checkpoint / response / escort / search / desk / lockdown / riot, each
+  with a readable label shown on the panel; role changes are sticky (anti-twitch) and counted.
+- **Guard patrol routes**: four routes spread guards across the prison (mess/yard, housing/showers,
+  security/admin, perimeter) with dwell-at-post; one guard prefers the security desk. During chaos,
+  routes are overridden by checkpoint/riot duty, then resume.
+- **Guard coordination**: a single nearest guard commits to an incident (no pile-on); in a riot only
+  ~half converge on the hottest zone while the rest hold posts; unreachable posts fall back.
+- **Prisoner intent system**: lightweight scoring picks an intent — schedule / socialize / group /
+  avoid-enemy / watch-fight / flee-danger / return-cell / hide / comply / wander — from phase, needs,
+  gang, fear/anger, nearby guards/enemies/allies, and chaos state. Sticky so choices don't flicker.
+- **Prisoner memory v1**: remembers last fight foe, last threat/insult source, recent search, and
+  fear/anger spikes (all decaying). Drives avoidance/retaliation; player insults/threats/beatings are
+  remembered so NPCs avoid or hold a grudge afterward.
+- **Group behaviour + avoidance**: gang allies cluster (separated by index, not stacked); fearful
+  inmates flee brawls; timid inmates avoid rivals; brave ones watch; rival crews throw "standoff"
+  warnings when a room gets tense (tension first, violence sometimes).
+- **Readable status**: NPC/guard panels show the current role/intent ("Patrolling", "Holding
+  checkpoint", "Avoiding trouble", "Returning to cell", "Watching", …); bubbles stay throttled.
+- **Telemetry+**: added guard role switches, prisoner intent changes, social interactions, standoffs,
+  order refusals, compliance events to `sim.metrics` (via `?debug`).
+- **Save/load v6**: persists guard roles + memory's stable timers; resets transient intent/memory refs
+  on load (no stuck paths/reservations). Backward-compatible with v5/v4 saves.
+
 ## v3.1.0-chaos.tuning — Stage Chaos 3.1 (balance, readability, alert cleanup, feel)
 Tuning + game-feel pass over the chaos layer — no new systems. Sim authoritative, RenderSync
 read-only, build passes, 0 runtime errors. Accelerated 1-day playtest: peak Heat **5** / peak Riot
