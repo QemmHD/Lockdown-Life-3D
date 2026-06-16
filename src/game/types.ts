@@ -212,6 +212,53 @@ export interface PlayerAppearance {
   uniform: number;
 }
 
+export interface FactionRunState {
+  leader: string;
+  members: number;
+  territory: string[];
+  enemy: string;
+  ally: string;
+  specialty: string;   // contraband specialty item id
+  hangout: string;     // room id
+  goal: string;
+  weakness: string;
+  attitude: number;    // starting relationship delta toward player
+}
+
+export interface DailyModifier { id: string; name: string; desc: string; }
+export interface EconItem { value: number; supply: number; demand: number; }
+
+export interface Mission {
+  id: string;
+  giver: string;       // npc id
+  giverName: string;
+  faction: FactionId;
+  type: string;
+  title: string;
+  desc: string;
+  targetRoom?: string;
+  item?: string;
+  reward: { money?: number; rep?: number; respect?: number; faction?: number; heat?: number; item?: string };
+  risk: number;
+  done: boolean;
+}
+
+export interface RunState {
+  seed: number;
+  worldState: string;
+  worldStateName: string;
+  worldStateDesc: string;
+  factions: Record<string, FactionRunState>;
+  economy: Record<string, EconItem>;
+  dailyModifier: DailyModifier;
+  npcTraits: Record<string, string>;
+  npcNames: Record<string, string>;
+  rumors: string[];        // rumors the player has seen
+  tomorrowRumor: string;
+  bestEventToday: string;
+  difficulty: number;      // 0..1 reactive difficulty
+}
+
 export interface SaveData {
   version: number;
   day: number;
@@ -233,6 +280,8 @@ export interface SaveData {
   flags: Record<string, boolean | number>;
   deadNPCs: string[];
   bodyCount: number;
+  run: RunState;
+  missions: Mission[];
 }
 
 export interface GameSettings {

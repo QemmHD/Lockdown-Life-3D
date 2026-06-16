@@ -8,9 +8,14 @@ import { CollisionWorld } from '../world/Collision';
 import { PrisonMap, Interactable } from '../world/PrisonMap';
 import { Backdrop } from '../world/Backdrop';
 import { PostFX } from './PostFX';
+import { run as RUN, randomSeed, RNG } from './RNG';
+import { generateRun, advanceDayProc, contrabandPrice } from '../systems/ProcGen';
+import { generateMission } from '../systems/MissionSystem';
+import type { Mission } from './types';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { roomAt, ROOM_MAP } from '../data/rooms';
 import { FACTIONS } from '../data/factions';
+import { SCHEDULE } from '../data/schedule';
 import { Player } from '../entities/Player';
 import { NPC } from '../entities/NPC';
 import { NPCS, NPC_MAP } from '../data/npcs';
@@ -30,8 +35,10 @@ import { InventoryUI } from '../ui/InventoryUI';
 
 type Mode = 'menu' | 'playing' | 'paused' | 'dialogue' | 'inventory' | 'event' | 'activity';
 
-const VERSION = '1.4.0';
+const VERSION = '1.5.0';
 const INTERACT_RANGE = 2.4;
+const SCHEDULE_IDS = SCHEDULE.map((p) => p.id);
+const PHASE_START: Record<string, number> = Object.fromEntries(SCHEDULE.map((p) => [p.id, p.startHour]));
 
 export class Game {
   private renderer: THREE.WebGLRenderer;
@@ -171,6 +178,7 @@ export class Game {
     this.activityEl.style.display = 'none';
     document.getElementById('ui-root')!.appendChild(this.activityEl);
 
+    this.buildDevPanel();
     this.wireSystems();
     this.wireUI();
 
@@ -228,6 +236,144 @@ export class Game {
     }
   }
 
+  // ----- Dev / debug panel (~ key) -----
+  private devEl!: HTMLDivElement;
+  private buildDevPanel() {
+    const el = document.createElement('div');
+    el.id = 'devpanel';
+    document.getElementById('ui-root')!.appendChild(el);
+    this.devEl = el;
+  }
+  private toggleDev() {
+    const open = this.devEl.style.display !== 'block';
+    this.devEl.style.display = open ? 'block' : 'none';
+    if (open) this.renderDev();
+  }
+  private renderDev() {
+    const r = this.state.run;
+    this.devEl.innerHTML = `<h3>// DEV PANEL</h3>
+      <div class="dev-seed">seed: ${r.seed}<br>world: ${r.worldStateName}<br>mod: ${r.dailyModifier.name}<br>diff: ${r.difficulty.toFixed(2)}</div>
+      <button data-d="reroll">🎲 Reroll Prison (new seed)</button>
+      <button data-d="seed">⌨ Start with seed…</button>
+      <button data-d="copy">📋 Copy seed</button>
+      <button data-d="event">⚡ Trigger random event</button>
+      <button data-d="phase">⏭ Advance phase</button>
+      <button data-d="day">🌙 Advance day</button>
+      <button data-d="mission">📋 Spawn mission</button>
+      <button data-d="close">✖ Close</button>`;
+    this.devEl.querySelectorAll('button').forEach((b) => {
+      (b as HTMLElement).onclick = () => this.devAction((b as HTMLElement).dataset.d!);
+    });
+  }
+  private devAction(a: string) {
+    switch (a) {
+      case 'reroll': this.rerollPrison(randomSeed()); break;
+      case 'seed': { const v = prompt('Enter seed (number):'); if (v && !isNaN(+v)) this.rerollPrison(+v); break; }
+      case 'copy': try { navigator.clipboard?.writeText(String(this.state.run.seed)); this.hud.toast('Seed copied', 'good'); } catch {} break;
+      case 'event': if (this.mode === 'playing') this.events.devTrigger(this.state.phase); break;
+      case 'phase': this.devAdvancePhase(); break;
+      case 'day': if (this.mode === 'playing') this.sleep(); break;
+      case 'mission': { const giver = this.npcs.find((n) => !n.dead && (n.def.role === 'leader' || n.def.role === 'recruiter')); if (giver) this.hud.toast(this.offerMission(giver), 'event'); break; }
+      case 'close': this.toggleDev(); return;
+    }
+    this.renderDev();
+  }
+  // re-roll the procedural world mid-session without losing the player
+  private rerollPrison(seed: number) {
+    RUN.reseed(seed);
+    const days = this.state.sentenceDays;
+    const apc = this.state.appearance, nm = this.state.playerName, cr = this.state.crime;
+    generateRun(this.state, seed);
+    this.state.sentenceDays = days; this.state.appearance = apc; this.state.playerName = nm; this.state.crime = cr;
+    this.spawnNPCs(); this.applyNPCProc(); this.resetEntities();
+    this.player.customize(apc, this.scene);
+    this.player.setPos(this.map.spawnPoint().x, this.map.spawnPoint().z);
+    this.cam.snapTo(this.player.x, this.player.z);
+    this.hud.toast(`🎲 Prison rerolled — seed ${seed} (${this.state.run.worldStateName})`, 'event');
+  }
+  private devAdvancePhase() {
+    const order = SCHEDULE_IDS;
+    const cur = order.indexOf(this.state.phase);
+    const next = order[(cur + 1) % order.length];
+    const startH = PHASE_START[next];
+    if (next === 'wakeup') { if (this.mode === 'playing') this.sleep(); return; }
+    this.state.timeOfDay = startH + 0.02;
+  }
+
+  // ----- Procedural missions / favors -----
+  private offerMission(npc: NPC): string {
+    const active = this.state.missions.filter((m) => !m.done);
+    if (active.length >= 2) return 'You\'ve got enough on your plate already. Finish what you started.';
+    const m = generateMission(RUN, npc, this.npcs, this.state);
+    this.state.missions.push(m);
+    this.hud.toast(`📋 New favor: ${m.title}`, 'event');
+    const r = m.reward;
+    return `${m.desc} Reward: $${r.money ?? 0}${r.item ? ' + ' + r.item : ''}.`;
+  }
+
+  private missionTimer = 1;
+  private checkMissions(dt: number) {
+    this.missionTimer -= dt;
+    if (this.missionTimer > 0) return;
+    this.missionTimer = 1;
+    for (const m of this.state.missions) {
+      if (m.done) continue;
+      let complete = false;
+      if (m.type === 'deliver' || m.type === 'smuggle') {
+        if (m.item && m.targetRoom && this.state.currentRoom === m.targetRoom && this.inv.count(m.item) > 0) {
+          this.inv.remove(m.item, 1); complete = true;
+        }
+      } else if (m.type === 'beat') {
+        const t = this.npcs.find((n) => n.def.id === m.item);
+        if (m.item && (!t || t.ko || t.dead)) complete = true;
+      } else if (m.type === 'intimidate') {
+        if (m.item && this.state.mem(m.item).relationship <= -15) complete = true;
+      } else if (m.type === 'stash') {
+        if (m.item && this.state.flags['opened_' + m.item]) complete = true;
+      }
+      if (complete) this.completeMission(m);
+    }
+  }
+
+  private completeMission(m: Mission) {
+    m.done = true;
+    const s = this.state.stats;
+    const r = m.reward;
+    if (r.money) { s.money += r.money; }
+    if (r.rep) s.reputation += r.rep;
+    if (r.respect) s.respect += r.respect;
+    if (r.faction) this.state.changeFactionRep(m.faction, r.faction);
+    if (r.heat) this.heat.add(-Math.abs(r.heat));
+    if (r.item) this.inv.add(r.item);
+    this.state.clampStats();
+    this.audio.play('rep');
+    this.hud.toast(`✅ Favor done: ${m.title} (+$${r.money ?? 0})`, 'good');
+    this.dayEarned.money += r.money ?? 0;
+  }
+
+  // reactive difficulty: the stronger/richer/more notorious you get, the tougher the prison reacts
+  private updateDifficulty() {
+    const s = this.state.stats;
+    let d = 0.25;
+    d += Math.min(0.25, s.respect / 400);
+    d += Math.min(0.15, s.money / 600);
+    d += Math.min(0.2, this.state.bodyCount * 0.07);
+    d += Math.min(0.15, this.state.day * 0.015);
+    if (this.state.playerFaction) d += 0.05;
+    this.state.run.difficulty = Math.max(0.15, Math.min(1, d));
+  }
+
+  // apply procedural traits, names, and per-NPC animation variation
+  private applyNPCProc() {
+    for (const n of this.npcs) {
+      n.trait = this.state.run.npcTraits[n.def.id] ?? '';
+      n.displayName = this.state.run.npcNames[n.def.id];
+      n.walkSpeedMul = 0.82 + ((n.def.id.length * 13 + (n.trait.length || 1) * 7) % 40) / 100; // 0.82..1.22 deterministic
+      if (n.trait === 'workout_addict') n.walkSpeedMul *= 1.05;
+      if (n.trait === 'sickly' || n.trait === 'quiet') n.walkSpeedMul *= 0.9;
+    }
+  }
+
   private removeDeadFromWorld() {
     for (let i = this.npcs.length - 1; i >= 0; i--) {
       const n = this.npcs[i];
@@ -262,18 +408,22 @@ export class Game {
       this.state.changeFactionRep(npc.def.faction, -15);
       this.dayEarned.rep += 2;
       if (npc.isGuard) { this.heat.add(45); this.addTime(2, 'Assaulted a guard'); }
-      else this.hud.toast(`You beat ${npc.def.name}. Respect up.`, 'good');
+      else this.hud.toast(`You beat ${npc.name}. Respect up.`, 'good');
     };
     this.combat.onDeath = (npc, byPlayer) => this.handleDeath(npc, byPlayer);
     this.combat.onPlayerKO = () => this.handlePlayerKO();
     this.combat.onHostile = (npc) => { if (npc.isGuard) this.triggerAlarm(npc.x, npc.z); };
     this.combat.onFightSeen = (x, z, byGuardOnly) => {
+      // snitches/informants nearby report you even if no guard saw it
+      const snitchNear = this.npcs.some((n) => !n.ko && !n.dead && (n.trait === 'snitch' || n.trait === 'informant') && n.distTo(x, z) < 12);
+      if (snitchNear) byGuardOnly = true;
       const guardNear = byGuardOnly || this.npcs.some((n) => n.isGuard && !n.ko && n.distTo(x, z) < 13);
       if (guardNear) { this.heat.add(byGuardOnly ? 18 : 12); this.triggerAlarm(x, z); this.audio.play('whistle'); this.state.dayClean = false; }
       else this.heat.add(3);
     };
 
-    this.dialogue.onChallenge = (npc) => { npc.ai = 'fight'; npc.combatTarget = 'player'; npc.hostile = true; this.hud.toast(`${npc.def.name} squares up!`, 'bad'); };
+    this.dialogue.onChallenge = (npc) => { npc.ai = 'fight'; npc.combatTarget = 'player'; npc.hostile = true; this.hud.toast(`${npc.name} squares up!`, 'bad'); };
+    this.dialogue.offerMission = (npc) => this.offerMission(npc);
     this.dialogue.toast = (m, t) => this.hud.toast(m, t);
     this.dialogue.onClose = () => { if (this.mode === 'dialogue') this.mode = 'playing'; };
 
@@ -307,14 +457,19 @@ export class Game {
     { crime: 'Grand Larceny', min: 9, max: 15 }
   ];
 
-  private newGame() {
+  private newGame(forcedSeed?: number) {
     this.state.reset();
+    // seeded procedural run
+    const seed = forcedSeed ?? randomSeed();
+    RUN.reseed(seed);
+    generateRun(this.state, seed);
     // roll a random crime + sentence
     const c = Game.CRIMES[Math.floor(Math.random() * Game.CRIMES.length)];
     const days = c.min + Math.floor(Math.random() * (c.max - c.min + 1));
     this.state.sentenceDays = days;
     this.state.crime = c.crime;
     this.spawnNPCs();   // fresh roster — anyone killed last run is back for the new sentence
+    this.applyNPCProc();
     this.resetEntities();
     SaveSystem.clear();
     this.menus.intro(
@@ -323,7 +478,10 @@ export class Game {
         crime: c.crime,
         days,
         minutesPerDay: this.schedule.realMinutesPerDay(),
-        sentenceText: `${days} DAYS`
+        sentenceText: `${days} DAYS`,
+        seed: this.state.run.seed,
+        world: this.state.run.worldStateName,
+        worldDesc: this.state.run.worldStateDesc
       },
       () => this.menus.creator((o) => this.applyCreation(o, c.crime, days))
     );
@@ -348,7 +506,9 @@ export class Game {
     const data = SaveSystem.load();
     if (!data) { this.newGame(); return; }
     SaveSystem.apply(this.state, data);
+    RUN.reseed((this.state.run.seed || 1) + this.state.day * 7919); // deterministic continuation
     this.spawnNPCs();
+    this.applyNPCProc();
     this.removeDeadFromWorld();   // inmates killed before the save stay gone
     this.player.customize(this.state.appearance, this.scene);
     this.player.setPos(data.player.x, data.player.z);
@@ -429,7 +589,7 @@ export class Game {
     const ang = Math.random() * Math.PI * 2;
     n.setPos(this.player.x + Math.sin(ang) * 6, this.player.z + Math.cos(ang) * 6);
     n.ai = 'fight'; n.combatTarget = 'player'; n.hostile = true;
-    this.hud.toast(`${n.def.name} comes at you!`, 'bad');
+    this.hud.toast(`${n.name} comes at you!`, 'bad');
   }
 
   // ----- Death & story consequences (one life — they're gone for good) -----
@@ -448,10 +608,10 @@ export class Game {
       if (npc.isGuard) {
         this.addTime(15, 'MURDER of an officer');
         this.forceLockdown();
-        this.hud.notify('MANHUNT', `You killed ${npc.def.name}. The whole block is locked down and hunting you.`);
+        this.hud.notify('MANHUNT', `You killed ${npc.name}. The whole block is locked down and hunting you.`);
       } else {
         this.addTime(6, 'Murder');
-        this.hud.notify('A LIFE TAKEN', `You killed ${npc.def.name}. The ${fac.name} swear revenge.`);
+        this.hud.notify('A LIFE TAKEN', `You killed ${npc.name}. The ${fac.name} swear revenge.`);
       }
       // the victim's crew comes for you
       let avengers = 0;
@@ -467,7 +627,7 @@ export class Game {
       }
       this.triggerAlarm(npc.x, npc.z);
     } else {
-      this.hud.notify('Word spreads', `${npc.def.name} (${fac.name}) was killed in a brawl. The yard feels colder.`);
+      this.hud.notify('Word spreads', `${npc.name} (${fac.name}) was killed in a brawl. The yard feels colder.`);
       this.state.stats.mood = clamp(this.state.stats.mood - 4, 0, 100);
     }
   }
@@ -487,7 +647,7 @@ export class Game {
     if (!foe) return;
     this.combat.startNpcFight(a, foe);
     if (a.distTo(this.player.x, this.player.z) < 22) {
-      this.hud.toast(`${a.def.name} and ${foe.def.name} are throwing down!`, 'event');
+      this.hud.toast(`${a.name} and ${foe.name} are throwing down!`, 'event');
       this.triggerAlarm((a.x + foe.x) / 2, (a.z + foe.z) / 2);
     }
   }
@@ -582,6 +742,8 @@ export class Game {
     this.state.dayClean = true;
 
     this.schedule.advanceDay();
+    advanceDayProc(this.state, RUN);           // new economy, daily modifier, rumor
+    this.updateDifficulty();
     this.resetNPCPositions();
     this.saveGame();
 
@@ -641,7 +803,7 @@ export class Game {
         if (this.state.phase === 'sleep' || this.state.phase === 'lockdown' || this.state.timeOfDay >= 21 || this.schedule.needsSleep) this.sleep();
         else this.hud.toast('Too early to sleep. Wait for Lights Out.', 'info');
         break;
-      case 'stash': this.openInventory(); break;
+      case 'stash': this.state.flags['opened_' + it.id] = true; this.openInventory(); break;
       case 'serving': case 'table':
         if (this.inv.count('food_tray') > 0) { this.inv.use('food_tray'); this.player.rig.setState('eat'); this.audio.play('eat'); this.fx.floatText(this.player.x, 2, this.player.z, '+hunger', '#e67e22'); }
         else if (this.inv.add('food_tray')) { this.audio.play('pickup'); this.hud.toast('Grabbed a food tray.', 'good'); }
@@ -748,6 +910,7 @@ export class Game {
 
   private updatePlaying(dt: number, t: number) {
     // --- input actions (edge) ---
+    if (this.input.consumePressed('`')) { this.toggleDev(); return; }
     if (this.input.consumePressed('escape') || this.input.consumePressed('p')) { this.pause(); return; }
     if (this.input.consumePressed('i') || this.input.consumePressed('tab') || this.mobile.consume('inventory')) { this.openInventory(); return; }
     if (this.input.consumePressed('m')) { this.pause(); this.menus.map(); return; }
@@ -795,6 +958,7 @@ export class Game {
     this.npcFightTimer -= dt;
     if (this.npcFightTimer <= 0) { this.npcFightTimer = 16 + Math.random() * 20; this.maybeStartNpcFight(); }
     this.cleanupDeadBodies();
+    this.checkMissions(dt);
 
     // schedule / time
     this.schedule.update(dt);
@@ -832,7 +996,13 @@ export class Game {
     this.updateFollowLight();
     this.hud.update();
     this.updatePromptUI();
+    this.updateObjectiveUI();
     this.updateRoomLabels();
+  }
+
+  private updateObjectiveUI() {
+    const active = this.state.missions.filter((m) => !m.done);
+    this.hud.setObjective(active.length ? `📋 ${active[0].title}${active.length > 1 ? ` (+${active.length - 1})` : ''}` : null);
   }
 
   private _lblV = new THREE.Vector3();
@@ -887,12 +1057,12 @@ export class Game {
     if (this.schedule.needsSleep) return; // handled
     const parts: string[] = [];
     if (this.nearInteractable) parts.push(`<b>E</b> ${this.nearInteractable.label}`);
-    if (this.nearNPC) parts.push(`<b>Talk</b> ${this.nearNPC.def.name} ${this.nearNPC.hostile ? '⚠' : ''}`);
+    if (this.nearNPC) parts.push(`<b>Talk</b> ${this.nearNPC.name} ${this.nearNPC.hostile ? '⚠' : ''}`);
     this.hud.setPrompt(parts.length ? parts.join(' &nbsp;·&nbsp; ') : null);
   }
 
   private openDialogue(npc: NPC) {
-    if (npc.hostile) { this.hud.toast(`${npc.def.name} is too angry to talk!`, 'bad'); return; }
+    if (npc.hostile) { this.hud.toast(`${npc.name} is too angry to talk!`, 'bad'); return; }
     this.mode = 'dialogue';
     this.dialogue.open(npc);
   }

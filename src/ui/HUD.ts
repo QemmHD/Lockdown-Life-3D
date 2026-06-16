@@ -18,6 +18,7 @@ export class HUD {
           <div id="phase-name">Wake-Up</div>
           <div id="time-row"><span id="day">Day 1</span> · <span id="time">6:00 AM</span></div>
           <div id="room-name">Cell Block</div>
+          <div id="day-mod" title="Today's modifier"></div>
         </div>
         <div id="hud-buttons">
           <button data-btn="inventory" title="Inventory (I)">🎒</button>
@@ -42,13 +43,14 @@ export class HUD {
         <div class="hud-stat" id="faction-standing">Independent</div>
         <div class="hud-stat" id="sentence">14 days left</div>
       </div>
+      <div id="objective"></div>
       <div id="prompt"></div>
       <div id="toast-layer"></div>
       <div id="vignette"></div>
       <div id="lockdown-overlay"></div>`;
     document.getElementById('ui-root')!.appendChild(this.root);
 
-    ['phase-name', 'day', 'time', 'room-name', 'money', 'rep', 'respect', 'faction-standing', 'sentence', 'prompt', 'vignette', 'lockdown-overlay'].forEach((id) => {
+    ['phase-name', 'day', 'time', 'room-name', 'day-mod', 'money', 'rep', 'respect', 'faction-standing', 'sentence', 'objective', 'prompt', 'vignette', 'lockdown-overlay'].forEach((id) => {
       this.els[id] = this.root.querySelector('#' + id) as HTMLElement;
     });
     for (const k of ['health', 'stamina', 'hunger', 'mood', 'heat']) {
@@ -72,6 +74,13 @@ export class HUD {
     if (text) this.els['prompt'].innerHTML = text;
   }
 
+  setObjective(text: string | null) {
+    const el = this.els['objective'];
+    if (!el) return;
+    el.style.display = text ? 'block' : 'none';
+    if (text) el.innerHTML = text;
+  }
+
   toast(msg: string, type = 'info') {
     const layer = this.root.querySelector('#toast-layer')!;
     const el = document.createElement('div');
@@ -93,6 +102,7 @@ export class HUD {
     this.els['time'].textContent = this.schedule.timeString();
     const room = ROOM_MAP[this.state.currentRoom];
     this.els['room-name'].textContent = room ? room.name : '';
+    if (this.els['day-mod']) this.els['day-mod'].textContent = '📋 ' + this.state.run.dailyModifier.name;
     if (room?.restricted) this.els['room-name'].classList.add('restricted'); else this.els['room-name'].classList.remove('restricted');
 
     this.setBar('health', s.health / s.maxHealth);

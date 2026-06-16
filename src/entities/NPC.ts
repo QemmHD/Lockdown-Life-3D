@@ -61,6 +61,11 @@ export class NPC {
   dead = false;
   deathTimer = 0;          // counts up after death; Game removes the body when it elapses
   npcFoe: NPC | null = null; // current NPC-vs-NPC brawl target
+  trait = '';              // procedural personality trait (affects behavior)
+  displayName?: string;    // procedural name override
+  walkSpeedMul = 1;        // per-NPC animation/movement variation
+  idleOffset = 0;
+  get name() { return this.displayName ?? this.def.name; }
   base: { health: number; aggression: number; fear: number; respect: number; loyalty: number; strength: number };
 
   constructor(def: NPCDef, private collision: CollisionWorld) {
@@ -200,7 +205,7 @@ export class NPC {
       return;
     }
 
-    const speedBase = this.isGuard ? 4.2 : 3.4 + this.base.strength * 0.05;
+    const speedBase = (this.isGuard ? 4.2 : 3.4 + this.base.strength * 0.05) * this.walkSpeedMul;
 
     // FIGHT
     if (this.ai === 'fight' && this.combatTarget === 'player') {
@@ -299,6 +304,8 @@ export class NPC {
     if (ctx.lockdown) return 'cellblock';
     // free phases gravitate to faction territory
     const free = ['yard', 'gym', 'shower'].includes(ctx.requiredRoom) || ctx.requiredRoom === '';
+    if (free && this.trait === 'workout_addict') return 'gym';
+    if (free && (this.trait === 'runner' || this.trait === 'escape_obsessed') && Math.random() < 0.5) return 'maintenance';
     const terr = FACTIONS[this.def.faction]?.territory ?? [];
     if (free && terr.length > 0) {
       return terr[Math.floor((this.def.id.length) % terr.length)];

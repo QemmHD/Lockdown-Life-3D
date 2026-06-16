@@ -4,6 +4,8 @@ import { AudioSystem } from './AudioSystem';
 import { FACTIONS } from '../data/factions';
 import { ITEMS } from '../data/items';
 import { NPC } from '../entities/NPC';
+import { contrabandPrice, genRumor } from './ProcGen';
+import { run as RUN } from '../game/RNG';
 
 interface Choice { label: string; act: () => void; }
 
@@ -14,6 +16,7 @@ export class DialogueSystem {
   onChallenge?: (npc: NPC) => void;
   onClose?: () => void;
   toast?: (msg: string, type?: string) => void;
+  offerMission?: (npc: NPC) => string;
 
   constructor(private state: GameState, private inv: InventorySystem, private audio: AudioSystem) {
     this.panel = document.createElement('div');
@@ -73,7 +76,7 @@ export class DialogueSystem {
     this.panel.innerHTML = `
       <div class="dlg-card">
         <div class="dlg-head" style="border-color:${f.cssColor}">
-          <div class="dlg-name">${npc.def.name}</div>
+          <div class="dlg-name">${npc.name}</div>
           <div class="dlg-meta"><span style="color:${f.cssColor}">${f.name}</span> · ${npc.def.role} · <span class="rel-${lvl}">${lvl}</span></div>
         </div>
         <div class="dlg-text">${text}</div>
@@ -140,45 +143,61 @@ export class DialogueSystem {
   }
 
   private rumor() {
-    const rumors = [
-      'Word is the Vipers are moving product through the laundry.',
-      'They say the Warden\'s cutting sentences for good behavior this month.',
-      'Heard a screw on night shift takes bribes — easy heat to shed.',
-      'The Iron Dogs are planning to take the gym for good.',
-      'Somebody\'s digging in the maintenance halls... could be a way out.',
-      'Fresh fish coming in tomorrow. Bullies are already circling.'
-    ];
-    this.state.stats.intelligence += 0; // info value
-    this.say('"' + rumors[Math.floor(Math.random() * rumors.length)] + '"');
+    // manipulative/snitch NPCs may feed false rumors; others share real ones
+    const text = genRumor(RUN, this.state);
+    const liar = this.npc!.trait === 'manipulative' || this.npc!.trait === 'snitch';
+    const tag = liar && RUN.chance(50) ? ' (...you\'re not sure you believe them)' : '';
+    if (!this.state.run.rumors.includes(text)) this.state.run.rumors.push(text);
+    this.say('"' + text + '"' + tag);
     this.state.changeRelationship(this.npc!.def.id, 1);
+  }
+
+  // dynamic prices: economy + world state + intelligence + trader attitude/trait
+  private priceOf(id: string): number {
+    const it = ITEMS[id];
+    let p = it.contraband ? contrabandPrice(this.state, id) : it.value;
+    const intel = this.state.stats.intelligence;
+    let markup = 1 - Math.min(0.2, intel * 0.012);                 // smart shopper
+    if (this.rel() > 30) markup *= 0.9;                            // friendly discount
+    if (this.npc!.trait === 'greedy') markup *= 1.2;
+    if (this.npc!.trait === 'friendly') markup *= 0.92;
+    return Math.max(1, Math.round(p * markup));
   }
 
   private trade() {
     const npc = this.npc!;
-    // NPC offers contraband for sale; player can also sell
-    const forSale = npc.def.faction === 'black_vipers'
+    // trader inventory keyed to faction specialty + role; runners/traders carry more
+    const spec = this.state.run.factions[npc.def.faction]?.specialty;
+    let forSale = npc.def.faction === 'black_vipers'
       ? ['shiv', 'energy_pills', 'lockpick', 'cigarettes']
       : npc.def.faction === 'blue_kings'
       ? ['cigarettes', 'phone', 'snack', 'betting_slip']
       : ['cigarettes', 'snack', 'alcohol_brew'];
+    if (spec && !forSale.includes(spec)) forSale = [spec, ...forSale];
+    if (npc.trait === 'trader' || npc.trait === 'runner') forSale = [...forSale, 'medicine', 'lighter'];
+    forSale = Array.from(new Set(forSale)).slice(0, 6);
+
     let html = '<div class="trade-grid"><div class="trade-col"><h4>Buy</h4>';
     for (const id of forSale) {
       const it = ITEMS[id];
-      html += `<button class="trade-item" data-buy="${id}">${it.icon} ${it.name} <span>$${it.value}</span></button>`;
+      const risk = Math.round((it.risk || 0) * 100);
+      html += `<button class="trade-item" data-buy="${id}">${it.icon} ${it.name} ${it.contraband ? `<small class="risk">⚠${risk}%</small>` : ''}<span>$${this.priceOf(id)}</span></button>`;
     }
     html += '</div><div class="trade-col"><h4>Sell</h4>';
     for (const inv of this.state.inventory) {
       const it = ITEMS[inv.itemId];
-      html += `<button class="trade-item" data-sell="${inv.itemId}">${it.icon} ${it.name} x${inv.qty} <span>$${Math.ceil(it.value * 0.6)}</span></button>`;
+      const sell = Math.ceil(this.priceOf(inv.itemId) * 0.6);
+      html += `<button class="trade-item" data-sell="${inv.itemId}">${it.icon} ${it.name} x${inv.qty} <span>$${sell}</span></button>`;
     }
     html += '</div></div><div class="trade-money">Your cash: $<b id="trade-cash">' + this.state.stats.money + '</b></div>';
     this.render(html);
     this.panel.querySelectorAll('[data-buy]').forEach((b) => {
       (b as HTMLElement).onclick = () => {
         const id = (b as HTMLElement).dataset.buy!;
-        const it = ITEMS[id];
-        if (this.state.stats.money >= it.value && this.inv.add(id, 1)) {
-          this.state.stats.money -= it.value;
+        const price = this.priceOf(id);
+        if (this.state.stats.money >= price && this.inv.add(id, 1)) {
+          this.state.stats.money -= price;
+          const e = this.state.run.economy[id]; if (e) { e.supply = Math.max(5, e.supply - 4); e.demand = Math.min(100, e.demand + 2); }
           this.audio.play('money');
           this.state.mem(this.npc!.def.id).traded = true;
           this.state.changeRelationship(this.npc!.def.id, 3);
@@ -189,9 +208,9 @@ export class DialogueSystem {
     this.panel.querySelectorAll('[data-sell]').forEach((b) => {
       (b as HTMLElement).onclick = () => {
         const id = (b as HTMLElement).dataset.sell!;
-        const it = ITEMS[id];
         if (this.inv.remove(id, 1)) {
-          this.state.stats.money += Math.ceil(it.value * 0.6);
+          this.state.stats.money += Math.ceil(this.priceOf(id) * 0.6);
+          const e = this.state.run.economy[id]; if (e) { e.supply = Math.min(100, e.supply + 3); }
           this.audio.play('money');
           this.state.changeRelationship(this.npc!.def.id, 2);
           this.trade();
@@ -235,6 +254,12 @@ export class DialogueSystem {
   }
 
   private favor() {
+    // procedural mission/favor from this NPC
+    if (this.offerMission) {
+      this.audio.play('click');
+      this.say('"' + this.offerMission(this.npc!) + '"');
+      return;
+    }
     const s = this.state.stats;
     const success = Math.random() < 0.4 + s.intelligence * 0.04 + this.rel() * 0.003;
     if (success) {
@@ -308,8 +333,12 @@ export class DialogueSystem {
 
   private bribe() {
     if (this.state.stats.money < 20) { this.say('"You think $0 buys silence? Get lost."'); return; }
-    // corrupt guards accept; strict ones get angry
-    const corrupt = Math.random() < 0.5;
+    // a guard's trait decides whether the bribe lands
+    const t = this.npc!.trait;
+    let corrupt: boolean;
+    if (t === 'corrupt' || t === 'bribable' || t === 'lazy') corrupt = true;
+    else if (t === 'strict' || t === 'rule_obsessed' || t === 'fair' || t === 'watchful') corrupt = false;
+    else corrupt = Math.random() < 0.5;
     this.state.stats.money -= 20;
     if (corrupt) {
       this.state.stats.heat = Math.max(0, this.state.stats.heat - 45);

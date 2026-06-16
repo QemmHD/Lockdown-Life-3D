@@ -132,7 +132,8 @@ export class CombatSystem {
     this.state.changeRelationship(npc.def.id, -25);
 
     const arch = npc.def.archetype;
-    const fearful = arch === 'coward' || arch === 'sick' || arch === 'new' || arch === 'booksmart';
+    const fearful = arch === 'coward' || arch === 'sick' || arch === 'new' || arch === 'booksmart'
+      || npc.trait === 'cowardly' || npc.trait === 'sickly' || npc.trait === 'quiet';
     if (npc.base.health < 60 || fearful || npc.health < npc.maxHealth * 0.3) {
       npc.ai = 'flee';
       npc.fleeTarget = null;

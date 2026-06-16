@@ -250,7 +250,7 @@ export class Menus {
   }
 
   // ---------- Intake cutscene ----------
-  intro(data: { name: string; crime: string; days: number; minutesPerDay: number; sentenceText: string }, cb: () => void) {
+  intro(data: { name: string; crime: string; days: number; minutesPerDay: number; sentenceText: string; seed: number; world: string; worldDesc: string }, cb: () => void) {
     this.pausedScreen = false;
     this.wrap(`
       <div class="menu-bg"></div>
@@ -261,20 +261,23 @@ export class Menus {
           <div class="intake-line"><span>INMATE</span><b id="t-name"></b></div>
           <div class="intake-line"><span>CONVICTED OF</span><b id="t-crime" class="crime"></b></div>
           <div class="intake-line"><span>SENTENCE</span><b id="t-sentence"></b></div>
+          <div class="intake-line"><span>BLOCK STATE</span><b style="color:#e0a030">${data.world}</b></div>
         </div>
+        <div class="intake-note"><i>${data.worldDesc}</i></div>
         <div class="intake-note">
           Survive each day, keep your nose clean, and you walk out a free inmate.
           Cause trouble and you'll do harder time. <br/>
-          <i>Each day inside is about <b>${data.minutesPerDay} minutes</b> of active play
-          (6:00 AM → lights out — the clock pauses during jobs, training and menus).
-          Sleep in your bunk to advance to the next day.</i>
+          <i>Each day is ~<b>${data.minutesPerDay} min</b> of active play (clock pauses in menus/jobs).</i>
         </div>
+        <div class="seed-row">SEED <code id="seed-val">${data.seed}</code> <button id="seed-copy" class="seed-btn">📋 Copy</button></div>
         <button id="intake-go" class="menu-big" disabled>Processing…</button>
       </div>`);
     const nameEl = this.overlay.querySelector('#t-name') as HTMLElement;
     const crimeEl = this.overlay.querySelector('#t-crime') as HTMLElement;
     const sentEl = this.overlay.querySelector('#t-sentence') as HTMLElement;
     const go = this.overlay.querySelector('#intake-go') as HTMLButtonElement;
+    const copyBtn = this.overlay.querySelector('#seed-copy') as HTMLElement;
+    if (copyBtn) copyBtn.onclick = () => { try { navigator.clipboard?.writeText(String(data.seed)); copyBtn.textContent = '✓ Copied'; } catch {} };
     // simple typewriter reveal sequence
     const steps: [HTMLElement, string][] = [
       [nameEl, data.name],
@@ -373,17 +376,25 @@ export class Menus {
     const timeLine = earned.daysAdded || earned.daysCut
       ? `<div class="stat-row"><span>Time adjustment</span><b>${earned.daysCut ? `<span style="color:#66ff88">-${earned.daysCut}</span>` : ''}${earned.daysAdded ? ` <span style="color:#ff6655">+${earned.daysAdded}</span>` : ''} days</b></div>`
       : `<div class="stat-row"><span>Behavior</span><b>No change</b></div>`;
-    this.wrap(`<div class="menu-panel"><h2>🌅 Day ${this.state.day - 1} Complete</h2>
+    const run = this.state.run;
+    const biggest = run.bestEventToday || 'A quiet day — nothing made the headlines.';
+    this.wrap(`<div class="menu-panel scroll"><h2>🌅 Day ${this.state.day - 1} Complete</h2>
       <div class="summary">
-        <p>You survived another day inside.</p>
+        <p class="diary">📰 "${biggest}"</p>
         ${timeLine}
         <div class="stat-row"><span>Money earned</span><b>$${earned.money}</b></div>
-        <div class="stat-row"><span>Sentence remaining</span><b>${this.state.sentenceDays} days</b></div>
         <div class="stat-row"><span>Reputation</span><b>${Math.round(s.reputation)}</b></div>
         <div class="stat-row"><span>Respect</span><b>${Math.round(s.respect)}</b></div>
-        <div class="stat-row"><span>Money</span><b>$${s.money}</b></div>
         <div class="stat-row"><span>Heat</span><b>${Math.round(s.heat)}</b></div>
+        <div class="stat-row"><span>Body count</span><b>${this.state.bodyCount}</b></div>
+        <div class="stat-row"><span>Sentence remaining</span><b>${this.state.sentenceDays} days</b></div>
       </div>
+      <div class="diary-block">
+        <div class="diary-row"><span>🏴 Block state</span><b>${run.worldStateName}</b></div>
+        <div class="diary-row"><span>📋 Tomorrow</span><b>${run.dailyModifier.name}</b> — ${run.dailyModifier.desc}</div>
+        <div class="diary-row"><span>🗣️ Rumor</span><i>${run.tomorrowRumor}</i></div>
+      </div>
+      <div class="seed-row">SEED <code>${run.seed}</code></div>
       <button id="sum-next" class="menu-big">▶ Begin Day ${this.state.day}</button></div>`);
     this.bind('#sum-next', () => { this.hide(); cb(); });
   }

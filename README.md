@@ -63,6 +63,7 @@ count** shapes how your story ends.
 | Map | `M` |
 | Pause | `P` or `Esc` |
 | Zoom | `+` / `-` |
+| Dev panel | `` ` `` (backtick) |
 
 ### Mobile controls
 - **Left virtual joystick** to move.
@@ -85,6 +86,19 @@ count** shapes how your story ends.
   or discover the **escape plan** (find a *file* + *keycard* and reach the maintenance stash during Lights Out).
 
 Saves are automatic at each day transition and manual from the Pause menu (`localStorage`).
+
+### Every run is procedurally generated
+Each new game rolls a **seed** (shown on the intake screen — copy it, or enter your own via the dev
+panel) that generates a different prison: a **world state** (gang war, crackdown, contraband boom,
+debt crisis…), randomized **gang leaders/territory/allegiances**, a unique **population** with
+behavior-changing traits and procedural names, a **dynamic contraband economy** with daily prices,
+**daily modifiers**, **rumors**, a reactive **event director**, and procedural **favors/missions**
+from the gangs. The day summary is a "prison diary" recapping the day and previewing tomorrow.
+
+**Testing the randomness:** start two new games and compare the seed/world state on the intake
+screen, the gang line-up, NPC names, and trade prices — they differ every run. Press `` ` `` to open
+the **dev panel** to reroll the prison, start with a specific seed, trigger events, advance the
+day/phase, or spawn a mission.
 
 ---
 

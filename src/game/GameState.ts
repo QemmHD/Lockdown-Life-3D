@@ -1,10 +1,18 @@
 import type {
-  PlayerStats, InventoryItem, NPCMemory, GameSettings, SchedulePhaseId, FactionId, RelationshipLevel, PlayerAppearance
+  PlayerStats, InventoryItem, NPCMemory, GameSettings, SchedulePhaseId, FactionId, RelationshipLevel, PlayerAppearance, RunState, Mission
 } from './types';
+
+export function defaultRun(): RunState {
+  return {
+    seed: 0, worldState: 'peace', worldStateName: 'Uneasy Peace', worldStateDesc: '',
+    factions: {}, economy: {}, dailyModifier: { id: 'calm', name: 'Quiet Day', desc: '' },
+    npcTraits: {}, npcNames: {}, rumors: [], tomorrowRumor: '', bestEventToday: '', difficulty: 0.3
+  };
+}
 import { PLAYABLE_FACTIONS } from '../data/factions';
 import { NPCS } from '../data/npcs';
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const SAVE_KEY = 'lockdown_life_3d_save';
 
 export function defaultStats(): PlayerStats {
@@ -46,6 +54,8 @@ export class GameState {
   dayClean = true;         // stayed out of trouble today (drives "good behavior" cuts)
   deadNPCs: string[] = []; // permanently dead inmates (one life, gone for good)
   bodyCount = 0;           // inmates the player has killed (notoriety/story)
+  run: RunState = defaultRun();
+  missions: Mission[] = [];
 
   constructor() {
     this.reset();
@@ -85,6 +95,8 @@ export class GameState {
     this.dayClean = true;
     this.deadNPCs = [];
     this.bodyCount = 0;
+    this.run = defaultRun();
+    this.missions = [];
   }
 
   mem(id: string): NPCMemory {

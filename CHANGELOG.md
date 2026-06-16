@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.5.0 — "Every Sentence Is Different" (procedural systems pass)
+A deep randomness layer so every save plays differently — without breaking the playable layout.
+- **Seeded runs**: a `mulberry32` RNG (`randomFloat/int/choice/weighted/chance/shuffle/vary`). Every
+  new game rolls a seed (shown & copyable on the intake screen and day summary, saved to localStorage).
+- **Procedural faction state**: each run rolls leaders, members, territory, ally/enemy, contraband
+  specialty, goals & weaknesses, and a **prison-wide world state** (gang war, crackdown, contraband
+  boom, debt crisis, racket, peace…) that biases the whole run.
+- **Procedural population**: every inmate/guard gets a randomized **trait** that changes behavior
+  (snitches report you, corrupt/bribable guards take payments, strict guards never do, cowards flee,
+  workout addicts haunt the gym, runners lurk in maintenance, greedy traders overcharge) plus
+  procedural **names/nicknames** and per-NPC animation/speed variation.
+- **Reactive Event Director**: 35+ events weighted by heat, reputation, contraband, hunger/health,
+  world state and the daily modifier — so events feel responsive, not random spam.
+- **Procedural missions/favors**: ask a gang leader/recruiter for work and get a generated objective
+  (deliver, smuggle, beat, intimidate, recover stash) with rewards, tracked on the HUD.
+- **Dynamic contraband economy**: per-run supply/demand and prices that drift daily and react to the
+  world state & daily modifier; trades show price + risk and move the market.
+- **Rumors / prison news**: procedural rumors via NPC dialogue and the day summary (manipulative
+  NPCs may lie).
+- **Daily modifiers**: each new day rolls a modifier (extra patrols, sweep, hot day, black market…)
+  shown on the HUD and the day summary.
+- **Reactive difficulty director** scales dangerous events with your power/notoriety.
+- **Procedural day summary**: a living "prison diary" with the day's biggest event, block state,
+  tomorrow's modifier & rumor, and the seed.
+- **Dev panel** (` / backtick): show seed, reroll prison, start-with-seed, copy seed, trigger event,
+  advance phase/day, spawn mission.
+- All procedural state (seed, faction state, economy, daily modifier, traits/names, rumors, missions,
+  difficulty) saves & loads (save format v4).
+
 ## v1.4.0 — "Do or Die" (living prison, encounters & permadeath)
 - **One life, permadeath**: inmates can be **killed** — finishing a downed inmate, or a heavy
   weapon blow — and once dead they're **gone for good** (removed from the world and from your save).

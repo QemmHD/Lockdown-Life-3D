@@ -2,6 +2,7 @@ import { GameState, clamp } from '../game/GameState';
 import { InventorySystem } from './InventorySystem';
 import { AudioSystem } from './AudioSystem';
 import { RANDOM_EVENTS } from '../data/events';
+import { ITEMS } from '../data/items';
 import type { RandomEventDef, SchedulePhaseId } from '../game/types';
 
 export interface EventHooks {
@@ -34,16 +35,68 @@ export class EventSystem {
       e.phases.includes(phase) && !(e.once && this.state.completedEvents.includes(e.id))
     );
     if (pool.length === 0) return;
-    const total = pool.reduce((a, e) => a + e.weight, 0);
+    // reactive director: weight each event by world/player state
+    const weighted = pool.map((e) => ({ e, w: this.weightFor(e) }));
+    const total = weighted.reduce((a, x) => a + x.w, 0);
     let r = Math.random() * total;
-    let chosen = pool[0];
-    for (const e of pool) { r -= e.weight; if (r <= 0) { chosen = e; break; } }
+    let chosen = weighted[0].e;
+    for (const x of weighted) { r -= x.w; if (r <= 0) { chosen = x.e; break; } }
+    this.trigger(chosen);
+  }
+
+  // contextual weighting so events feel reactive, not purely random
+  private weightFor(ev: RandomEventDef): number {
+    const s = this.state.stats;
+    const id = ev.id;
+    const has = (arr: string[]) => arr.includes(id);
+    let w = ev.weight;
+    const contraband = this.inv.contrabandItems().length > 0;
+    const ws = this.state.run.worldState;
+    const dm = this.state.run.dailyModifier.id;
+    const tension = ws === 'gang_war' ? 1 : (ws === 'cold_war' || ws === 'tension') ? 0.6 : 0.2;
+
+    if (has(['cell_search', 'guard_inspection', 'framed', 'lockdown_drill', 'corrupt_offer', 'snitch_report'])) w *= 1 + s.heat / 45;
+    if (has(['cafeteria_argument', 'yard_fight', 'faction_brawl', 'riot_tension'])) w *= 1 + tension;
+    if (has(['protection_demand', 'theft_accusation', 'debt_collection'])) w *= s.reputation < 0 ? 1.8 : 0.8;
+    if (has(['recruitment', 'enemy_truce'])) w *= s.reputation > 20 ? 1.6 : 0.7;
+    if (contraband && has(['cell_search', 'guard_inspection', 'framed', 'shower_ambush'])) w *= 1.7;
+    if (has(['sick_inmate', 'illness']) && s.health < 60) w *= 1.5;
+    if (id === 'food_shortage' && s.hunger < 40) w *= 1.6;
+
+    if (ws === 'gang_war' && has(['yard_fight', 'faction_brawl', 'riot_tension'])) w *= 2;
+    if (ws === 'crackdown' && has(['cell_search', 'guard_inspection'])) w *= 2;
+    if (ws === 'contraband_boom' && has(['black_auction', 'price_spike', 'contraband_rumor'])) w *= 2;
+    if (ws === 'debt_crisis' && id === 'debt_collection') w *= 2.2;
+    if (ws === 'racket' && id === 'protection_demand') w *= 2.2;
+
+    if ((dm === 'inspection' || dm === 'sweep') && has(['cell_search', 'guard_inspection', 'framed'])) w *= 2.5;
+    if (dm === 'black_market' && has(['black_auction', 'price_spike'])) w *= 2;
+    if (dm === 'tension_high' && has(['yard_fight', 'faction_brawl', 'cafeteria_argument', 'riot_tension'])) w *= 2;
+
+    // reactive difficulty nudges dangerous events up
+    if (has(['yard_fight', 'faction_brawl', 'shower_ambush', 'protection_demand', 'debt_collection']))
+      w *= 1 + (this.state.run.difficulty - 0.3) * 0.8;
+    return Math.max(0.05, w);
+  }
+
+  // dev: force a contextual event now, ignoring cooldown
+  devTrigger(phase: SchedulePhaseId) {
+    if (this.active) return;
+    const pool = RANDOM_EVENTS.filter((e) => e.phases.includes(phase));
+    const all = pool.length ? pool : RANDOM_EVENTS;
+    const weighted = all.map((e) => ({ e, w: this.weightFor(e) }));
+    const total = weighted.reduce((a, x) => a + x.w, 0);
+    let r = Math.random() * total;
+    let chosen = weighted[0].e;
+    for (const x of weighted) { r -= x.w; if (r <= 0) { chosen = x.e; break; } }
+    this.cooldown = 0;
     this.trigger(chosen);
   }
 
   trigger(ev: RandomEventDef) {
     this.active = ev;
     this.cooldown = 25;
+    this.state.run.bestEventToday = ev.name;
     if (ev.once) this.state.completedEvents.push(ev.id);
     this.audio.play('murmur');
     this.render(ev);
@@ -109,6 +162,18 @@ export class EventSystem {
       case 'warden_watch': this.state.flags['warden_watch'] = this.state.day; t('The Warden is watching. Behave.'); break;
       case 'faction_brawl_join': this.hooks.spawnHostile(); s.respect += 3; s.heat += 10; t('You pick a side in the brawl!', 'bad'); break;
       case 'escape_thread': this.hooks.startEscapeThread(); break;
+      case 'blackout': s.heat = clamp(s.heat - 15, 0, 100); t('You slip through the blind spot — heat fades.', 'good'); break;
+      case 'gambling': if (s.money >= 10) { s.money -= 10; if (Math.random() < 0.45) { const win = 12 + Math.floor(Math.random() * 22); s.money += win; t(`You win $${win}!`, 'good'); } else t('You lose the roll. -$10', 'bad'); } else t('Not enough cash.'); break;
+      case 'price_spike': for (const k in this.state.run.economy) this.state.run.economy[k].demand = Math.min(100, this.state.run.economy[k].demand + 15); t('Contraband prices are climbing — sell high soon.', 'event'); break;
+      case 'auction': if (s.money >= 20) { s.money -= 20; const loot = ['phone', 'keycard', 'medicine', 'shiv'][Math.floor(Math.random() * 4)]; if (this.inv.add(loot)) t(`You win the auction: ${ITEMS[loot].name}!`, 'good'); else t('No room for the prize.'); } else t('Not enough cash to bid.'); break;
+      case 'food_event': if (this.inv.add('food_tray')) t('You grab extra rations.', 'good'); s.heat = clamp(s.heat + 4, 0, 100); break;
+      case 'illness': if (Math.random() < 0.4) { s.health = clamp(s.health - 15, 1, s.maxHealth); s.mood = clamp(s.mood - 6, 0, 100); t('You caught the bug. -HP', 'bad'); } else t('You stay healthy.', 'good'); break;
+      case 'debt_collect': if (s.money >= 15) { s.money -= 15; t('Debt paid. -$15'); } else { this.hooks.spawnHostile(); t('No money? Then you pay in blood.', 'bad'); } break;
+      case 'framed': if (s.intelligence > 5 || Math.random() < 0.5) { t('You talk your way clear of the frame-up.', 'good'); } else { s.heat = clamp(s.heat + 20, 0, 100); this.hooks.addTime(1, 'Framed for contraband'); this.inv.confiscateContraband(); t('They pin it on you — extra time and a search!', 'bad'); } break;
+      case 'truce': { const facs = Object.keys(this.state.factionRep).filter((f) => f !== 'guards'); const f = facs[Math.floor(Math.random() * facs.length)]; this.state.changeFactionRep(f as any, 25); t('A truce holds. Faction tension eases.', 'good'); break; }
+      case 'graffiti': t('Fresh tags mark whose turf this is now.', 'event'); break;
+      case 'riot_tension': s.heat = clamp(s.heat + 15, 0, 100); this.hooks.spawnHostile(); t('You stoke the tension — it could boil over.', 'bad'); break;
+      case 'holiday': s.mood = clamp(s.mood + 20, 0, 100); this.inv.add('snack'); t('A rare good day. Mood lifts and there\'s a treat.', 'good'); break;
     }
     this.state.clampStats();
     this.done();
