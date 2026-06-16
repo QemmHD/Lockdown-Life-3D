@@ -8,20 +8,42 @@ import { EventBus } from '../core/EventBus';
 import { GANGS, GANG_MAP, areEnemies, NAME_POOL, GUARD_NAMES, PRISONER_TRAITS, phaseAt } from '../data/content';
 import { ITEMS, CONTRABAND_IDS, ITEM_IDS, isContraband } from '../data/items';
 import { JOB_BY_ROOM } from '../data/jobs';
-import { Interactable, InteractableDef, OBJ_ACTIONS, OBJ_ACTION_LABEL } from '../world/Interactable';
+import { Interactable, InteractableDef, OBJ_ACTIONS, OBJ_ACTION_LABEL, isExclusive } from '../world/Interactable';
 
 const SECONDS_PER_HOUR = 5;
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
 const RESTRICTED = ['guardroom', 'intake', 'storage', 'solitary'];
-export type InteractAction = 'talk' | 'insult' | 'threaten' | 'trade' | 'favor' | 'fight' | 'backoff' | 'comply' | 'argue' | 'rest' | 'wash' | 'eat' | 'train' | 'work' | 'pickup' | 'use' | 'inspect' | 'search' | 'hide' | 'take';
+const DEBUG = typeof location !== 'undefined' && /[?&]debug/.test(location.search);
+// schedule phases during which an area's door/gate stands open (others closed; rec areas locked at night)
+const OPEN_FOR: Record<string, string[]> = {
+  cellblock: ['wake', 'lockdown', 'sleep'],
+  cafeteria: ['breakfast', 'lunch', 'dinner'],
+  shower: ['shower'],
+  yard: ['work', 'yard', 'free']
+};
+// which interactable types prisoners head for during each schedule phase
+const PHASE_OBJ: Record<string, string[]> = {
+  wake: ['sink', 'bed'], sleep: ['bed'], lockdown: ['bed'],
+  breakfast: ['table'], lunch: ['table'], dinner: ['table'],
+  shower: ['shower'], yard: ['weights', 'pullup'], free: ['weights', 'pullup'],
+  work: ['job', 'shelf', 'trash']
+};
+// interactable type -> the pose/state an occupant holds while using it
+const USE_STATE: Record<string, string> = {
+  bed: 'resting', shower: 'washing', sink: 'washing', toilet: 'washing',
+  table: 'eating', counter: 'eating', weights: 'training', pullup: 'training',
+  job: 'working', shelf: 'working', trash: 'working'
+};
+const USING_STATES = new Set(['resting', 'washing', 'eating', 'training', 'working']);
+export type InteractAction = 'talk' | 'insult' | 'threaten' | 'trade' | 'favor' | 'fight' | 'backoff' | 'comply' | 'argue' | 'rest' | 'wash' | 'eat' | 'train' | 'work' | 'pickup' | 'use' | 'inspect' | 'search' | 'hide' | 'take' | 'open' | 'close' | 'try';
 const SELF_ACTIONS: InteractAction[] = ['rest', 'wash', 'eat', 'train', 'work'];
 const ACTION_DUR: Record<string, number> = { talk: 0.8, insult: 0.9, threaten: 1.0, trade: 1.1, favor: 1.0, comply: 0.6, argue: 0.8, rest: 1.4, wash: 1.4, eat: 1.5, train: 1.4, work: 1.8 };
 const ACTION_STATE: Record<string, string> = { talk: 'talking', comply: 'talking', argue: 'threatening', insult: 'threatening', threaten: 'threatening', trade: 'trading', favor: 'trading', rest: 'resting', wash: 'washing', eat: 'eating', train: 'training', work: 'working' };
 const SAY: Record<string, string> = { talk: "What's up?", insult: '😠', threaten: 'Back off!', trade: 'Trade?', favor: 'A favor?', comply: 'Yes, sir.', argue: '😤', rest: '😴', wash: '🚿', eat: '🍽️', train: '🏋️', work: '💪' };
 // object-action timings, character states, and bubble icons
-const OBJ_DUR: Record<string, number> = { rest: 1.6, wash: 1.4, use: 0.6, eat: 1.5, train: 1.4, work: 1.8, inspect: 0.8, search: 1.2, hide: 1.0, take: 0.8 };
-const OBJ_STATE: Record<string, string> = { rest: 'resting', wash: 'washing', eat: 'eating', train: 'training', work: 'working', search: 'searching', hide: 'working', take: 'working', use: 'talking', inspect: 'talking' };
-const OBJ_ICON: Record<string, string> = { rest: '😴', wash: '🚿', eat: '🍽️', train: '🏋️', work: '💪', search: '🔍', hide: '🤫', take: '🖐️', use: '🚪', inspect: '👁️' };
+const OBJ_DUR: Record<string, number> = { rest: 1.6, wash: 1.4, use: 0.6, eat: 1.5, train: 1.4, work: 1.8, inspect: 0.8, search: 1.2, hide: 1.0, take: 0.8, open: 0.6, close: 0.6, try: 0.7 };
+const OBJ_STATE: Record<string, string> = { rest: 'resting', wash: 'washing', eat: 'eating', train: 'training', work: 'working', search: 'searching', hide: 'working', take: 'working', use: 'talking', inspect: 'talking', open: 'talking', close: 'talking', try: 'talking' };
+const OBJ_ICON: Record<string, string> = { rest: '😴', wash: '🚿', eat: '🍽️', train: '🏋️', work: '💪', search: '🔍', hide: '🤫', take: '🖐️', use: '🚪', inspect: '👁️', open: '🚪', close: '🚪', try: '🔒' };
 
 // The authoritative game world. Decides what happens; render only reflects it.
 export class Simulation {
@@ -126,7 +148,7 @@ export class Simulation {
     const r = this.pickRoomOfType(type);
     const start = this.map.worldToIdx(p.x, p.z);
     const goal = randomTileInRoom(this.map, this.rooms, r.id, () => this.rng.float());
-    const path = start >= 0 ? findPath(this.map, start, goal) : null;
+    const path = start >= 0 ? this.path(start, goal, e) : null;
     ag.path = path && path.length ? path : null; ag.step = 0;
   }
   name(e: Entity) { return this.ecs.get<Brain>(e, 'Brain')?.name ?? '?'; }
@@ -139,11 +161,15 @@ export class Simulation {
     const ph = phaseAt(this.hour);
     if (ph.id !== this.phaseId) {
       this.phaseId = ph.id;
+      this.applyDoorSchedule();                 // open/lock areas for the new phase
       const free = ph.id === 'yard' || ph.id === 'free' || ph.id === 'work';
       for (const e of this.ecs.query('Brain')) {
         const b = this.ecs.get<Brain>(e, 'Brain')!;
         if (b.isPlayer) continue; // the player is not yanked by the schedule
-        if (b.role === 'prisoner' && b.state !== 'fight' && b.state !== 'down' && b.state !== 'solitary') {
+        if (b.role === 'prisoner' && b.state !== 'fight' && b.state !== 'down' && b.state !== 'solitary' && b.state !== 'escorted' && b.state !== 'beingSearched') {
+          // release any object held/claimed for the previous phase, then re-route
+          this.releaseFor(e); b.objTarget = undefined;
+          if (USING_STATES.has(b.state)) b.state = 'idle';
           // during free time, gang members drift to their turf
           b.targetRoom = (free && b.gang) ? GANG_MAP[b.gang].territory : ph.room;
           b.state = 'goto';
@@ -154,12 +180,27 @@ export class Simulation {
     }
 
     this.needsSystem(dt);
+    this.sweepReservations(dt);
     this.prisonerAI(dt);
     this.guardAI(dt);
     this.combatSystem(dt);
     this.playerSystem(dt);
     this.moveAgents(dt);
   }
+
+  // free any object whose holder is gone, downed, or whose reservation timed out
+  private sweepReservations(dt: number) {
+    for (const o of this.objs.values()) {
+      if (!o.reservedBy) continue;
+      o.reservedUntil -= dt;
+      const b = this.brain(o.reservedBy);
+      if (!b || o.reservedUntil <= 0 || b.state === 'down' || b.state === 'solitary') {
+        if (b && b.objTarget === o.id) b.objTarget = undefined;
+        o.reservedBy = 0; o.reservedUntil = 0;
+      }
+    }
+  }
+  private releaseFor(e: Entity) { for (const o of this.objs.values()) if (o.reservedBy === e) { o.reservedBy = 0; o.reservedUntil = 0; } }
 
   private needsSystem(dt: number) {
     for (const e of this.ecs.query('Needs', 'Brain')) {
@@ -183,44 +224,76 @@ export class Simulation {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
       if (b.role !== 'prisoner' || b.isPlayer) continue;   // player is manually controlled
       if (b.state === 'fight' || b.state === 'down' || b.state === 'solitary' || b.state === 'beingSearched' || b.state === 'escorted') continue;
-      // an NPC using a prop just holds the pose, then releases it
-      if (b.state === 'resting' || b.state === 'washing' || b.state === 'training' || b.state === 'eating') {
+      const ag = this.ecs.get<Agent>(e, 'Agent')!;
+      const p = this.ecs.get<Position>(e, 'Position')!;
+      // holding a use-pose at an object: keep the reservation alive, then release
+      if (USING_STATES.has(b.state)) {
         b.timer -= dt;
-        if (b.timer <= 0) { for (const o of this.objs.values()) if (o.reservedBy === e) o.reservedBy = 0; b.state = 'idle'; }
+        const held = b.objTarget ? this.objs.get(b.objTarget) : null;
+        if (held && held.reservedBy === e) held.reservedUntil = Math.max(held.reservedUntil, b.timer + 2);
+        if (b.timer <= 0) { this.releaseFor(e); b.objTarget = undefined; b.state = 'idle'; b.action = 'Idle'; }
         continue;
       }
-      const ag = this.ecs.get<Agent>(e, 'Agent')!;
       ag.repathCd -= dt;
+      // walking to a claimed schedule object
+      if (b.objTarget) {
+        const o = this.objs.get(b.objTarget);
+        if (!o || (isExclusive(o.type) && o.reservedBy !== e)) { b.objTarget = undefined; ag.path = null; }
+        else {
+          o.reservedUntil = Math.max(o.reservedUntil, 8);
+          if (Math.hypot(p.x - o.ix, p.z - o.iz) <= 1.3) this.beginNpcUse(e, b, p, o);
+          else if (!ag.path && ag.repathCd <= 0) {
+            const path = this.path(this.map.worldToIdx(p.x, p.z), this.map.worldToIdx(o.ix, o.iz), e);
+            ag.repathCd = 1; if (path && path.length) { ag.path = path; ag.step = 0; b.state = 'goto'; } else { this.releaseFor(e); b.objTarget = undefined; } // unreachable → fall back
+          }
+          continue;
+        }
+      }
       if (!ag.path) {
-        const p = this.ecs.get<Position>(e, 'Position')!;
         const here = this.roomTypeAt(p);
+        // prefer a real scheduled object/anchor over a generic room center
+        if (ag.repathCd <= 0 && this.assignScheduleTarget(e, b, p)) { ag.repathCd = 1.2; continue; }
         if (here !== b.targetRoom && ag.repathCd <= 0) { this.gotoRoom(e, b.targetRoom); ag.repathCd = 1.2; b.state = 'goto'; }
         else {
           b.state = 'wander'; b.timer -= dt;
-          if (b.timer <= 0) {
-            if (this.rng.chance(0.45) && this.npcUseObject(e, b, p)) { /* started using a prop */ }
-            else { if (this.rng.chance(0.5)) this.gotoRoom(e, b.targetRoom); b.timer = this.rng.range(2.5, 6); }
-          }
+          if (b.timer <= 0) { if (this.rng.chance(0.5)) this.gotoRoom(e, b.targetRoom); b.timer = this.rng.range(2.5, 6); }
         }
       }
     }
   }
-  // light NPC prop use: grab a free nearby object and hold a pose for a few seconds
-  private npcUseObject(e: Entity, b: Brain, p: Position): boolean {
-    const useState: Record<string, string> = { bed: 'resting', shower: 'washing', weights: 'training', pullup: 'training', table: 'eating', counter: 'eating' };
-    let best: Interactable | null = null, bd = 6;
+  // pick a free, reachable interactable matching the current schedule phase; claim + route to it
+  private assignScheduleTarget(e: Entity, b: Brain, p: Position): boolean {
+    const want = PHASE_OBJ[this.phaseId]; if (!want) return false;
+    const ph = phaseAt(this.hour);
+    const constrain = this.phaseId !== 'work';   // meals/sleep/yard stay in their scheduled area; jobs can be anywhere
+    const start = this.map.worldToIdx(p.x, p.z); if (start < 0) return false;
+    let best: Interactable | null = null, bd = Infinity;
     for (const o of this.objs.values()) {
-      if (o.reservedBy || !(o.type in useState)) continue;
+      if (!want.includes(o.type)) continue;
+      if (isExclusive(o.type) && o.reservedBy && o.reservedBy !== e) continue;
+      if (constrain && this.roomType(o.room) !== ph.room) continue;
       const d = Math.hypot(o.ix - p.x, o.iz - p.z); if (d < bd) { bd = d; best = o; }
     }
     if (!best) return false;
-    best.reservedBy = e;
-    b.state = useState[best.type] as any;
-    b.action = best.name;
-    b.timer = this.rng.range(3, 6);
-    p.facing = Math.atan2(best.x - p.x, best.z - p.z);
-    this.ecs.get<Agent>(e, 'Agent')!.path = null;
+    const path = this.path(start, this.map.worldToIdx(best.ix, best.iz), e);
+    if (!path) return false;                     // blocked (e.g. locked gate) → caller falls back
+    if (isExclusive(best.type)) { best.reservedBy = e; best.reservedUntil = 30; }
+    b.objTarget = best.id; b.action = `Heading to ${best.name}`; b.state = 'goto';
+    const ag = this.ecs.get<Agent>(e, 'Agent')!; ag.path = path.length ? path : null; ag.step = 0;
     return true;
+  }
+  // arrive at a claimed object and hold its pose for a few seconds
+  private beginNpcUse(e: Entity, b: Brain, p: Position, o: Interactable) {
+    b.state = (USE_STATE[o.type] as any) ?? 'idle';
+    b.action = o.name;
+    b.timer = this.rng.range(3, 7);
+    p.facing = Math.atan2(o.x - p.x, o.z - p.z);
+    this.ecs.get<Agent>(e, 'Agent')!.path = null;
+    if (isExclusive(o.type)) { o.reservedBy = e; o.reservedUntil = b.timer + 2; }
+    const sat: Needs = this.ecs.get<Needs>(e, 'Needs')!;
+    if (b.state === 'resting') sat.sleep = clamp01(sat.sleep - 0.3);
+    else if (b.state === 'washing') sat.hygiene = clamp01(sat.hygiene - 0.3);
+    else if (b.state === 'eating') sat.hunger = clamp01(sat.hunger - 0.3);
   }
 
   private guardAI(dt: number) {
@@ -260,7 +333,7 @@ export class Simulation {
         b.actTimer = (b.actTimer ?? 14) - dt;
         const so = this.pickRoomOfType('solitary'); const sc = this.map.toWorld(so.x + (so.w >> 1), so.y + (so.h >> 1));
         if (!tp || !tb) { b.state = 'idle'; b.escortTarget = undefined; ag.path = null; continue; }
-        if (!ag.path && ag.repathCd <= 0) { const gi = this.map.worldToIdx(p.x, p.z), si = this.map.worldToIdx(sc.x, sc.z); const path = gi >= 0 && si >= 0 ? findPath(this.map, gi, si) : null; ag.path = path && path.length ? path : null; ag.step = 0; ag.repathCd = 1; }
+        if (!ag.path && ag.repathCd <= 0) { const gi = this.map.worldToIdx(p.x, p.z), si = this.map.worldToIdx(sc.x, sc.z); const path = gi >= 0 && si >= 0 ? this.path(gi, si, e) : null; ag.path = path && path.length ? path : null; ag.step = 0; ag.repathCd = 1; }
         // the escorted prisoner follows just behind the guard
         const fx = p.x - Math.sin(p.facing) * 0.9, fz = p.z - Math.cos(p.facing) * 0.9;
         tp.x += (fx - tp.x) * Math.min(1, dt * 6); tp.z += (fz - tp.z) * Math.min(1, dt * 6); tp.facing = p.facing;
@@ -269,23 +342,42 @@ export class Simulation {
         }
         continue;
       }
-      // patrol
+      // patrol — sometimes man a guard post (desk/console), otherwise sweep an area or checkpoint
       if (!ag.path) {
         b.timer -= dt;
         if (b.timer <= 0) {
-          b.targetRoom = PATROL_ROOMS[Math.floor(this.rng.float() * PATROL_ROOMS.length)];
-          this.gotoRoom(e, b.targetRoom);
-          b.timer = this.rng.range(3, 6);
+          if (this.rng.chance(0.3) && this.guardToPost(e, b, p)) { b.timer = this.rng.range(3, 6); }
+          else { b.targetRoom = PATROL_ROOMS[Math.floor(this.rng.float() * PATROL_ROOMS.length)]; this.gotoRoom(e, b.targetRoom); b.timer = this.rng.range(3, 6); }
+        } else {
+          // standing at a post: face the nearest guard desk/console
+          let best: Interactable | null = null, bd = 3;
+          for (const o of this.objs.values()) { if (o.type !== 'desk') continue; const d = Math.hypot(o.ix - p.x, o.iz - p.z); if (d < bd) { bd = d; best = o; } }
+          if (best) p.facing = Math.atan2(best.x - p.x, best.z - p.z);
         }
       }
     }
+  }
+  // route a guard to a guard desk/console anchor (security or intake) and stand post there
+  private guardToPost(e: Entity, b: Brain, p: Position): boolean {
+    let best: Interactable | null = null, bd = Infinity;
+    for (const o of this.objs.values()) {
+      if (o.type !== 'desk') continue;
+      const rt = this.roomType(o.room); if (rt !== 'guardroom' && rt !== 'intake') continue;
+      const d = Math.hypot(o.ix - p.x, o.iz - p.z); if (d < bd) { bd = d; best = o; }
+    }
+    if (!best) return false;
+    const path = this.path(this.map.worldToIdx(p.x, p.z), this.map.worldToIdx(best.ix, best.iz), e);
+    if (!path) return false;
+    const ag = this.ecs.get<Agent>(e, 'Agent')!; ag.path = path.length ? path : null; ag.step = 0;
+    b.targetRoom = this.roomType(best.room);
+    return true;
   }
   private gotoEntity(e: Entity, target: Entity) {
     const p = this.ecs.get<Position>(e, 'Position')!;
     const tp = this.ecs.get<Position>(target, 'Position')!;
     const ag = this.ecs.get<Agent>(e, 'Agent')!;
     const start = this.map.worldToIdx(p.x, p.z), goal = this.map.worldToIdx(tp.x, tp.z);
-    const path = start >= 0 && goal >= 0 ? findPath(this.map, start, goal) : null;
+    const path = start >= 0 && goal >= 0 ? this.path(start, goal, e) : null;
     ag.path = path && path.length ? path : null; ag.step = 0;
   }
   private endRespond(e: Entity, b: Brain) { b.state = 'idle'; b.foe = undefined; this.ecs.get<Agent>(e, 'Agent')!.path = null; b.timer = 0; }
@@ -390,7 +482,11 @@ export class Simulation {
       const ag = this.ecs.get<Agent>(e, 'Agent')!;
       if (!ag.path || ag.step >= ag.path.length) { ag.path = null; continue; }
       const p = this.ecs.get<Position>(e, 'Position')!;
-      const t = this.map.tileXY(ag.path[ag.step]);
+      const tileIdx = ag.path[ag.step];
+      const t = this.map.tileXY(tileIdx);
+      // a character walking through an unlocked door swings it open (visual + state)
+      const did = this.doorTiles.get(tileIdx);
+      if (did) { const dr = this.objs.get(did); if (dr && !dr.open && !dr.locked && !dr.restricted) dr.open = true; }
       const w = this.map.toWorld(t.x, t.y);
       const dx = w.x - p.x, dz = w.z - p.z, d = Math.hypot(dx, dz);
       if (d < 0.15) { ag.step++; if (ag.step >= ag.path.length) ag.path = null; continue; }
@@ -418,8 +514,9 @@ export class Simulation {
     const idx = this.map.worldToIdx(wx, wz);
     if (idx < 0 || !this.map.walkable[idx]) return null;
     const start = this.map.worldToIdx(this.pos(pl)!.x, this.pos(pl)!.z);
-    const path = start >= 0 ? findPath(this.map, start, idx) : null;
-    const ag = this.ecs.get<Agent>(pl, 'Agent')!; ag.path = path && path.length ? path : null; ag.step = 0;
+    const path = start >= 0 ? this.path(start, idx, pl) : null;
+    if (!path) { this.bus.emit('actionResult', { text: 'No path — a door is locked.' }); return null; }
+    const ag = this.ecs.get<Agent>(pl, 'Agent')!; ag.path = path.length ? path : null; ag.step = 0;
     pb.action = 'Walking';
     const t = this.map.tileXY(idx); return this.map.toWorld(t.x, t.y);
   }
@@ -431,24 +528,70 @@ export class Simulation {
 
   // ---------- interactable objects ----------
   objs = new Map<string, Interactable>();
+  private doorTiles = new Map<number, string>();   // grid tile idx -> door/gate object id
   setInteractables(defs: InteractableDef[]) {
-    this.objs.clear();
-    for (const d of defs) this.objs.set(d.id, { ...d, reservedBy: 0, reservedUntil: 0, open: !d.restricted, stash: [] });
+    this.objs.clear(); this.doorTiles.clear();
+    for (const d of defs) {
+      this.objs.set(d.id, { ...d, reservedBy: 0, reservedUntil: 0, open: !d.restricted, locked: false, stash: [] });
+      if (d.type === 'door' || d.type === 'gate') { const k = this.map.worldToIdx(d.x, d.z); if (k >= 0) this.doorTiles.set(k, d.id); }
+    }
+    this.applyDoorSchedule();
   }
   getObj(id: string) { return this.objs.get(id); }
+
+  // ---------- doors / gates: movement blocking + schedule ----------
+  // Can `role` step onto a door tile right now? Guards open anything; prisoners are stopped
+  // by locked or restricted (staff-only) doors. Open/closed-unlocked doors let prisoners through.
+  private doorPassable(o: Interactable, role: 'prisoner' | 'guard'): boolean {
+    if (role === 'guard') return true;
+    return !o.restricted && !o.locked;
+  }
+  // a tile-passability predicate for findPath, specialised to one entity's role
+  private passFor(e: Entity): (idx: number) => boolean {
+    const role = this.brain(e)?.role ?? 'prisoner';
+    if (!this.doorTiles.size) return () => true;
+    return (idx: number) => { const id = this.doorTiles.get(idx); if (!id) return true; const o = this.objs.get(id); return !o || this.doorPassable(o, role); };
+  }
+  // door-aware path: returns a tile route or null (blocked / unreachable)
+  private path(startIdx: number, goalIdx: number, e: Entity): number[] | null {
+    if (startIdx < 0 || goalIdx < 0) return null;
+    const p = findPath(this.map, startIdx, goalIdx, this.passFor(e));
+    if (!p && DEBUG) console.debug('[path] blocked', { e, startIdx, goalIdx, role: this.brain(e)?.role });
+    return p;
+  }
+  // set every door/gate open/closed/locked based on the current schedule phase
+  private applyDoorSchedule() {
+    for (const o of this.objs.values()) {
+      if (o.type !== 'door' && o.type !== 'gate') continue;
+      const rtype = this.roomType(o.room);
+      if (RESTRICTED.includes(rtype)) { o.open = false; o.locked = false; continue; } // staff-only handled by `restricted`
+      const open = (OPEN_FOR[rtype] ?? []).includes(this.phaseId);
+      if (open) { o.open = true; o.locked = false; }
+      else if (this.phaseId === 'sleep') { o.open = false; o.locked = true; }  // Lights Out: rec areas locked (guards still pass)
+      else { o.open = false; o.locked = false; }                               // closed but openable the rest of the day
+    }
+  }
   private alive(e: Entity) { const b = this.brain(e); return !!b && b.state !== 'down'; }
   objActions(id: string): { key: string; label: string; disabled?: boolean; reason?: string }[] {
     const o = this.objs.get(id); if (!o) return [];
+    // doors/gates: contextual Inspect + Open/Close/Try depending on state
+    if (o.type === 'door' || o.type === 'gate') {
+      const out: { key: string; label: string; disabled?: boolean; reason?: string }[] = [{ key: 'inspect', label: 'Inspect' }];
+      if (o.restricted) out.push({ key: 'try', label: 'Try Door', reason: 'staff only' });
+      else if (o.locked) out.push({ key: 'try', label: 'Try Door', reason: 'locked down' });
+      else out.push(o.open ? { key: 'close', label: 'Close' } : { key: 'open', label: 'Open' });
+      out.push({ key: 'backoff', label: 'Back Off' });
+      return out;
+    }
     const base = OBJ_ACTIONS[o.type] ?? [];
     const acts = o.stash.length && !base.includes('take') ? [...base, 'take'] : base.slice();
     const pInv = this.inv(this.playerId)!;
-    const inUse = o.reservedBy && o.reservedBy !== this.playerId && this.alive(o.reservedBy);
+    const inUse = isExclusive(o.type) && o.reservedBy && o.reservedBy !== this.playerId && this.alive(o.reservedBy);
     return acts.map((key) => {
       let disabled = false, reason = '';
       if (inUse) { disabled = true; reason = 'in use'; }
       else if (key === 'hide' && pInv.items.length === 0) { disabled = true; reason = 'nothing to hide'; }
       else if (key === 'take' && o.stash.length === 0) { disabled = true; reason = 'nothing hidden'; }
-      else if (key === 'use' && o.restricted) { disabled = true; reason = 'staff only'; }
       return { key, label: OBJ_ACTION_LABEL[key] ?? key, disabled, reason };
     });
   }
@@ -460,18 +603,25 @@ export class Simulation {
     const o = this.objs.get(objId); if (!o) return '';
     const pl = this.playerId; const pb = this.brain(pl)!; const pinv = this.inv(pl)!;
     if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down') return 'You can\'t act right now.';
-    if (o.reservedBy && o.reservedBy !== pl && this.alive(o.reservedBy)) return `${o.name} is in use.`;
+    if (action === 'backoff') { this.releaseObj(); this.act = null; pb.action = 'Idle'; this.bubble(pl, '…', 'talk', 0.6); return 'You step away.'; }
+    const isDoor = o.type === 'door' || o.type === 'gate';
+    const exclusive = isExclusive(o.type);
+    if (exclusive && o.reservedBy && o.reservedBy !== pl && this.alive(o.reservedBy)) return `${o.name} is in use.`;
     if (action === 'hide' && !pinv.items.length) return 'Nothing to hide.';
     if (action === 'take' && !o.stash.length) return 'Nothing hidden here.';
-    if (action === 'use' && o.restricted) { this.bubble(pl, '🔒', 'search', 1.0); return `${o.name}: locked (staff only).`; }
+    // can the player actually walk to the object's interaction point? (door states matter)
+    const pp0 = this.pos(pl)!; const here = Math.hypot(pp0.x - o.ix, pp0.z - o.iz) <= 1.5;
+    if (!here) {
+      const reach = this.path(this.map.worldToIdx(pp0.x, pp0.z), this.map.worldToIdx(o.ix, o.iz), pl);
+      if (!reach) { this.bubble(pl, '🔒', 'search', 1.0); return `Can't reach the ${o.name} — a door is locked.`; }
+    }
     const dur = OBJ_DUR[action] ?? 1.0;
     this.releaseObj();
     this.act = { action: action as InteractAction, target: pl, objId, point: { x: o.ix, z: o.iz }, phase: 'approach', timer: dur, dur, applied: false };
-    o.reservedBy = pl; o.reservedUntil = 6;
-    const pp = this.pos(pl)!;
-    if (Math.hypot(pp.x - o.ix, pp.z - o.iz) <= 1.5) { this.act.phase = 'perform'; this.beginPerform(); return ''; }
+    if (exclusive) { o.reservedBy = pl; o.reservedUntil = 8; }
+    if (here) { this.act.phase = 'perform'; this.beginPerform(); return ''; }
     this.playerMoveToKeepAction(o.ix, o.iz);
-    return `Heading to the ${o.name}…`;
+    return isDoor ? `Heading to the ${o.name}…` : `Heading to the ${o.name}…`;
   }
 
   private bubble(e: Entity, text: string, kind = 'talk', dur = 1.4) { this.bus.emit('bubble', { e, text, kind, dur }); }
@@ -493,12 +643,13 @@ export class Simulation {
     return `Walking up to ${this.brain(target)?.name ?? 'them'}…`;
   }
   // path the player without cancelling the queued action
-  private playerMoveToKeepAction(wx: number, wz: number) {
-    const pl = this.playerId; const idx = this.map.worldToIdx(wx, wz); if (idx < 0) return;
+  private playerMoveToKeepAction(wx: number, wz: number): boolean {
+    const pl = this.playerId; const idx = this.map.worldToIdx(wx, wz); if (idx < 0) return false;
     const start = this.map.worldToIdx(this.pos(pl)!.x, this.pos(pl)!.z);
-    const path = start >= 0 ? findPath(this.map, start, idx) : null;
+    const path = start >= 0 ? this.path(start, idx, pl) : null;
     const ag = this.ecs.get<Agent>(pl, 'Agent')!; ag.path = path && path.length ? path : null; ag.step = 0;
     this.brain(pl)!.action = 'Approaching';
+    return !!path;
   }
   private beginPerform() {
     const a = this.act!; const pl = this.playerId; const pb = this.brain(pl)!;
@@ -521,6 +672,7 @@ export class Simulation {
     const pl = this.playerId; const pb = this.brain(pl)!;
     if (pb.state === 'down' || pb.state === 'solitary' || pb.state === 'escorted') { this.releaseObj(); this.act = null; return; }
     const a = this.act;
+    if (a.objId) { const o = this.objs.get(a.objId); if (o && o.reservedBy === pl) o.reservedUntil = Math.max(o.reservedUntil, 4); }
     if (a.phase === 'approach') {
       if (a.objId) {
         const o = this.objs.get(a.objId); if (!o) { this.act = null; pb.action = 'Idle'; return; }
@@ -552,10 +704,20 @@ export class Simulation {
       case 'rest': n.sleep = clamp01(n.sleep - 0.45); n.energy = clamp01(n.energy + 0.3); this.floatBy(pl, '+Energy', '#6dff9e'); result = `You rest on the ${o.name}.`; break;
       case 'wash': n.hygiene = clamp01(n.hygiene - 0.55); this.floatBy(pl, '+Hygiene', '#9fcad8'); result = `You wash up at the ${o.name}.`; break;
       case 'use': if (o.type === 'door' || o.type === 'gate') { o.open = !o.open; this.bubble(pl, o.open ? 'Open.' : 'Shut.', 'search', 1.0); result = `${o.name}: ${o.open ? 'opened' : 'closed'}.`; } else { n.hygiene = clamp01(n.hygiene - 0.1); result = `You use the ${o.name}.`; } break;
+      case 'open': o.open = true; this.bubble(pl, 'Open.', 'search', 1.0); this.floatBy(pl, 'Opened', '#9fe0a0'); result = `You open the ${o.name}.`; break;
+      case 'close': o.open = false; this.bubble(pl, 'Shut.', 'search', 1.0); result = `You close the ${o.name}.`; break;
+      case 'try': {
+        // rattling a locked/restricted door fails, raises suspicion, and a nearby guard may clock it
+        ps.suspicion = clamp(ps.suspicion + (o.restricted ? 9 : 6), 0, 100);
+        this.bubble(pl, '🔒', 'search', 1.1); this.floatBy(pl, 'Suspicion +', '#ff7a6a');
+        result = o.restricted ? `${o.name}: guard access only.` : `${o.name}: locked down.`;
+        const g = this.nearestGuard(pl, 7); if (g != null && this.rng.chance(0.4)) { this.bus.emit('alert', { type: 'guard', text: `A guard noticed you at the ${o.name}.` }); }
+        break;
+      }
       case 'eat': n.hunger = clamp01(n.hunger - 0.55); this.floatBy(pl, 'Fed', '#e8b52e'); result = `You eat at the ${o.name}.`; break;
       case 'train': n.energy = clamp01(n.energy - 0.15); ps.respect = clamp(ps.respect + 1, 0, 100); this.floatBy(pl, '+Respect', '#ffd24a'); result = `You train on the ${o.name}.`; break;
       case 'work': { const before = pinv.money; result = this.doJob(o.jobRoom ?? this.roomType(o.room)); const dM = pinv.money - before; if (dM) this.floatBy(pl, `$+${dM}`, '#9fe0a0'); break; }
-      case 'inspect': result = (o.type === 'door' || o.type === 'gate') ? `${o.name}: ${o.restricted ? 'restricted, staff only' : o.open ? 'open' : 'closed'}.` : `You inspect the ${o.name}.`; break;
+      case 'inspect': result = (o.type === 'door' || o.type === 'gate') ? `${o.name}: ${o.restricted ? 'restricted, staff only' : o.locked ? 'locked down' : o.open ? 'open' : 'closed (unlocked)'}.` : `You inspect the ${o.name}.`; break;
       case 'search': {
         if (o.stash.length) { const got = o.stash.splice(0); for (const it of got) pinv.items.push(it); this.floatBy(pl, 'Found stash!', '#6dff9e'); result = `You found hidden items in the ${o.name}.`; this.bus.emit('alert', { type: 'search', text: `Found ${got.length} hidden item(s)` }); }
         else { ps.suspicion = clamp(ps.suspicion + 6, 0, 100); this.floatBy(pl, 'Nothing', '#ccc'); result = `Nothing hidden in the ${o.name}.`; }
@@ -817,9 +979,9 @@ export class Simulation {
       inv: this.ecs.get<Inventory>(e, 'Inventory'),
       isPlayer: e === this.playerId
     }));
-    const objs: Record<string, { stash: string[]; open: boolean }> = {};
-    for (const [id, o] of this.objs) if (o.stash.length || o.open !== !o.restricted) objs[id] = { stash: o.stash, open: o.open };
-    return { version: 3, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs };
+    const objs: Record<string, { stash: string[]; open: boolean; locked: boolean }> = {};
+    for (const [id, o] of this.objs) if (o.stash.length || o.open !== !o.restricted || o.locked) objs[id] = { stash: o.stash, open: o.open, locked: o.locked };
+    return { version: 4, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs };
   }
   hydrate(data: any) {
     if (!data?.ents) return;
@@ -835,15 +997,16 @@ export class Simulation {
       this.ecs.set(e, 'Render', r.render);
       this.ecs.set(e, 'Agent', r.agent ?? { speed: 2, path: null, step: 0, repathCd: 0 });
       this.ecs.set(e, 'Needs', r.needs ?? { hunger: 0, sleep: 0, hygiene: 0, energy: 1, anger: 0, fear: 0, health: 1 });
-      this.ecs.set(e, 'Brain', { ...r.brain, foe: undefined, escortTarget: undefined, actTimer: undefined, state: safeState(r.brain.state), action: 'Idle' });
+      this.ecs.set(e, 'Brain', { ...r.brain, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle' });
       this.ecs.set(e, 'Social', r.social ?? { reputation: 0, respect: 20, suspicion: 0, rel: 0 });
       this.ecs.set(e, 'Inventory', r.inv ?? { items: [], money: 0 });
       if (r.isPlayer || r.brain.isPlayer) this.playerId = e;
     }
     if (!this.playerId) this.playerId = this.ecs.query('Brain').find((e) => this.ecs.get<Brain>(e, 'Brain')!.role === 'prisoner') ?? 0;
-    // reset object reservations; restore stashes / door state
-    for (const o of this.objs.values()) { o.reservedBy = 0; o.reservedUntil = 0; o.stash = []; o.open = !o.restricted; }
-    if (data.objs) for (const id in data.objs) { const o = this.objs.get(id); if (o) { o.stash = data.objs[id].stash ?? []; o.open = data.objs[id].open ?? o.open; } }
+    // reset object reservations, derive door states for the loaded phase, then restore saved overrides
+    for (const o of this.objs.values()) { o.reservedBy = 0; o.reservedUntil = 0; o.stash = []; o.open = !o.restricted; o.locked = false; }
+    this.applyDoorSchedule();
+    if (data.objs) for (const id in data.objs) { const o = this.objs.get(id); if (o) { o.stash = data.objs[id].stash ?? []; if ('open' in data.objs[id]) o.open = data.objs[id].open; if ('locked' in data.objs[id]) o.locked = data.objs[id].locked; } }
   }
 }
 

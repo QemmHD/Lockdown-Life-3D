@@ -39,6 +39,7 @@ export interface Brain {
   discTimer?: number;      // seconds left in solitary
   escortTarget?: Entity;   // guard escorting this prisoner
   actTimer?: number;       // generic in-progress action timer (guard search etc.)
+  objTarget?: string;      // interactable id this NPC is walking to / using (schedule)
 }
 
 // Reputation / standing / suspicion. On the player: reputation+respect drive the loop;

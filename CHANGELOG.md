@@ -1,5 +1,34 @@
 # Changelog
 
+## v2.3.0-interaction — Stage Interaction 2.3 (real doors/gates, schedule anchors, NPC object use)
+Doors, gates, schedules, and NPC routines now connect into one physical world. Sim stays
+authoritative (RenderSync still read-only; door meshes are a read-only view of sim state),
+build passes, 0 runtime errors.
+- **Doors/gates block movement**: `findPath` takes a per-entity passability predicate. Closed/locked
+  doors are real pathfinding blockers; open doors pass. Prisoners are stopped by **locked** and
+  **restricted** (staff-only) doors; **guards pass everything**. Unlocked doors auto-swing open as a
+  character walks through.
+- **Schedule-driven doors** (`applyDoorSchedule`): cell-block opens at Wake/Lockdown/Lights-Out,
+  cafeteria at meals, showers at the shower phase, the yard **gate** during work/yard/free. At Lights
+  Out the recreational areas **lock** (guards still pass).
+- **Player door flow**: Inspect / Open / Close, and **Try Door** on a locked/restricted door — which
+  fails, raises suspicion, and a nearby guard may notice. Tapping anything behind a blocked door now
+  reports "Can't reach … a door is locked."
+- **NPC schedule anchors**: prisoners target **real interactable objects** for the current phase —
+  beds/sinks at wake & sleep, cafeteria tables at meals, shower heads at shower time, weights/pull-up
+  bars in the yard, job spots during work — instead of generic room centers. They route to the object's
+  interaction point, reserve it (single-use objects), hold a pose, then release.
+- **Guards** man guard desks/consoles (Security, Intake) between patrols and route through any door.
+- **Reservations** work for both NPCs and the player, with a safety auto-release sweep (timeout / holder
+  gone / downed) and release on action complete, cancel, schedule change, and load — no permanent locks.
+  Tables/counters/job spots are shared (no reservation) so meals and work never deadlock.
+- **Stuck prevention**: unreachable scheduled object → fall back to room anchor → wander in place; blocked
+  routes never crash (optional `?debug` logging of path failures + selected-object state).
+- **Door visuals**: framed, swinging barred leaf with a state lamp (green open / yellow closed /
+  orange locked / red staff-only) plus the existing selection highlight.
+- **Save/load** (version 4): persists door open/locked state and hidden stashes; clears all reservations
+  and re-derives door states for the loaded phase. Older saves load safely.
+
 ## v2.2.0-interaction — Stage Interaction 2.2 (props are real interactable objects)
 Props are no longer just decoration — they're tappable world objects with their own actions, reservations,
 and state. Sim stays authoritative (interactions mutate the Simulation, RenderSync read-only), camera/

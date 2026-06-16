@@ -85,22 +85,68 @@ export class Game {
     this.bus.on('actionResult', ({ text }) => this.hud.alert(text, 'info'));
 
     window.addEventListener('resize', () => { this.app.resize(); this.cam.resize(); });
+    // debug hook (only with ?debug): inspect sim/door state from the console or a headless harness
+    if (/[?&]debug/.test(location.search)) (window as any).__game = this;
     this.loop();
   }
 
-  // register each room's door/gate as an interactable object (+ invisible hitbox)
+  private doorVisuals: { id: string; pivot: THREE.Object3D; baseRot: number; lampMat: THREE.MeshStandardMaterial }[] = [];
+  private static RESTRICTED_ROOMS = ['guardroom', 'intake', 'storage', 'solitary'];
+
+  // register each room's door/gate as an interactable object (hitbox + visible, stateful leaf)
   private buildDoorObjects(): { defs: any[]; hitMeshes: THREE.Object3D[] } {
     const defs: any[] = []; const hitMeshes: THREE.Object3D[] = [];
-    const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
-    const geo = new THREE.BoxGeometry(1.4, 2.4, 1.4);
+    const map = this.sim.map;
+    const hitMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+    const hitGeo = new THREE.BoxGeometry(1.4, 2.4, 1.4);
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x3a3e45, roughness: 0.7, metalness: 0.4 });
+    const barMat = new THREE.MeshStandardMaterial({ color: 0x9aa0a8, roughness: 0.5, metalness: 0.6 });
     for (const r of this.sim.rooms) {
       if (r.door == null) continue;
-      const t = this.sim.map.tileXY(r.door); const w = this.sim.map.toWorld(t.x, t.y);
+      const t = map.tileXY(r.door); const w = map.toWorld(t.x, t.y);
+      const restricted = Game.RESTRICTED_ROOMS.includes(r.type);
+      // wall orientation: a door in a horizontal wall has walkable tiles above/below
+      const vertWall = map.isWalkable(t.x, t.y - 1) && map.isWalkable(t.x, t.y + 1);  // movement runs N-S → leaf spans X
+      const baseRot = vertWall ? 0 : Math.PI / 2;
+      // interaction point = an adjacent walkable, non-door tile (stand beside, not on, the door)
+      let ix = w.x, iz = w.z;
+      for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+        const nx = t.x + dx, ny = t.y + dy;
+        if (map.isWalkable(nx, ny) && map.idx(nx, ny) !== r.door) { const nw = map.toWorld(nx, ny); ix = nw.x; iz = nw.z; break; }
+      }
       const id = 'door_' + r.id;
-      defs.push({ id, type: r.gate ? 'gate' : 'door', name: r.name + (r.gate ? ' Gate' : ' Door'), room: r.id, x: w.x, z: w.z, ix: w.x, iz: w.z, facing: 0, restricted: r.security >= 3 });
-      const hb = new THREE.Mesh(geo, mat); hb.position.set(w.x, 1.2, w.z); hb.userData.objId = id; this.app.scene.add(hb); hitMeshes.push(hb);
+      defs.push({ id, type: r.gate ? 'gate' : 'door', name: r.name + (r.gate ? ' Gate' : ' Door'), room: r.id, x: w.x, z: w.z, ix, iz, facing: Math.atan2(w.x - ix, w.z - iz), restricted });
+
+      // visible door: frame posts + a swinging barred leaf + a state lamp
+      const grp = new THREE.Group(); grp.position.set(w.x, 0, w.z); grp.rotation.y = baseRot;
+      grp.add(this.makeBox(0.16, 2.4, 0.16, frameMat, -0.55, 1.2, 0));
+      grp.add(this.makeBox(0.16, 2.4, 0.16, frameMat, 0.55, 1.2, 0));
+      const pivot = new THREE.Group(); pivot.position.set(-0.5, 0, 0);   // hinge at left post
+      for (let i = 0; i < 4; i++) pivot.add(this.makeCyl(0.04, 1.9, barMat, 0.12 + i * 0.26, 0.95, 0));
+      pivot.add(this.makeBox(1.05, 0.1, 0.1, barMat, 0.5, 1.85, 0));
+      pivot.add(this.makeBox(1.05, 0.1, 0.1, barMat, 0.5, 0.25, 0));
+      grp.add(pivot);
+      const lampMat = new THREE.MeshStandardMaterial({ color: 0x222, emissive: 0x33ff66, emissiveIntensity: 1.2 });
+      grp.add(this.makeBox(0.2, 0.2, 0.2, lampMat, 0, 2.45, 0));
+      this.app.scene.add(grp);
+      this.doorVisuals.push({ id, pivot, baseRot, lampMat });
+
+      const hb = new THREE.Mesh(hitGeo, hitMat); hb.position.set(w.x, 1.2, w.z); hb.userData.objId = id; this.app.scene.add(hb); hitMeshes.push(hb);
     }
     return { defs, hitMeshes };
+  }
+  private makeBox(w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0, z = 0) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = true; return m; }
+  private makeCyl(r: number, h: number, mat: THREE.Material, x = 0, y = 0, z = 0) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 8), mat); m.position.set(x, y, z); m.castShadow = true; return m; }
+
+  // reflect each door/gate's open/locked/restricted state into its mesh (read-only view of sim)
+  private updateDoors(dt: number) {
+    for (const d of this.doorVisuals) {
+      const o = this.sim.getObj(d.id); if (!o) continue;
+      const target = o.open ? Math.PI * 0.46 : 0;                   // swing the leaf open/closed
+      d.pivot.rotation.y += (target - d.pivot.rotation.y) * Math.min(1, dt * 8);
+      const col = o.restricted ? 0xff3322 : o.locked ? 0xffaa22 : o.open ? 0x33ff66 : 0xccbb44;
+      d.lampMat.emissive.setHex(col); d.lampMat.color.setHex(col & 0x222222);
+    }
   }
 
   private onTap(x: number, y: number) {
@@ -121,7 +167,10 @@ export class Game {
   private selectObject(id: string) {
     this.selectedObj = id; this.selected = null;
     const o = this.sim.getObj(id);
-    if (o) { this.objHighlight.position.set(o.x, 0.07, o.z); this.objHighlight.visible = true; }
+    if (o) {
+      this.objHighlight.position.set(o.x, 0.07, o.z); this.objHighlight.visible = true;
+      if (/[?&]debug/.test(location.search)) console.debug('[obj]', o.id, o.type, { room: o.room, open: o.open, locked: o.locked, restricted: o.restricted, reservedBy: o.reservedBy, stash: o.stash.length });
+    }
     this.refreshObjectPanel();
   }
   // camera always follows the player prisoner; selection only changes the inspected panel
@@ -135,9 +184,11 @@ export class Game {
     const id = this.selectedObj; if (!id) return;
     const o = this.sim.getObj(id); if (!o) { this.selectedObj = null; this.objHighlight.visible = false; return; }
     const room = this.sim.rooms.find((r) => r.id === o.room);
+    const isDoor = o.type === 'door' || o.type === 'gate';
     const meta: string[] = [];
-    if (o.restricted) meta.push('Restricted');
-    if ((o.type === 'door' || o.type === 'gate')) meta.push(o.open ? 'Open' : 'Closed');
+    if (o.restricted) meta.push('Staff Only');
+    else if (isDoor && o.locked) meta.push('Locked Down');
+    if (isDoor) meta.push(o.open ? 'Open' : 'Closed');
     if (o.stash.length) meta.push(`Hidden: ${o.stash.length}`);
     const actions: PanelAction[] = this.sim.objActions(id).map((a) => ({
       key: a.key, label: a.label, disabled: a.disabled, reason: a.reason,
@@ -146,7 +197,7 @@ export class Game {
     }));
     this.hud.showPanel({
       name: o.name, role: 'Object', player: false, object: true,
-      gang: undefined, gangColor: undefined, state: (o.type === 'door' || o.type === 'gate') ? (o.open ? 'open' : 'closed') : 'idle',
+      gang: undefined, gangColor: undefined, state: isDoor ? (o.restricted ? 'staff only' : o.locked ? 'locked' : o.open ? 'open' : 'closed') : 'idle',
       room: room?.name ?? '', traits: [], meta, needs: [], items: [], actions
     });
   }
@@ -292,6 +343,7 @@ export class Game {
     this.sync.update(dt, this.selected, t);
     this.updateFx(dt);
     this.updateMarker(dt);
+    this.updateDoors(dt);
     this.feedback.update(dt, this.cam.camera, (e) => this.sync.worldOf(e));
     this.hud.setAction(this.sim.actionLabel(), this.sim.actionProgress());
 

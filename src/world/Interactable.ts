@@ -18,9 +18,17 @@ export interface InteractableDef {
 
 export interface Interactable extends InteractableDef {
   reservedBy: number;       // entity id, 0 = free
-  reservedUntil: number;
-  open: boolean;            // doors/gates
+  reservedUntil: number;    // seconds left on the reservation (safety auto-release)
+  open: boolean;            // doors/gates: physically open
+  locked: boolean;          // doors/gates: schedule/lockdown hard-lock (guards still pass)
   stash: string[];          // hidden item ids
+}
+
+// Single-use objects get reserved so two characters never share one. Tables/counters/
+// job spots are shared (no reservation) so meals/work don't deadlock.
+export function isExclusive(type: ObjType): boolean {
+  return type === 'bed' || type === 'toilet' || type === 'sink' || type === 'shower'
+    || type === 'weights' || type === 'pullup' || type === 'locker' || type === 'shelf';
 }
 
 // available actions per object type
@@ -44,5 +52,6 @@ export const OBJ_ACTIONS: Record<ObjType, string[]> = {
 
 export const OBJ_ACTION_LABEL: Record<string, string> = {
   rest: 'Rest', use: 'Use', hide: 'Hide Item', search: 'Search', wash: 'Wash',
-  eat: 'Eat', work: 'Work', train: 'Train', inspect: 'Inspect', take: 'Take Item'
+  eat: 'Eat', work: 'Work', train: 'Train', inspect: 'Inspect', take: 'Take Item',
+  open: 'Open', close: 'Close', try: 'Try Door', backoff: 'Back Off'
 };
