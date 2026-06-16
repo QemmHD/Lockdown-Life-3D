@@ -44,6 +44,8 @@ const SAY: Record<string, string> = { talk: "What's up?", insult: '😠', threat
 const OBJ_DUR: Record<string, number> = { rest: 1.6, wash: 1.4, use: 0.6, eat: 1.5, train: 1.4, work: 1.8, inspect: 0.8, search: 1.2, hide: 1.0, take: 0.8, open: 0.6, close: 0.6, try: 0.7 };
 const OBJ_STATE: Record<string, string> = { rest: 'resting', wash: 'washing', eat: 'eating', train: 'training', work: 'working', search: 'searching', hide: 'working', take: 'working', use: 'talking', inspect: 'talking', open: 'talking', close: 'talking', try: 'talking' };
 const OBJ_ICON: Record<string, string> = { rest: '😴', wash: '🚿', eat: '🍽️', train: '🏋️', work: '💪', search: '🔍', hide: '🤫', take: '🖐️', use: '🚪', inspect: '👁️', open: '🚪', close: '🚪', try: '🔒' };
+// shown when a player convenience action finds no reachable matching object
+const SELF_REASON: Record<string, string> = { rest: 'Find a bed.', wash: 'No reachable shower or sink.', eat: 'No food station nearby.', train: 'No training equipment nearby.', work: 'No work object nearby.' };
 
 // The authoritative game world. Decides what happens; render only reflects it.
 export class Simulation {
@@ -219,6 +221,7 @@ export class Simulation {
     }
   }
 
+  // TODO(refactor): extract into PrisonerAISystem (schedule targeting, object use, wander) — ARCHITECTURE.md
   private prisonerAI(dt: number) {
     for (const e of this.ecs.query('Brain', 'Agent', 'Position')) {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
@@ -261,26 +264,29 @@ export class Simulation {
       }
     }
   }
-  // pick a free, reachable interactable matching the current schedule phase; claim + route to it
+  // pick the nearest *reachable* free interactable for the current schedule phase; claim + route.
+  // Tries candidates in distance order so one unreachable object doesn't make the NPC give up.
   private assignScheduleTarget(e: Entity, b: Brain, p: Position): boolean {
     const want = PHASE_OBJ[this.phaseId]; if (!want) return false;
     const ph = phaseAt(this.hour);
     const constrain = this.phaseId !== 'work';   // meals/sleep/yard stay in their scheduled area; jobs can be anywhere
     const start = this.map.worldToIdx(p.x, p.z); if (start < 0) return false;
-    let best: Interactable | null = null, bd = Infinity;
-    for (const o of this.objs.values()) {
-      if (!want.includes(o.type)) continue;
-      if (isExclusive(o.type) && o.reservedBy && o.reservedBy !== e) continue;
-      if (constrain && this.roomType(o.room) !== ph.room) continue;
-      const d = Math.hypot(o.ix - p.x, o.iz - p.z); if (d < bd) { bd = d; best = o; }
+    const cands = [...this.objs.values()]
+      .filter((o) => want.includes(o.type)
+        && !(isExclusive(o.type) && o.reservedBy && o.reservedBy !== e)
+        && (!constrain || this.roomType(o.room) === ph.room))
+      .sort((a, c) => (Math.hypot(a.ix - p.x, a.iz - p.z) - Math.hypot(c.ix - p.x, c.iz - p.z)))
+      .slice(0, 8);                              // bound the path attempts to the nearest few
+    for (const o of cands) {
+      const path = this.path(start, this.map.worldToIdx(o.ix, o.iz), e);
+      if (!path) continue;                       // try the next-nearest if this one is walled off
+      if (isExclusive(o.type)) { o.reservedBy = e; o.reservedUntil = 30; }   // reserve only once reachable
+      b.objTarget = o.id; b.action = `Heading to ${o.name}`; b.state = 'goto';
+      const ag = this.ecs.get<Agent>(e, 'Agent')!; ag.path = path.length ? path : null; ag.step = 0;
+      return true;
     }
-    if (!best) return false;
-    const path = this.path(start, this.map.worldToIdx(best.ix, best.iz), e);
-    if (!path) return false;                     // blocked (e.g. locked gate) → caller falls back
-    if (isExclusive(best.type)) { best.reservedBy = e; best.reservedUntil = 30; }
-    b.objTarget = best.id; b.action = `Heading to ${best.name}`; b.state = 'goto';
-    const ag = this.ecs.get<Agent>(e, 'Agent')!; ag.path = path.length ? path : null; ag.step = 0;
-    return true;
+    if (DEBUG && cands.length) console.debug('[sched] no reachable object', { e, phase: this.phaseId, candidates: cands.length });
+    return false;
   }
   // arrive at a claimed object and hold its pose for a few seconds
   private beginNpcUse(e: Entity, b: Brain, p: Position, o: Interactable) {
@@ -296,6 +302,7 @@ export class Simulation {
     else if (b.state === 'eating') sat.hunger = clamp01(sat.hunger - 0.3);
   }
 
+  // TODO(refactor): extract into GuardAISystem (patrol/respond/search/escort/posts) — ARCHITECTURE.md
   private guardAI(dt: number) {
     for (const e of this.ecs.query('Brain', 'Agent', 'Position')) {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
@@ -522,11 +529,13 @@ export class Simulation {
   }
 
   // ---------- deferred action flow (walk → face → perform → apply → feedback) ----------
-  private act: { action: InteractAction; target: Entity; objId?: string; point?: { x: number; z: number }; phase: 'approach' | 'perform'; timer: number; dur: number; applied: boolean } | null = null;
+  private act: { action: InteractAction; target: Entity; objId?: string; point?: { x: number; z: number }; phase: 'approach' | 'perform'; timer: number; dur: number; applied: boolean; approachT: number } | null = null;
+  private static APPROACH_TIMEOUT = 9;   // seconds before a stuck approach self-cancels
   actionProgress() { return this.act && this.act.phase === 'perform' ? 1 - this.act.timer / this.act.dur : 0; }
   actionLabel() { return this.act ? this.act.action : ''; }
 
   // ---------- interactable objects ----------
+  // TODO(refactor): extract InteractionSystem (object reservations + player action machine) — ARCHITECTURE.md
   objs = new Map<string, Interactable>();
   private doorTiles = new Map<number, string>();   // grid tile idx -> door/gate object id
   setInteractables(defs: InteractableDef[]) {
@@ -540,6 +549,7 @@ export class Simulation {
   getObj(id: string) { return this.objs.get(id); }
 
   // ---------- doors / gates: movement blocking + schedule ----------
+  // TODO(refactor): extract DoorSystem + ScheduleSystem (LockdownSystem/RiotSystem build on these) — ARCHITECTURE.md
   // Can `role` step onto a door tile right now? Guards open anything; prisoners are stopped
   // by locked or restricted (staff-only) doors. Open/closed-unlocked doors let prisoners through.
   private doorPassable(o: Interactable, role: 'prisoner' | 'guard'): boolean {
@@ -604,7 +614,6 @@ export class Simulation {
     const pl = this.playerId; const pb = this.brain(pl)!; const pinv = this.inv(pl)!;
     if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down') return 'You can\'t act right now.';
     if (action === 'backoff') { this.releaseObj(); this.act = null; pb.action = 'Idle'; this.bubble(pl, '…', 'talk', 0.6); return 'You step away.'; }
-    const isDoor = o.type === 'door' || o.type === 'gate';
     const exclusive = isExclusive(o.type);
     if (exclusive && o.reservedBy && o.reservedBy !== pl && this.alive(o.reservedBy)) return `${o.name} is in use.`;
     if (action === 'hide' && !pinv.items.length) return 'Nothing to hide.';
@@ -617,11 +626,26 @@ export class Simulation {
     }
     const dur = OBJ_DUR[action] ?? 1.0;
     this.releaseObj();
-    this.act = { action: action as InteractAction, target: pl, objId, point: { x: o.ix, z: o.iz }, phase: 'approach', timer: dur, dur, applied: false };
+    this.act = { action: action as InteractAction, target: pl, objId, point: { x: o.ix, z: o.iz }, phase: 'approach', timer: dur, dur, applied: false, approachT: 0 };
     if (exclusive) { o.reservedBy = pl; o.reservedUntil = 8; }
     if (here) { this.act.phase = 'perform'; this.beginPerform(); return ''; }
     this.playerMoveToKeepAction(o.ix, o.iz);
-    return isDoor ? `Heading to the ${o.name}…` : `Heading to the ${o.name}…`;
+    return `Heading to the ${o.name}…`;
+  }
+
+  // Player "convenience" needs button: route to the NEAREST REACHABLE object that supports the
+  // action (rest→bed, wash→sink/shower, eat→table/counter, train→weights/pullup, work→job/shelf/…).
+  requestNearestObjectAction(action: string): string {
+    const pl = this.playerId; const pp = this.pos(pl); if (!pp) return '';
+    const start = this.map.worldToIdx(pp.x, pp.z);
+    const cands = [...this.objs.values()]
+      .filter((o) => (OBJ_ACTIONS[o.type] ?? []).includes(action) && !(isExclusive(o.type) && o.reservedBy && o.reservedBy !== pl && this.alive(o.reservedBy)))
+      .sort((a, b) => (Math.hypot(a.ix - pp.x, a.iz - pp.z) - Math.hypot(b.ix - pp.x, b.iz - pp.z)));
+    for (const o of cands) {
+      const here = Math.hypot(pp.x - o.ix, pp.z - o.iz) <= 1.5;
+      if (here || this.path(start, this.map.worldToIdx(o.ix, o.iz), pl)) return this.requestObjectAction(o.id, action);
+    }
+    return SELF_REASON[action] ?? 'Nothing to use nearby.';
   }
 
   private bubble(e: Entity, text: string, kind = 'talk', dur = 1.4) { this.bus.emit('bubble', { e, text, kind, dur }); }
@@ -636,10 +660,16 @@ export class Simulation {
     if (action === 'fight') { this.act = null; this.startPlayerFight(target); return 'Fight!'; }
     const self = SELF_ACTIONS.includes(action);
     const dur = ACTION_DUR[action] ?? 0.9;
-    this.act = { action, target: self ? pl : target, phase: self ? 'perform' : 'approach', timer: dur, dur, applied: false };
+    this.act = { action, target: self ? pl : target, phase: self ? 'perform' : 'approach', timer: dur, dur, applied: false, approachT: 0 };
     if (self) { this.beginPerform(); return ''; }
     if (this.dist(pl, target) <= 2.6) { this.act.phase = 'perform'; this.beginPerform(); return ''; }
-    const tp = this.pos(target)!; this.playerMoveToKeepAction(tp.x, tp.z);
+    // refuse to queue an interaction we can't actually walk to (behind a locked/restricted door)
+    const tp = this.pos(target)!;
+    if (!this.playerMoveToKeepAction(tp.x, tp.z)) {
+      this.act = null; pb.action = 'Idle';
+      const tr = this.roomTypeAt(tp);
+      return RESTRICTED.includes(tr) ? 'They\'re in a restricted area.' : 'No route to them.';
+    }
     return `Walking up to ${this.brain(target)?.name ?? 'them'}…`;
   }
   // path the player without cancelling the queued action
@@ -650,6 +680,13 @@ export class Simulation {
     const ag = this.ecs.get<Agent>(pl, 'Agent')!; ag.path = path && path.length ? path : null; ag.step = 0;
     this.brain(pl)!.action = 'Approaching';
     return !!path;
+  }
+  // abort the queued/in-progress player action cleanly (release reservation, reset to idle, notify)
+  private cancelAction(msg?: string) {
+    this.releaseObj(); this.act = null;
+    const pb = this.brain(this.playerId); if (pb && pb.state !== 'fight' && pb.state !== 'down') { pb.state = 'idle'; pb.action = 'Idle'; }
+    this.ecs.get<Agent>(this.playerId, 'Agent')!.path = null;
+    if (msg) this.bus.emit('actionResult', { text: msg });
   }
   private beginPerform() {
     const a = this.act!; const pl = this.playerId; const pb = this.brain(pl)!;
@@ -674,17 +711,20 @@ export class Simulation {
     const a = this.act;
     if (a.objId) { const o = this.objs.get(a.objId); if (o && o.reservedBy === pl) o.reservedUntil = Math.max(o.reservedUntil, 4); }
     if (a.phase === 'approach') {
+      // fail-safe: never let an approach run forever (target moved behind a locked door, no route, …)
+      a.approachT += dt;
+      if (a.approachT > Simulation.APPROACH_TIMEOUT) { this.cancelAction('Couldn\'t reach it.'); return; }
       if (a.objId) {
-        const o = this.objs.get(a.objId); if (!o) { this.act = null; pb.action = 'Idle'; return; }
+        const o = this.objs.get(a.objId); if (!o) { this.cancelAction(); return; }
         const pp = this.pos(pl)!; this.faceObj(pl, o);
         if (Math.hypot(pp.x - a.point!.x, pp.z - a.point!.z) <= 1.5) { a.phase = 'perform'; a.timer = a.dur; this.beginPerform(); }
-        else if (!this.ecs.get<Agent>(pl, 'Agent')!.path) this.playerMoveToKeepAction(a.point!.x, a.point!.z);
+        else if (!this.ecs.get<Agent>(pl, 'Agent')!.path && !this.playerMoveToKeepAction(a.point!.x, a.point!.z)) { this.cancelAction('Path blocked.'); }
         return;
       }
-      const tb = this.brain(a.target); if (!tb) { this.act = null; pb.action = 'Idle'; return; }
+      const tb = this.brain(a.target); if (!tb) { this.cancelAction(); return; }
       this.faceTo(pl, a.target);
       if (this.dist(pl, a.target) <= 2.6) { a.phase = 'perform'; a.timer = a.dur; this.beginPerform(); }
-      else if (!this.ecs.get<Agent>(pl, 'Agent')!.path) { const tp = this.pos(a.target)!; this.playerMoveToKeepAction(tp.x, tp.z); }
+      else if (!this.ecs.get<Agent>(pl, 'Agent')!.path) { const tp = this.pos(a.target)!; if (!this.playerMoveToKeepAction(tp.x, tp.z)) this.cancelAction('Lost the route.'); }
     } else {
       if (a.objId) { const o = this.objs.get(a.objId); if (o) this.faceObj(pl, o); }
       else if (!SELF_ACTIONS.includes(a.action)) this.faceTo(pl, a.target);
@@ -967,7 +1007,32 @@ export class Simulation {
     return `${job.verb}. Earned $${job.money}.`;
   }
 
+  // ---------- debug self-test (?debug) — read-only invariant check, never mutates live state ----------
+  selfTest() {
+    const arr = [...this.objs.values()];
+    const has = (t: string) => arr.some((o) => o.type === t);
+    let doorsMapped = true;
+    for (const o of arr) if (o.type === 'door' || o.type === 'gate') { if (this.doorTiles.get(this.map.worldToIdx(o.x, o.z)) !== o.id) doorsMapped = false; }
+    // can a prisoner NPC path to at least one schedule object of the current phase?
+    let npcPathOk = false; const want = PHASE_OBJ[this.phaseId] ?? [];
+    const npc = this.ecs.query('Brain', 'Position').find((e) => { const b = this.brain(e)!; return b.role === 'prisoner' && !b.isPlayer; });
+    if (npc != null && want.length) {
+      const p = this.pos(npc)!; const start = this.map.worldToIdx(p.x, p.z);
+      for (const o of arr) { if (want.includes(o.type) && this.path(start, this.map.worldToIdx(o.ix, o.iz), npc)) { npcPathOk = true; break; } }
+    } else npcPathOk = !want.length;            // nothing required this phase
+    let saveOk = true; try { const s = JSON.parse(JSON.stringify(this.serialize())); saveOk = Array.isArray(s.ents) && s.ents.length > 0; } catch { saveOk = false; }
+    return {
+      playerOk: this.brain(this.playerId)?.isPlayer === true,
+      mapOk: !!this.map && this.map.width > 0,
+      interactables: this.objs.size,
+      hasBed: has('bed'), hasSink: has('sink'), hasTable: has('table'), hasDoor: has('door'), hasGate: has('gate'),
+      doorsMapped, npcPathOk, saveOk
+    };
+  }
+
   // ---------- save/load ----------
+  // TODO(refactor): extract serialize/hydrate into a SaveSerializer with explicit version migrations
+  // (see docs/ARCHITECTURE.md "Future refactor candidates").
   serialize() {
     const ents = this.ecs.query('Position', 'Brain').map((e) => ({
       pos: this.ecs.get<Position>(e, 'Position'),
@@ -1006,7 +1071,12 @@ export class Simulation {
       this.ecs.set<Inventory>(e, 'Inventory', { items: Array.isArray(r.inv?.items) ? r.inv.items.filter((id: any) => typeof id === 'string') : [], money: num(r.inv?.money, 0) });
       if (r.isPlayer || r.brain.isPlayer) this.playerId = e;
     }
-    if (!this.playerId) this.playerId = this.ecs.query('Brain').find((e) => this.ecs.get<Brain>(e, 'Brain')!.role === 'prisoner') ?? 0;
+    // if the saved player id was missing, promote the first prisoner and mark them as the player
+    if (!this.playerId) {
+      this.playerId = this.ecs.query('Brain').find((e) => this.ecs.get<Brain>(e, 'Brain')!.role === 'prisoner') ?? 0;
+      const pb = this.brain(this.playerId);
+      if (pb) { pb.isPlayer = true; pb.name = 'You'; pb.action = 'Idle'; const r = this.ecs.get<Render>(this.playerId, 'Render'); if (r) r.color = 0xef7a22; }
+    }
     // reset object reservations, derive door states for the loaded phase, then restore saved overrides
     for (const o of this.objs.values()) { o.reservedBy = 0; o.reservedUntil = 0; o.stash = []; o.open = !o.restricted; o.locked = false; }
     this.applyDoorSchedule();

@@ -1,5 +1,7 @@
 // localStorage save/load. (IndexedDB / Capacitor Preferences are a later upgrade.)
-const KEY = 'prison_sim_save_v1';
+// Version-neutral key — the save's schema version lives inside the payload (Simulation.serialize),
+// not in the key name, so the key doesn't lie about the format.
+const KEY = 'lockdown_life_save';
 
 export const SaveManager = {
   has(): boolean { try { return !!localStorage.getItem(KEY); } catch { return false; } },

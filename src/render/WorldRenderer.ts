@@ -82,7 +82,9 @@ export function buildPrison(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
   body.instanceMatrix.needsUpdate = true; cap.instanceMatrix.needsUpdate = true;
   root.add(body, cap);
 
-  // ---- doors / gates: metal frame + bars, warning stripes + room sign ----
+  // ---- doorway signs + warning stripes only ----
+  // The moving door/gate leaf, frame, and state lamp are owned by Game.buildDoorObjects
+  // (single owner of door/gate geometry, since their visual state lives in the Simulation).
   const stripeTex = createWarningStripeTexture();
   const signFor = (r: Room): string => ({
     cellblock_a: 'BLOCK A', cellblock_b: 'BLOCK B', cafeteria: 'CAFETERIA', shower: 'SHOWERS',
@@ -92,8 +94,6 @@ export function buildPrison(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
     if (r.door == null) continue;
     const t = map.tileXY(r.door); const w = map.toWorld(t.x, t.y);
     const restricted = r.security >= 3;
-    if (r.gate) buildGate(root, w.x, w.z);
-    else buildDoor(root, w.x, w.z, restricted);
     if (restricted || r.gate) {
       const stripe = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 1.3), new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.9 }));
       stripe.rotation.x = -Math.PI / 2; stripe.position.set(w.x, 0.06, w.z); root.add(stripe);
@@ -118,33 +118,3 @@ function makeSign(text: string, restricted: boolean): THREE.Mesh {
   return m;
 }
 
-// wide sliding-style security gate (yard transition)
-function buildGate(root: THREE.Group, x: number, z: number) {
-  const frameMat = new THREE.MeshStandardMaterial({ color: THEME.walls.frame, roughness: 0.7, metalness: 0.35 });
-  const barMat = new THREE.MeshStandardMaterial({ color: THEME.walls.bars, roughness: 0.5, metalness: 0.6 });
-  const g = new THREE.Group(); g.position.set(x, 0, z);
-  for (const px of [-1.05, 1.05]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.24, WALL_H + 0.3, 0.36), frameMat); post.position.set(px, (WALL_H + 0.3) / 2, 0); post.castShadow = true; g.add(post); }
-  const top = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.26, 0.36), frameMat); top.position.set(0, WALL_H + 0.15, 0); g.add(top);
-  for (let i = -4; i <= 4; i++) { const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, WALL_H, 6), barMat); bar.position.set(i * 0.22, WALL_H / 2, 0); g.add(bar); }
-  root.add(g);
-}
-
-function buildDoor(root: THREE.Group, x: number, z: number, restricted: boolean) {
-  const frameMat = new THREE.MeshStandardMaterial({ color: THEME.walls.frame, roughness: 0.7, metalness: 0.3 });
-  const barMat = new THREE.MeshStandardMaterial({ color: THEME.walls.bars, roughness: 0.5, metalness: 0.6 });
-  const g = new THREE.Group(); g.position.set(x, 0, z);
-  // posts + lintel (oriented along X — layout doors all face the hallway on z)
-  for (const px of [-0.55, 0.55]) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, WALL_H, 0.3), frameMat);
-    post.position.set(px, WALL_H / 2, 0); post.castShadow = true; g.add(post);
-  }
-  const lintel = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.22, 0.3), frameMat);
-  lintel.position.set(0, WALL_H - 0.1, 0); g.add(lintel);
-  // vertical bars
-  for (let i = -2; i <= 2; i++) {
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, WALL_H - 0.2, 6), barMat);
-    bar.position.set(i * 0.2, (WALL_H - 0.2) / 2, 0); g.add(bar);
-  }
-  if (restricted) (g.children[0] as THREE.Mesh).material = barMat;
-  root.add(g);
-}

@@ -14,7 +14,6 @@ import { Entity } from '../ecs/world';
 import { Brain, Needs, Position, Agent, Social, Inventory } from '../ecs/components';
 import { phaseAt, GANG_MAP } from '../data/content';
 import { ITEMS, isContraband } from '../data/items';
-import { JOB_BY_ROOM } from '../data/jobs';
 import { InteractAction } from '../sim/Simulation';
 
 const FIXED = 1 / 30;
@@ -38,6 +37,8 @@ export class Game {
   private selectedObj: string | null = null;
   private objHits: THREE.Object3D[] = [];
   private objHighlight!: THREE.Mesh;
+  private panelDirty = true;     // request an immediate panel refresh
+  private panelTimer = 0;        // throttle background refreshes to ~6.7/s (not every frame)
 
   constructor(canvas: HTMLCanvasElement) {
     this.app = new ThreeApp(canvas);
@@ -66,12 +67,12 @@ export class Game {
     this.hud = new HUD({
       onPause: () => { this.paused = !this.paused; this.hud.setSpeed(this.paused ? '❚❚' : SPEEDS[this.speedIdx] + '×'); },
       onSpeed: () => { this.speedIdx = (this.speedIdx + 1) % SPEEDS.length; this.paused = false; this.hud.setSpeed(SPEEDS[this.speedIdx] + '×'); },
-      onSave: () => { SaveManager.save(this.sim.serialize()); this.hud.alert('Game saved', 'guard'); },
+      onSave: () => { const ok = SaveManager.save(this.sim.serialize()); this.hud.alert(ok ? 'Game saved' : 'Save failed (storage unavailable)', ok ? 'guard' : 'fight'); },
       onLoad: () => this.load(),
       onDeselect: () => this.select(this.playerEntity),
       hasSave: () => SaveManager.has(),
       onAction: (key) => this.doAction(key),
-      onItem: (key) => { const r = this.sim.dropItem(key); if (r) this.hud.alert(r, 'trade'); this.refreshPanel(); }
+      onItem: (key) => { const r = this.sim.dropItem(key); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; this.refreshPanel(); }
     });
     this.select(this.playerEntity);   // panel shows the player by default
 
@@ -85,8 +86,8 @@ export class Game {
     this.bus.on('actionResult', ({ text }) => this.hud.alert(text, 'info'));
 
     window.addEventListener('resize', () => { this.app.resize(); this.cam.resize(); });
-    // debug hook (only with ?debug): inspect sim/door state from the console or a headless harness
-    if (/[?&]debug/.test(location.search)) (window as any).__game = this;
+    // debug hook (only with ?debug): inspect sim/door state + run an invariant self-test
+    if (/[?&]debug/.test(location.search)) { (window as any).__game = this; console.info('[selfTest]', this.sim.selfTest()); }
     this.loop();
   }
 
@@ -115,19 +116,24 @@ export class Game {
         if (map.isWalkable(nx, ny) && map.idx(nx, ny) !== r.door) { const nw = map.toWorld(nx, ny); ix = nw.x; iz = nw.z; break; }
       }
       const id = 'door_' + r.id;
-      defs.push({ id, type: r.gate ? 'gate' : 'door', name: r.name + (r.gate ? ' Gate' : ' Door'), room: r.id, x: w.x, z: w.z, ix, iz, facing: Math.atan2(w.x - ix, w.z - iz), restricted });
+      const isGate = !!r.gate;
+      defs.push({ id, type: isGate ? 'gate' : 'door', name: r.name + (isGate ? ' Gate' : ' Door'), room: r.id, x: w.x, z: w.z, ix, iz, facing: Math.atan2(w.x - ix, w.z - iz), restricted });
 
-      // visible door: frame posts + a swinging barred leaf + a state lamp
+      // visible door/gate (the ONLY door geometry — WorldRenderer draws signs/stripes only):
+      // static frame posts + lintel + a swinging barred leaf hinged at the left post + a state lamp
+      const halfW = isGate ? 1.05 : 0.55, leafW = isGate ? 1.95 : 1.05, nbars = isGate ? 8 : 4;
       const grp = new THREE.Group(); grp.position.set(w.x, 0, w.z); grp.rotation.y = baseRot;
-      grp.add(this.makeBox(0.16, 2.4, 0.16, frameMat, -0.55, 1.2, 0));
-      grp.add(this.makeBox(0.16, 2.4, 0.16, frameMat, 0.55, 1.2, 0));
-      const pivot = new THREE.Group(); pivot.position.set(-0.5, 0, 0);   // hinge at left post
-      for (let i = 0; i < 4; i++) pivot.add(this.makeCyl(0.04, 1.9, barMat, 0.12 + i * 0.26, 0.95, 0));
-      pivot.add(this.makeBox(1.05, 0.1, 0.1, barMat, 0.5, 1.85, 0));
-      pivot.add(this.makeBox(1.05, 0.1, 0.1, barMat, 0.5, 0.25, 0));
+      grp.add(this.makeBox(0.16, 2.4, 0.18, frameMat, -halfW, 1.2, 0));
+      grp.add(this.makeBox(0.16, 2.4, 0.18, frameMat, halfW, 1.2, 0));
+      grp.add(this.makeBox(halfW * 2 + 0.2, 0.18, 0.2, frameMat, 0, 2.25, 0));   // lintel
+      const pivot = new THREE.Group(); pivot.position.set(-halfW + 0.05, 0, 0);  // hinge at left post
+      const gap = leafW / nbars;
+      for (let i = 0; i < nbars; i++) pivot.add(this.makeCyl(0.045, 1.9, barMat, 0.1 + i * gap, 0.95, 0));
+      pivot.add(this.makeBox(leafW, 0.1, 0.1, barMat, leafW / 2, 1.85, 0));
+      pivot.add(this.makeBox(leafW, 0.1, 0.1, barMat, leafW / 2, 0.25, 0));
       grp.add(pivot);
       const lampMat = new THREE.MeshStandardMaterial({ color: 0x222, emissive: 0x33ff66, emissiveIntensity: 1.2 });
-      grp.add(this.makeBox(0.2, 0.2, 0.2, lampMat, 0, 2.45, 0));
+      grp.add(this.makeBox(0.2, 0.2, 0.2, lampMat, 0, 2.5, 0));
       this.app.scene.add(grp);
       this.doorVisuals.push({ id, pivot, baseRot, lampMat });
 
@@ -171,14 +177,14 @@ export class Game {
       this.objHighlight.position.set(o.x, 0.07, o.z); this.objHighlight.visible = true;
       if (/[?&]debug/.test(location.search)) console.debug('[obj]', o.id, o.type, { room: o.room, open: o.open, locked: o.locked, restricted: o.restricted, reservedBy: o.reservedBy, stash: o.stash.length });
     }
-    this.refreshObjectPanel();
+    this.panelDirty = true; this.refreshObjectPanel();
   }
   // camera always follows the player prisoner; selection only changes the inspected panel
   private followTarget(): Entity { return this.playerEntity; }
   private select(e: Entity | null) {
     this.selected = e ?? this.playerEntity;
     this.selectedObj = null; this.objHighlight.visible = false;
-    this.refreshPanel();
+    this.panelDirty = true; this.refreshPanel();
   }
   private refreshObjectPanel() {
     const id = this.selectedObj; if (!id) return;
@@ -233,16 +239,17 @@ export class Game {
     this.hud.showPanel(info);
   }
   private relWord(v: number) { return v <= -50 ? 'enemy' : v <= -15 ? 'disliked' : v < 15 ? 'neutral' : v < 50 ? 'friendly' : 'ally'; }
-  private playerActions(e: Entity): PanelAction[] {
-    const room = this.sim.roomTypeAt(this.sim.ecs.get<Position>(e, 'Position')!);
-    const a: PanelAction[] = [];
-    if (room === 'cellblock') a.push({ key: 'rest', label: 'Rest', kind: 'object' });
-    if (room === 'shower') a.push({ key: 'wash', label: 'Wash', kind: 'object' });
-    if (room === 'cafeteria') a.push({ key: 'eat', label: 'Eat', kind: 'object' });
-    if (room === 'yard') a.push({ key: 'train', label: 'Train', kind: 'object' });
-    if (JOB_BY_ROOM[room]) a.push({ key: 'work', label: JOB_BY_ROOM[room].verb, kind: 'object' });
-    if (!a.length) a.push({ key: 'work', label: 'No actions here', disabled: true, reason: 'move to a room with facilities' });
-    return a;
+  // Convenience needs actions. Each routes to the NEAREST REACHABLE matching interactable object
+  // (see Simulation.requestNearestObjectAction) — not a room-only stat change. If nothing is
+  // reachable the sim returns a clear reason ("Find a bed.", "No reachable shower.", …).
+  private playerActions(_e: Entity): PanelAction[] {
+    return [
+      { key: 'rest', label: 'Rest', kind: 'object' },
+      { key: 'wash', label: 'Wash', kind: 'object' },
+      { key: 'eat', label: 'Eat', kind: 'object' },
+      { key: 'train', label: 'Train', kind: 'object' },
+      { key: 'work', label: 'Work', kind: 'object' }
+    ];
   }
   private npcActions(e: Entity, role: string): PanelAction[] {
     if (role === 'guard') return [{ key: 'talk', label: 'Talk', kind: 'social' }, { key: 'comply', label: 'Comply', kind: 'guard' }, { key: 'argue', label: 'Argue', kind: 'risky' }];
@@ -258,7 +265,9 @@ export class Game {
       { key: 'backoff', label: 'Back Off' }
     ];
   }
+  private static SELF_KEYS = ['rest', 'wash', 'eat', 'train', 'work'];
   private doAction(key: string) {
+    this.panelDirty = true;
     if (this.selectedObj) {
       const status = this.sim.requestObjectAction(this.selectedObj, key);
       if (status) this.hud.alert(status, 'info');
@@ -266,7 +275,11 @@ export class Game {
       return;
     }
     const sel = this.selected ?? this.playerEntity;
-    const status = this.sim.requestAction(sel, key as InteractAction);
+    const isPlayerSel = sel === this.playerEntity || !!this.sim.ecs.get<Brain>(sel, 'Brain')?.isPlayer;
+    // player "convenience" needs actions route to the nearest reachable real object (not room shortcuts)
+    const status = (isPlayerSel && Game.SELF_KEYS.includes(key))
+      ? this.sim.requestNearestObjectAction(key)
+      : this.sim.requestAction(sel, key as InteractAction);
     if (status) this.hud.alert(status, key === 'fight' ? 'fight' : 'info');
     this.refreshPanel();
   }
@@ -279,6 +292,7 @@ export class Game {
     this.feedback.reset();
     this.sync.setEcs(this.sim.ecs);
     this.playerEntity = this.sim.player();
+    this.panelDirty = true;
     this.select(this.playerEntity);
     this.hud.alert('Game loaded', 'guard');
   }
@@ -358,7 +372,12 @@ export class Game {
     }
     this.cam.tick(dt);
 
-    if (this.selectedObj) this.refreshObjectPanel(); else this.refreshPanel();
+    // panel: refresh on demand (selection/action/inventory) or a few times a second — never every frame
+    this.panelTimer -= dt;
+    if (this.panelDirty || this.panelTimer <= 0) {
+      if (this.selectedObj) this.refreshObjectPanel(); else this.refreshPanel();
+      this.panelDirty = false; this.panelTimer = 0.15;
+    }
     const riot = this.riotRisk();
     this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, 0, riot);
     this.hud.setAlarm(riot);
