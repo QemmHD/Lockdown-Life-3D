@@ -18,6 +18,7 @@ import { choosePrisonerIntent } from './PrisonerAISystem';
 import { AIMemory, newMemory, decayMemory, rememberFoe, rememberThreat, rememberSearch, sanitizeMemory } from './AIMemorySystem';
 import { clusterOffset } from './GroupBehaviorSystem';
 import { routeFor } from './GuardAISystem';
+import { AttackType, CombatOutcome, ATTACKS, COMBAT_SPACING, SQUARE_UP, HITREACT, STUMBLE, DOWN_TIME, RECOVER, chooseAttack, resolveDefense, OUTCOME_TEXT } from './CombatSystem';
 
 const SECONDS_PER_HOUR = 5;
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
@@ -90,7 +91,7 @@ export class Simulation {
   private escapeCd = 0;                          // cooldown between escape attempts
   private heatEventTimer = 0;                    // recent-heat-event timer (slows decay briefly)
   // lightweight playtest telemetry (?debug)
-  metrics: Record<string, number> = { fightsStarted: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, orderRefusals: 0, complianceEvents: 0 };
+  metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0 };
 
   constructor(public bus: EventBus, seed = Math.floor(Math.random() * 1e9)) { this.rng = new Random(seed); }
 
@@ -444,6 +445,17 @@ export class Simulation {
         this.metrics.standoffs++;
         const rp = this.pos(rival)!, p = this.pos(e)!; p.facing = Math.atan2(rp.x - p.x, rp.z - p.z);
         this.bubble(e, this.rng.pick(['Watch it.', 'Back off.', '😠']), 'threaten', 1.4); b.bubbleCd = this.rng.range(6, 10);
+        const rb = this.brain(rival)!; const guardClose = this.nearestGuard(e, 6) != null;
+        // a guard nearby (or a coward) defuses it; otherwise an angry pair may square up
+        const angry = (this.ecs.get<Needs>(e, 'Needs')!.anger + this.ecs.get<Needs>(rival, 'Needs')!.anger) / 2;
+        if (!guardClose && angry > 0.55 && !b.traits.includes('cowardly') && !rb.traits.includes('cowardly') && this.rng.chance(0.4)) {
+          this.metrics.standoffsEscalated++;
+          b.state = 'fight'; b.foe = rival; b.cphase = 'squareUp'; b.cTimer = 0.4; b.attackCd = 0.4;
+          rb.state = 'fight'; rb.foe = e; rb.cphase = 'squareUp'; rb.cTimer = 0.4; rb.attackCd = 0.6;
+          if (b.mem) rememberFoe(b.mem, rival); if (rb.mem) rememberFoe(rb.mem, e);
+          this.bus.emit('alert', { type: 'fight', text: `${b.name} and ${rb.name} square off!` });
+          this.dispatchGuard(e); this.registerFight(e);
+        } else { this.metrics.standoffsDefused++; }
         return;
       }
     }
@@ -855,45 +867,132 @@ export class Simulation {
     }
   }
 
-  // ---------- combat ----------
+  // ---------- combat (Stage 3.3 phase machine) ----------
+  // TODO(refactor): the phase machine + resolution wrapper could move into a CombatController class.
   private combatSystem(dt: number) {
     this.fightCd -= dt;
     if (this.fightCd <= 0) { this.fightCd = this.rng.range(5, 10); this.tryStartFight(); }
 
     for (const e of this.ecs.query('Brain', 'Position', 'Needs')) {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
-      if (b.state === 'down') { b.timer -= dt; if (b.timer <= 0) { b.state = 'idle'; this.ecs.get<Needs>(e, 'Needs')!.health = 0.45; } continue; }
-      if (b.state !== 'fight' || b.foe == null) continue;
-      const loser = b.foe;
+      if (b.state === 'down') {   // knocked down — hold the pose, then get up
+        b.cphase = 'down'; b.timer -= dt;
+        if (b.timer <= 0) { b.state = 'idle'; b.cphase = undefined; this.ecs.get<Needs>(e, 'Needs')!.health = Math.max(0.45, this.ecs.get<Needs>(e, 'Needs')!.health); }
+        continue;
+      }
+      if (b.blockT) b.blockT = Math.max(0, b.blockT - dt);
+      if (b.state !== 'fight' || b.foe == null) { if (b.cphase) b.cphase = undefined; continue; }
       const p = this.ecs.get<Position>(e, 'Position')!;
       const fb = this.ecs.get<Brain>(b.foe, 'Brain');
       const fp = this.ecs.get<Position>(b.foe, 'Position');
-      if (!fb || !fp || fb.state === 'down') { b.state = 'idle'; b.foe = undefined; continue; }
+      if (!fb || !fp || fb.state === 'down' || fb.state === 'solitary') { this.endFighter(e, b); continue; }
+      // always face the foe + keep fighting spacing (no overlap)
       p.facing = Math.atan2(fp.x - p.x, fp.z - p.z);
       const d = Math.hypot(fp.x - p.x, fp.z - p.z);
-      if (d > 1.3) { p.x += Math.sin(p.facing) * dt * 1.6; p.z += Math.cos(p.facing) * dt * 1.6; }
-      else {
-        b.attackCd -= dt;
-        if (b.attackCd <= 0) {
-          b.attackCd = 0.8;
-          const fn = this.ecs.get<Needs>(b.foe, 'Needs')!;
-          let power = 0.12 * (b.traits.includes('tough') ? 1.3 : 1) * (b.traits.includes('weak') ? 0.6 : 1);
-          const weapon = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.combat ?? 0).reduce((a, c) => Math.max(a, c), 0);
-          power += weapon * 0.02;
-          fn.health = clamp01(fn.health - power);
-          this.bus.emit('impact', { x: fp.x, z: fp.z });
-          this.bus.emit('float', { x: fp.x, z: fp.z, text: `-${Math.round(power * 100)}`, color: '#ff7a6a' });
-          this.faceWatchers(fp.x, fp.z);
-          if (fn.health <= 0.2) {
-            fb.state = 'down'; fb.timer = 6; fb.foe = undefined;
-            b.state = 'idle'; b.foe = undefined;
-            this.ecs.get<Needs>(e, 'Needs')!.anger = clamp01(this.ecs.get<Needs>(e, 'Needs')!.anger - 0.3);
-            this.bus.emit('alert', { type: 'fight', text: `${b.name} knocked out ${fb.name}` });
-            this.onFightWin(e, loser, b, fb);
-          }
-        }
+      const reacting = b.cphase === 'hitReact' || b.cphase === 'stumble' || b.cphase === 'dodge';
+      if (!reacting) {
+        if (d > COMBAT_SPACING + 0.35) { const sp = Math.min(dt * 1.7, d - COMBAT_SPACING); p.x += Math.sin(p.facing) * sp; p.z += Math.cos(p.facing) * sp; }
+        else if (d < COMBAT_SPACING - 0.35) { this.nudge(p, -Math.sin(p.facing) * dt * 1.2, -Math.cos(p.facing) * dt * 1.2); }
       }
+      this.advanceCombat(e, b, p, b.foe, fb, fp, dt);
     }
+  }
+  // per-fighter phase progression: squareUp → windup → strike → recover → squareUp.
+  // Reaction phases (hitReact/stumble/dodge/block) are set on the foe by doStrike and play out here.
+  private advanceCombat(e: Entity, b: Brain, p: Position, foe: Entity, fb: Brain, fp: Position, dt: number) {
+    b.cTimer = (b.cTimer ?? 0) - dt;
+    b.attackCd -= dt;
+    if (!b.cphase) b.cphase = 'squareUp';
+    if ((b.cTimer ?? 0) > 0) return;   // mid-phase — let the pose play
+    const inRange = Math.hypot(fp.x - p.x, fp.z - p.z) <= COMBAT_SPACING + 0.45;
+    switch (b.cphase) {
+      case 'windup': this.doStrike(e, b, foe, fb, fp); break;        // sets strike phase + timer
+      case 'strike': b.cphase = 'recover'; b.cTimer = (b.cResult as AttackType) in ATTACKS ? ATTACKS[b.cResult as AttackType].recover : RECOVER; break;
+      case 'recover': b.cphase = 'squareUp'; b.cTimer = SQUARE_UP; break;
+      case 'hitReact': case 'stumble': case 'dodge': case 'block': b.cphase = 'squareUp'; b.cTimer = SQUARE_UP * 0.6; break;
+      case 'squareUp': default:
+        if (inRange && b.attackCd <= 0) {
+          const atk = this.pickAttack(e, b);
+          b.cphase = 'windup'; b.cTimer = ATTACKS[atk].windup; b.cResult = atk;
+          b.attackCd = ATTACKS[atk].windup + ATTACKS[atk].recover + this.rng.range(0.2, 0.6);
+          this.metrics.attacksAttempted++;
+        } else {
+          // defensive NPCs occasionally raise a guard between exchanges (gives blocks + a block pose)
+          if (!b.isPlayer && !b.blockT && this.rng.chance(0.14)) { b.blockT = 0.7; b.cphase = 'block'; b.cTimer = 0.5; }
+          else b.cTimer = SQUARE_UP * 0.5;
+        }
+        break;
+    }
+  }
+  private pickAttack(e: Entity, b: Brain): AttackType {
+    if (b.isPlayer && b.pendingAtk) { const a = b.pendingAtk as AttackType; b.pendingAtk = undefined; return a; }
+    const n = this.ecs.get<Needs>(e, 'Needs')!;
+    const weapon = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.combat ?? 0).reduce((a, c) => Math.max(a, c), 0);
+    return chooseAttack({ anger: n.anger, fear: n.fear, energy: n.energy, weapon, tough: b.traits.includes('tough'), aggressive: b.traits.includes('aggressive') }, this.rng.float());
+  }
+  // resolve a windup into an outcome on the foe + feedback
+  private doStrike(e: Entity, b: Brain, foe: Entity, fb: Brain, fp: Position) {
+    b.cphase = 'strike'; b.cTimer = 0.18;
+    const atk = (b.cResult as AttackType) in ATTACKS ? (b.cResult as AttackType) : 'quick';
+    const an = this.ecs.get<Needs>(e, 'Needs')!; an.energy = clamp01(an.energy - ATTACKS[atk].stamina);
+    const fn = this.ecs.get<Needs>(foe, 'Needs')!;
+    const def = { fear: fn.fear, energy: fn.energy, coward: fb.traits.includes('cowardly') || fb.traits.includes('weak'), blocking: !!fb.blockT };
+    const outcome = resolveDefense(atk, def, this.rng.float(), this.rng.float(), this.rng.float());
+    const ep = this.pos(e)!;
+    if (outcome === 'miss' || outcome === 'dodged' || outcome === 'blocked') {
+      this.metrics[outcome === 'blocked' ? 'blocks' : outcome === 'dodged' ? 'dodges' : 'misses']++;
+      if (outcome !== 'miss') { fb.cphase = outcome === 'blocked' ? 'block' : 'dodge'; fb.cTimer = 0.3; }
+      this.bus.emit('float', { x: fp.x, z: fp.z, text: OUTCOME_TEXT[outcome], color: outcome === 'blocked' ? '#9fd0ff' : '#dfe3e6' });
+      if (outcome === 'blocked') this.bus.emit('impact', { x: (ep.x + fp.x) / 2, z: (ep.z + fp.z) / 2 });
+      return;
+    }
+    // a landed hit
+    this.metrics.hits++;
+    const weapon = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.combat ?? 0).reduce((a, c) => Math.max(a, c), 0);
+    let dmg = this.rng.range(ATTACKS[atk].dmgMin, ATTACKS[atk].dmgMax) * (b.traits.includes('tough') ? 1.2 : 1) * (b.traits.includes('weak') ? 0.7 : 1);
+    dmg += weapon * 0.02; if (outcome === 'glancing') dmg *= 0.45;
+    fn.health = clamp01(fn.health - dmg);
+    fb.lastAttacker = e;
+    this.bus.emit('impact', { x: fp.x, z: fp.z });
+    if (dmg > 0.02) this.bus.emit('float', { x: fp.x, z: fp.z, text: `-${Math.round(dmg * 100)}`, color: '#ff7a6a' });
+    // knockback (path-safe) + hit reaction / stumble
+    const ang = Math.atan2(fp.x - ep.x, fp.z - ep.z);
+    this.nudge(fp, Math.sin(ang) * ATTACKS[atk].knockback * 0.6, Math.cos(ang) * ATTACKS[atk].knockback * 0.6);
+    const heavy = ATTACKS[atk].knockback > 0.5 || dmg > 0.16;
+    if (fn.health <= 0.2 || (heavy && fn.energy < 0.2)) { this.knockDown(foe, fb, e, b); }
+    else { fb.cphase = heavy ? 'stumble' : 'hitReact'; fb.cTimer = heavy ? STUMBLE : HITREACT; fn.fear = clamp01(fn.fear + 0.06); }
+    this.faceWatchers(fp.x, fp.z);
+    this.crowdReact(fp.x, fp.z);
+  }
+  private knockDown(loser: Entity, lb: Brain, winner: Entity, wb: Brain) {
+    lb.state = 'down'; lb.timer = DOWN_TIME; lb.foe = undefined; lb.cphase = 'down'; lb.cTimer = DOWN_TIME;
+    this.ecs.get<Agent>(loser, 'Agent')!.path = null;
+    wb.state = 'idle'; wb.foe = undefined; wb.cphase = undefined;
+    const wn = this.ecs.get<Needs>(winner, 'Needs')!; wn.anger = clamp01(wn.anger - 0.3);
+    this.metrics.knockdowns++; this.metrics.fightsEnded++;
+    this.bus.emit('alert', { type: 'fight', text: `${wb.name} knocked down ${lb.name}` });
+    this.onFightWin(winner, loser, wb, lb);
+  }
+  // disengage a fighter whose foe is gone/downed
+  private endFighter(e: Entity, b: Brain) { b.state = 'idle'; b.foe = undefined; b.cphase = undefined; b.cTimer = 0; }
+  // move a character by (dx,dz) but never through a wall/locked tile (clamp to current tile)
+  private nudge(p: Position, dx: number, dz: number) {
+    const nx = p.x + dx, nz = p.z + dz; const idx = this.map.worldToIdx(nx, nz);
+    if (idx >= 0 && this.map.walkable[idx]) { p.x = nx; p.z = nz; }
+  }
+  // nearby inmates react to a brawl (capped + throttled): watch / cheer / flee
+  private crowdReact(x: number, z: number) {
+    let watchers = 0;
+    for (const e of this.ecs.query('Brain', 'Position', 'Needs')) {
+      if (watchers >= 5) break;
+      const b = this.brain(e)!; if (b.role !== 'prisoner' || b.isPlayer || b.state === 'fight' || b.state === 'down') continue;
+      const p = this.pos(e)!; const d = Math.hypot(p.x - x, p.z - z); if (d < 1.2 || d > 6) continue;
+      watchers++;
+      const n = this.ecs.get<Needs>(e, 'Needs')!;
+      if ((b.traits.includes('cowardly') || n.fear > 0.6) && b.intent !== 'fleeDanger') { b.intent = 'fleeDanger'; b.intentCd = 2; }
+      else if (!b.bubbleCd && this.rng.chance(0.04)) { this.bubble(e, this.rng.pick(['Get him!', 'Ohh!', 'Fight!', '👀']), 'insult', 1.2); b.bubbleCd = this.rng.range(4, 8); }
+    }
+    if (watchers >= 3) { const rid = this.roomIdAt({ x, z, facing: 0 }); if (rid) this.tension[rid] = Math.min(100, (this.tension[rid] ?? 0) + 6 * 0.05); }
   }
   private tryStartFight() {
     const prisoners = this.ecs.query('Brain', 'Needs', 'Position').filter((e) => {
@@ -931,17 +1030,22 @@ export class Simulation {
     const b = this.ecs.get<Brain>(best, 'Brain')!; b.state = 'respond'; b.foe = fighter; this.ecs.get<Agent>(best, 'Agent')!.path = null;
   }
   private breakUpFight(guard: Entity, near: Entity) {
-    const np = this.ecs.get<Position>(near, 'Position')!;
+    const np = this.ecs.get<Position>(near, 'Position')!; const gp = this.pos(guard);
+    if (gp && !this.brain(guard)!.bubbleCd) { this.bubble(guard, 'Break it up!', 'search', 1.4); this.brain(guard)!.bubbleCd = 3; }
+    let broke = 0;
     for (const e of this.ecs.query('Brain', 'Position')) {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
       if (b.role !== 'prisoner' || b.state !== 'fight') continue;
       const p = this.ecs.get<Position>(e, 'Position')!;
       if (Math.hypot(p.x - np.x, p.z - np.z) < 4) {
-        b.state = 'idle'; b.foe = undefined;
+        b.state = 'idle'; b.foe = undefined; b.cphase = 'stumble'; b.cTimer = 0.5;   // shoved apart
+        if (gp) { const a = Math.atan2(p.x - gp.x, p.z - gp.z); this.nudge(p, Math.sin(a) * 0.5, Math.cos(a) * 0.5); }
         const n = this.ecs.get<Needs>(e, 'Needs')!; n.anger = clamp01(n.anger - 0.4); n.fear = clamp01(n.fear + 0.2);
+        const ps = this.social(e); if (ps) ps.suspicion = clamp(ps.suspicion + 8, 0, 100);
+        broke++;
       }
     }
-    this.metrics.fightsBrokenUp++;
+    this.metrics.fightsBrokenUp++; this.metrics.guardInterrupts++; if (broke) this.metrics.fightsEnded++;
     this.bus.emit('alert', { type: 'guard', text: `${this.name(guard)} broke up the fight` });
   }
 
@@ -1469,14 +1573,19 @@ export class Simulation {
     if (wb.isPlayer && ws) { ws.reputation = clamp(ws.reputation + 7, -100, 100); this.bus.emit('alert', { type: 'rep', text: `You beat ${lb.name}! Respect rises.` }); }
     if (lb.isPlayer && ls) { ls.reputation = clamp(ls.reputation - 6, -100, 100); this.bus.emit('alert', { type: 'rep', text: `You were beaten by ${wb.name}.` }); this.escortLoserToInfirmaryOrSolitary(); }
     if (ls) ls.respect = clamp(ls.respect - 4, 0, 100);
+    // a fight always draws suspicion + a chance of being searched (winner especially)
+    if (ws) ws.suspicion = clamp(ws.suspicion + 14, 0, 100);
+    if (ls) ls.suspicion = clamp(ls.suspicion + 6, 0, 100);
+    this.addHeat(5);
     // the loser remembers who beat them (and especially the player)
     if (lb.mem) rememberFoe(lb.mem, winner, 45);
     if (wb.isPlayer && ls) ls.rel = clamp(ls.rel - 30, -100, 100);
-    // guards may discipline the player for fighting if seen
-    if (wb.isPlayer || lb.isPlayer) {
-      const g = this.nearestGuard(this.playerId, 10);
-      if (g != null && this.rng.chance(0.5)) this.beginEscort(g, this.playerId, 'fighting');
-    }
+    // guards may discipline a fighter if seen (player, or a nearby NPC winner)
+    const seen = this.nearestGuard(winner, 11);
+    if (seen != null && this.rng.chance(wb.isPlayer || lb.isPlayer ? 0.55 : 0.3)) {
+      this.metrics.fightDisciplines++;
+      this.beginEscort(seen, wb.isPlayer ? this.playerId : winner, 'fighting');
+    } else if (seen != null && this.rng.chance(0.4)) { this.beginSearch(seen, winner); }
   }
   private escortLoserToInfirmaryOrSolitary() {
     const pb = this.brain(this.playerId)!; pb.action = 'Knocked out';
@@ -1545,11 +1654,36 @@ export class Simulation {
 
   private startPlayerFight(target: Entity) {
     const pl = this.playerId; const pb = this.brain(pl)!; const tb = this.brain(target)!;
-    pb.state = 'fight'; pb.foe = target; pb.attackCd = 0.3; pb.action = 'Fighting';
-    tb.state = 'fight'; tb.foe = pl; tb.attackCd = 0.5;
+    pb.state = 'fight'; pb.foe = target; pb.attackCd = 0.3; pb.action = 'Fighting'; pb.cphase = 'squareUp'; pb.cTimer = 0.4;
+    tb.state = 'fight'; tb.foe = pl; tb.attackCd = 0.5; tb.cphase = 'squareUp'; tb.cTimer = 0.4;
+    if (tb.mem) rememberFoe(tb.mem, pl);
     this.bus.emit('alert', { type: 'fight', text: `Fight: You vs ${tb.name}!` });
     this.dispatchGuard(pl);
     this.registerFight(pl);
+  }
+
+  // ---------- player combat actions (Stage 3.3) ----------
+  // contextual fight buttons: only while fighting, or when standing next to a hostile inmate
+  playerCombatActions(): { key: string; label: string }[] {
+    const pl = this.playerId; const pb = this.brain(pl); if (!pb) return [];
+    if (pb.state === 'fight') return [
+      { key: 'strike', label: 'Strike' }, { key: 'heavy', label: 'Heavy' }, { key: 'shove', label: 'Shove' },
+      { key: 'block', label: 'Block' }, { key: 'backoff', label: 'Back Off' }
+    ];
+    return [];
+  }
+  // queue a combat input for the player's next phase / set a block window / disengage
+  requestCombatAction(key: string): string {
+    const pl = this.playerId; const pb = this.brain(pl)!; if (pb.state !== 'fight') return '';
+    this.metrics.playerCombatChoices++;
+    switch (key) {
+      case 'strike': pb.pendingAtk = 'quick'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Strike!';
+      case 'heavy': pb.pendingAtk = 'heavy'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Heavy swing!';
+      case 'shove': pb.pendingAtk = 'shove'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Shove!';
+      case 'block': pb.blockT = 0.9; pb.cphase = 'block'; pb.cTimer = 0.5; this.bubble(pl, '🛡️', 'search', 0.8); return 'Blocking.';
+      case 'backoff': { const foe = pb.foe; this.endFighter(pl, pb); pb.action = 'Idle'; if (foe != null) { const fb = this.brain(foe); if (fb && fb.state === 'fight') { fb.state = 'idle'; fb.foe = undefined; fb.cphase = undefined; } } this.social(pl)!.reputation = clamp(this.social(pl)!.reputation - 1, -100, 100); return 'You back off.'; }
+    }
+    return '';
   }
 
   private smalltalk(tb: Brain): string {
@@ -1647,7 +1781,7 @@ export class Simulation {
       riotPressure: this.riotPressure,
       tension: this.tension
     };
-    return { version: 6, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos };
+    return { version: 7, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -1667,7 +1801,7 @@ export class Simulation {
       this.ecs.set<Render>(e, 'Render', { kind: r.render.kind === 'guard' ? 'guard' : 'prisoner', color: num(r.render.color, 0xc98a3a), meshId: e });
       this.ecs.set<Agent>(e, 'Agent', { speed: num(r.agent?.speed, 2), path: null, step: 0, repathCd: 0 });
       this.ecs.set<Needs>(e, 'Needs', r.needs ?? { hunger: 0, sleep: 0, hygiene: 0, energy: 1, anger: 0, fear: 0, health: 1 });
-      this.ecs.set<Brain>(e, 'Brain', { ...r.brain, role: r.brain.role === 'guard' ? 'guard' : 'prisoner', traits: Array.isArray(r.brain.traits) ? r.brain.traits : [], targetRoom: r.brain.targetRoom ?? 'cellblock', attackCd: 0, timer: 0, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle', intent: 'schedule', intentCd: 0, checkpoint: undefined, dwell: 0, roleCd: 0, bubbleCd: 0, guardRole: r.brain.role === 'guard' ? 'patrol' : undefined, mem: r.brain.role === 'guard' ? undefined : sanitizeMemory(r.brain.mem) });
+      this.ecs.set<Brain>(e, 'Brain', { ...r.brain, role: r.brain.role === 'guard' ? 'guard' : 'prisoner', traits: Array.isArray(r.brain.traits) ? r.brain.traits : [], targetRoom: r.brain.targetRoom ?? 'cellblock', attackCd: 0, timer: 0, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle', intent: 'schedule', intentCd: 0, checkpoint: undefined, dwell: 0, roleCd: 0, bubbleCd: 0, guardRole: r.brain.role === 'guard' ? 'patrol' : undefined, mem: r.brain.role === 'guard' ? undefined : sanitizeMemory(r.brain.mem), cphase: undefined, cTimer: 0, cResult: undefined, blockT: 0, pendingAtk: undefined, lastAttacker: undefined });
       this.ecs.set<Social>(e, 'Social', r.social ?? { reputation: 0, respect: 20, suspicion: 0, rel: 0 });
       this.ecs.set<Inventory>(e, 'Inventory', { items: Array.isArray(r.inv?.items) ? r.inv.items.filter((id: any) => typeof id === 'string') : [], money: num(r.inv?.money, 0) });
       if (r.isPlayer || r.brain.isPlayer) this.playerId = e;

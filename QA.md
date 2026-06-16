@@ -119,6 +119,19 @@ selected-object / blocked-path info to the console.
 - [ ] Save/load (v6) keeps guard roles + prisoner intents/memory safe; no stuck NPCs
 - [ ] `?debug` metrics include guardRoleSwitches / prisonerIntentChanges / socialInteractions / standoffs
 
+## Combat feel (Stage 3.3)
+- [ ] A fight shows phases (square-up → windup → strike → hit-react/stumble → recover), not instant ticks
+- [ ] Fighters keep spacing (don't overlap); knockback shoves the loser back (never through a wall)
+- [ ] Not every attack lands — Dodge / Blocked / Miss / Glancing feedback appears; damage numbers only on hits
+- [ ] Heavy hit / low stamina can knock a character down; they recover (non-lethal)
+- [ ] Tap Fight on an NPC → panel becomes Strike / Heavy / Shove / Block / Back Off; inputs affect the fight
+- [ ] A responding guard shouts "Break it up!", shoves fighters apart, and disciplines if it continues
+- [ ] Nearby inmates watch/cheer (capped) or flee; a crowd nudges tension up
+- [ ] A rival standoff can escalate into a fight, or defuse when a guard is near
+- [ ] Winning raises respect/reputation; losing lowers it; fights raise suspicion/heat → possible search/solitary
+- [ ] Save/load during a fight → no one stuck in windup/fight; outcomes (health/respect/memory) persist
+- [ ] `?debug` metrics include attacks/hits/misses/blocks/dodges/knockdowns/guardInterrupts/playerCombatChoices
+
 ## Stability
 - [ ] Run a full in-game day at 4× → no runtime errors, no soft-locks
 - [ ] No leaking DOM feedback elements after many floats/bubbles

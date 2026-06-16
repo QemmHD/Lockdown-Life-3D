@@ -12,6 +12,41 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v3.3.0-combat — Stage Combat/Animation Feel 3.3 (phased fights, reactions, physical feel)
+Combat-feel pass — fights now have rhythm, defence, knockback, and readable animation. No new
+progression/economy. Sim authoritative, RenderSync read-only, build passes, 0 runtime errors. New
+pure module `CombatSystem.ts` (attack tables + outcome resolution); a per-fighter phase machine runs
+in the Simulation; RenderSync animates the phases read-only.
+- **Combat phases**: squareUp → windup → strike → recover, with reaction phases block / dodge /
+  hitReact / stumble / down → recover. Each fighter holds a phase + timer; RenderSync poses arms/torso/
+  legs per phase (pull-back windup, snapping strike, raised-guard block, side-shift dodge, jerk-back
+  hitReact, wobble stumble) — no skeletal rig, just the existing low-poly transforms.
+- **Spacing**: fighters keep a combat distance (step in when far, back off when too close) instead of
+  overlapping; knockback/shove movement is path-clamped (never through walls/locked doors); watchers
+  keep their distance.
+- **Attack types v1** (abstract): quick / heavy / shove, each with windup, stamina, hit chance, damage,
+  knockback. Auto-selected from anger/fear/energy/weapon/trait (player can queue their choice).
+- **Defence**: hit / glancing / blocked / dodged / miss outcomes with "Blocked"/"Dodge"/"Miss"/
+  "Glancing" feedback + impact/block flashes; damage numbers only on real hits. NPCs occasionally raise
+  a guard; fearful inmates dodge more.
+- **Knockback / stumble / knockdown**: hits shove + stagger the target; heavy hits or low stamina can
+  knock them **down** (non-lethal), then they recover. Winner gains respect/reputation, loser loses
+  standing + gains fear; the loser remembers who beat them.
+- **Player combat panel**: while fighting, the panel becomes **Strike / Heavy / Shove / Block / Back
+  Off** (only shown mid-fight); inputs influence the next phase, Block opens a brief block window.
+- **Guard interruption**: responding guards shout "Break it up!", shove fighters apart, add suspicion,
+  and escalate to search/escort/solitary if it continues.
+- **Crowd payoff**: nearby inmates watch (capped at 5, throttled bubbles), fearful ones flee, and a
+  growing crowd nudges area tension up.
+- **Standoff → fight**: AI 3.2 standoffs can now **escalate** to a squared-up fight (angry rivals, no
+  guard near) or **defuse** (guard present / cowardly), tracked in telemetry.
+- **Consequences**: fights raise suspicion + heat and can trigger a search or escort to solitary.
+- **Telemetry+**: attacks attempted, hits, misses, blocks, dodges, knockdowns, guard interruptions,
+  standoffs escalated/defused, fight disciplines, player combat choices, fights started/ended.
+- **Save/load v7**: transient combat phases reset safely on load (no fighter stuck in windup/fight);
+  persistent outcomes (health/respect/relationships/memory/suspicion/discipline) remain. Backward-
+  compatible with v6/v5/v4.
+
 ## v3.2.0-ai — Stage AI 3.2 (deeper guard/prisoner AI, memory, group behaviour)
 AI-depth pass — guards and prisoners now have roles, intents, memory, and light group behaviour.
 Sim authoritative, RenderSync read-only, build passes, 0 runtime errors. New **pure AI modules**:
