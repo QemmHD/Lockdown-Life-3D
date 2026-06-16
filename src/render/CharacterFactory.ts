@@ -29,27 +29,28 @@ function limb(w: number, h: number, d: number, mat: THREE.Material): THREE.Group
 
 export function makeCharacter(kind: 'prisoner' | 'guard', color: number): CharView {
   const group = new THREE.Group();
-  const scale = 0.92 + Math.random() * 0.18;
+  const scale = 1.08 + Math.random() * 0.22;
 
   // contact shadow
-  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.44, 18),
-    new THREE.MeshBasicMaterial({ color: THEME.contactShadow, transparent: true, opacity: 0.34, depthWrite: false }));
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.46, 18),
+    new THREE.MeshBasicMaterial({ color: THEME.contactShadow, transparent: true, opacity: 0.4, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.02; group.add(shadow);
 
-  // selection ring
-  const ring = new THREE.Mesh(new THREE.RingGeometry(0.46, 0.58, 24),
-    new THREE.MeshBasicMaterial({ color: THEME.selection, transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false }));
-  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.04; ring.visible = false; group.add(ring);
+  // selection ring (thick + bright so the picked inmate pops)
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.7, 28),
+    new THREE.MeshBasicMaterial({ color: THEME.selection, transparent: true, opacity: 1, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2; ring.position.y = 0.05; ring.visible = false; group.add(ring);
 
   const rig = new THREE.Group(); rig.scale.setScalar(scale); group.add(rig);
 
   const skinMat = new THREE.MeshStandardMaterial({ color: kind === 'guard' ? THEME.guard.skin : pick(THEME.prisoners.skins), roughness: 0.8 });
-  const uniMat = new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
+  const uniMat = new THREE.MeshStandardMaterial({ color: kind === 'guard' ? THEME.guard.uniform : color, roughness: 0.85 });
+  const legMat = new THREE.MeshStandardMaterial({ color: kind === 'guard' ? THEME.guard.trousers : THEME.prisonerTrousers, roughness: 0.85 });
   const shoeMat = new THREE.MeshStandardMaterial({ color: 0x202024, roughness: 0.8 });
 
   // legs (hips at y=0.55)
-  const legL = limb(0.17, 0.55, 0.2, uniMat); legL.position.set(-0.12, 0.55, 0);
-  const legR = limb(0.17, 0.55, 0.2, uniMat); legR.position.set(0.12, 0.55, 0);
+  const legL = limb(0.17, 0.55, 0.2, legMat); legL.position.set(-0.12, 0.55, 0);
+  const legR = limb(0.17, 0.55, 0.2, legMat); legR.position.set(0.12, 0.55, 0);
   for (const lg of [legL, legR]) { const sh = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.12, 0.3), shoeMat); sh.position.set(0, -0.52, 0.05); sh.castShadow = true; lg.add(sh); }
   rig.add(legL, legR);
 

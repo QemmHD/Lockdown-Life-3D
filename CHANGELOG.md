@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.0.0-sim.3 — Stage Visual 1.1 (readability & polish)
+- Brighter, balanced lighting: stronger ambient/key/hemisphere + exposure; large rooms now get a
+  grid of point lights so cafeteria/yard/hallway/guard room stay readable while keeping the mood.
+- Camera pulled in (zoom 15 -> 12.5) so characters/props are larger; less empty background.
+- Characters scaled up, two-tone prison uniforms (bright jumpsuit + dark trousers) vs darker capped
+  guards; thicker brighter selection ring; stronger contact shadow.
+- Stronger prop silhouettes (beds w/ headboard, sinks, trays, puddles, chair, fence posts, vents,
+  security light) and denser deterministic room dressing.
+- Wall polish: brighter top caps for contrast; barred metal door frames; room SIGNS (CELLS, YARD,
+  CAFETERIA, SHOWERS, GUARD) over doorways; hazard stripes at restricted doors.
+- Exterior concrete slab + dim perimeter lights so the prison no longer floats in a black void.
+- HUD: severity-colored HEAT/RIOT chips, riot alarm vignette, fight impact rings, animated alert feed.
+
 ## v2.0.0-sim.2 — Stage Visual 1.0 (art-direction pass)
 Pure visual upgrade — the Milestone-1 sim is untouched and RenderSync stays read-only.
 - **VisualTheme.ts** — single source of truth for all colors, lighting, camera, and UI values.

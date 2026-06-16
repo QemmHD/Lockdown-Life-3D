@@ -15,6 +15,18 @@ export function buildPrison(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
   const grime = createGrimeTexture();
   const concrete = createConcreteTexture('#8a8d95', 5);
 
+  // exterior concrete slab so the prison doesn't float in a black void
+  const slab = new THREE.Mesh(
+    new THREE.PlaneGeometry(map.width * 2.6, map.height * 2.6),
+    new THREE.MeshStandardMaterial({ map: createConcreteTexture('#22252d', 16), color: THEME.exterior, roughness: 1 })
+  );
+  slab.rotation.x = -Math.PI / 2; slab.position.y = -0.08; slab.receiveShadow = true; root.add(slab);
+  // dim perimeter lights to hint at a yard beyond
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]] as const) {
+    const pl = new THREE.PointLight(0x6f86b0, 0.5, 60, 1.5);
+    pl.position.set(sx * map.width * 0.55, 6, sz * map.height * 0.55); root.add(pl);
+  }
+
   // base concrete floor
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(map.width, map.height),
@@ -38,10 +50,16 @@ export function buildPrison(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
       new THREE.MeshStandardMaterial({ map: grime, transparent: true, opacity: r.type === 'yard' ? 0.7 : 0.45, depthWrite: false }));
     dirt.rotation.x = -Math.PI / 2; dirt.position.set(cx, 0.03, cz); root.add(dirt);
 
-    // moody room light
+    // moody room lighting — multiple lights for large rooms so details stay readable
     if (rt.lightI > 0) {
-      const pl = new THREE.PointLight(rt.light, rt.lightI * 1.6, Math.max(r.w, r.h) * 1.4, 1.4);
-      pl.position.set(cx, 3.2, cz); root.add(pl);
+      const nx = Math.max(1, Math.round(r.w / 9)), nz = Math.max(1, Math.round(r.h / 9));
+      const reach = Math.max(r.w, r.h) / Math.max(nx, nz) + 5;
+      for (let ix = 0; ix < nx; ix++) for (let iz = 0; iz < nz; iz++) {
+        const lx = (r.x - map.width / 2) + ((ix + 0.5) / nx) * r.w;
+        const lz = (r.y - map.height / 2) + ((iz + 0.5) / nz) * r.h;
+        const pl = new THREE.PointLight(rt.light, rt.lightI * 1.5, reach * 1.8, 1.3);
+        pl.position.set(lx, 3.3, lz); root.add(pl);
+      }
     }
   }
 
@@ -64,8 +82,9 @@ export function buildPrison(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
   body.instanceMatrix.needsUpdate = true; cap.instanceMatrix.needsUpdate = true;
   root.add(body, cap);
 
-  // ---- doors: metal frame + bars, warning stripes for restricted rooms ----
+  // ---- doors: metal frame + bars, warning stripes + room sign ----
   const stripeTex = createWarningStripeTexture();
+  const SIGN: Record<string, string> = { cellblock: 'CELLS', cafeteria: 'CAFETERIA', shower: 'SHOWERS', guardroom: 'GUARD', yard: 'YARD' };
   for (const r of rooms) {
     if (r.door == null) continue;
     const t = map.tileXY(r.door); const w = map.toWorld(t.x, t.y);
@@ -75,10 +94,24 @@ export function buildPrison(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
         new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.9 }));
       stripe.rotation.x = -Math.PI / 2; stripe.position.set(w.x, 0.05, w.z); root.add(stripe);
     }
+    const label = SIGN[r.type];
+    if (label) { const s = makeSign(label, r.security >= 3); s.position.set(w.x, WALL_H + 0.42, w.z + (r.y < map.height / 2 ? 0.35 : -0.35)); s.rotation.y = Math.PI / 4; root.add(s); }
   }
 
   scene.add(root);
   return root;
+}
+
+function makeSign(text: string, restricted: boolean): THREE.Mesh {
+  const c = document.createElement('canvas'); c.width = 256; c.height = 72;
+  const ctx = c.getContext('2d')!;
+  ctx.fillStyle = restricted ? '#3a1310' : '#141821'; ctx.fillRect(0, 0, 256, 72);
+  ctx.strokeStyle = restricted ? '#d2281e' : '#d8a72c'; ctx.lineWidth = 6; ctx.strokeRect(4, 4, 248, 64);
+  ctx.fillStyle = restricted ? '#ff7a6a' : '#ffd97a'; ctx.font = 'bold 38px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 40);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.42), new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.35, side: THREE.DoubleSide }));
+  return m;
 }
 
 function buildDoor(root: THREE.Group, x: number, z: number, restricted: boolean) {

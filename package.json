@@ -1,7 +1,7 @@
 {
   "name": "lockdown-life-3d",
   "private": true,
-  "version": "2.0.0-sim.2",
+  "version": "2.0.0-sim.3",
   "type": "module",
   "description": "Lockdown Life 3D - a gritty 3D isometric prison-life sandbox simulator",
   "scripts": {
