@@ -10,7 +10,7 @@ import { InputManager } from './InputManager';
 import { SaveManager } from './SaveManager';
 import { HUD, PanelInfo } from '../ui/HUD';
 import { Entity } from '../ecs/world';
-import { Brain, Needs } from '../ecs/components';
+import { Brain, Needs, Position, Agent } from '../ecs/components';
 import { phaseAt } from '../data/content';
 
 const FIXED = 1 / 30;
@@ -29,6 +29,7 @@ export class Game {
   private speedIdx = 0;
   private paused = false;
   private selected: Entity | null = null;
+  private playerEntity: Entity | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.app = new ThreeApp(canvas);
@@ -41,7 +42,11 @@ export class Game {
     buildPrison(this.app.scene, this.sim.map, this.sim.rooms);
     dressRooms(this.app.scene, this.sim.map, this.sim.rooms);
     this.sync = new RenderSync(this.app.scene, this.sim.ecs);
-    this.cam.focus(0, 0);
+    // character-focused camera: clamp to the prison, follow a prisoner by default
+    this.cam.setBounds(this.sim.map.width / 2 - 5, this.sim.map.height / 2 - 5);
+    this.playerEntity = this.pickPlayer();
+    const sp = this.playerEntity != null ? this.sim.ecs.get<Position>(this.playerEntity, 'Position') : null;
+    this.cam.focus(sp ? sp.x : 0, sp ? sp.z : 0);
 
     this.hud = new HUD({
       onPause: () => { this.paused = !this.paused; this.hud.setSpeed(this.paused ? '❚❚' : SPEEDS[this.speedIdx] + '×'); },
@@ -65,11 +70,23 @@ export class Game {
   private onTap(x: number, y: number) {
     const ray = this.cam.raycaster(x, y);
     const e = this.sync.pick(ray);
-    this.select(e);
+    if (e != null) this.select(e);    // tapping empty space keeps current follow target
+  }
+  // default "player" prisoner the camera falls back to when nothing is selected
+  private pickPlayer(): Entity | null {
+    for (const e of this.sim.ecs.query('Brain')) if (this.sim.ecs.get<Brain>(e, 'Brain')!.role === 'prisoner') return e;
+    return null;
+  }
+  private followTarget(): Entity | null {
+    if (this.selected != null && this.sim.ecs.has(this.selected, 'Position')) return this.selected;
+    if (this.playerEntity != null && this.sim.ecs.has(this.playerEntity, 'Position')) return this.playerEntity;
+    return this.playerEntity = this.pickPlayer();
   }
   private select(e: Entity | null) {
     this.selected = e;
-    if (e == null) this.hud.showPanel(null); else this.refreshPanel();
+    if (e == null) { this.hud.showPanel(null); return; }
+    this.cam.recenter();              // resume smooth follow toward the newly selected inmate
+    this.refreshPanel();
   }
   private refreshPanel() {
     if (this.selected == null) return;
@@ -137,6 +154,20 @@ export class Game {
 
     this.sync.update(dt, this.selected, t);
     this.updateFx(dt);
+
+    // character-focused follow: track selected-or-player prisoner with a small movement lead
+    const ft = this.followTarget();
+    if (ft != null) {
+      const w = this.sync.worldOf(ft) ?? this.sim.ecs.get<Position>(ft, 'Position');
+      if (w) {
+        const pos = this.sim.ecs.get<Position>(ft, 'Position');
+        const moving = !!this.sim.ecs.get<Agent>(ft, 'Agent')?.path;
+        const lead = moving && pos ? 2 : 0;
+        this.cam.setFollow(w.x + (pos ? Math.sin(pos.facing) * lead : 0), w.z + (pos ? Math.cos(pos.facing) * lead : 0));
+      }
+    }
+    this.cam.tick(dt);
+
     if (this.selected != null) this.refreshPanel();
     const riot = this.riotRisk();
     this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, 0, riot);

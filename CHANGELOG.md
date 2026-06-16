@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.0.0-camera.1 — Stage Camera 1.0 (character-focused follow camera)
+The default view is now a close, Hard Time-style character camera instead of a management overview.
+- **Character Mode (default)**: smoothly follows the selected prisoner, or a chosen "player" prisoner
+  (first prisoner) when nothing is selected. Default zoom pulled way in (~9 half-height): one
+  wing/room + nearby hallway, characters ~3x larger and clearly readable.
+- **Room / Overview**: pinch or wheel out for a medium room view, or all the way out to the full-
+  prison overview (manual only — never the default). Smooth zoom across the whole range.
+- Follow uses smooth lerp with a small **movement lead** and a **framing offset** so the subject sits
+  left of centre (clear of the right-side stats panel); camera **clamped to prison bounds** to avoid
+  black void.
+- One-finger drag still pans and **suspends auto-follow for a few seconds**; selecting a prisoner
+  **recenters/resumes** follow. Tapping empty space no longer drops your follow target.
+- All in IsoCamera + VisualTheme + Game wiring; pathfinding, RenderSync (read-only), schedules,
+  guards, selection, and save/load unchanged.
+
 ## v2.0.0-layout.1 — Stage Layout 1.0 (real prison complex)
 Reworked the floorplan from one hallway-with-themed-rooms into a believable prison complex
 (sim/visuals preserved, RenderSync read-only, build passes, 0 runtime errors).

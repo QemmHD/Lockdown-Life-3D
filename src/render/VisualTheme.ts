@@ -1,6 +1,8 @@
 // Single source of truth for art direction. No magic colors scattered elsewhere.
 export const THEME = {
-  camera: { zoom: 18, min: 7, max: 40, offset: { x: 22, y: 28, z: 22 } },
+  // Character-focused by default (zoom = ortho half-height in world units).
+  // ~9 ≈ one room + nearby hallway; pinch out to 40 for the full-prison overview.
+  camera: { zoom: 9, min: 5.5, max: 40, offset: { x: 22, y: 28, z: 22 }, frameRight: 3, panHold: 4 },
 
   bg: 0x14171e,
   fog: { color: 0x14171e, near: 70, far: 170 },
