@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.0.0-sim.1 — Prison SIM engine (architecture pivot, Milestone 1)
+Reworked toward a living isometric **prison management sim** (Prison Architect/RimWorld-style:
+autonomous agents, tap-to-select, schedules) on a clean **ECS-lite engine**, keeping Vite + TS +
+Three.js. The previous player-controller game is **preserved** under `src/legacy/` (excluded from the
+build, recoverable any time).
+
+New architecture:
+- `core/` — Game loop (fixed timestep), EventBus, InputManager (drag-pan / pinch-zoom / tap),
+  SaveManager, Random (seeded).
+- `render/` — ThreeApp, IsoCamera (ortho iso, mobile pan/zoom), WorldRenderer (instanced walls +
+  room floors), CharacterFactory, RenderSync (reads sim, never writes).
+- `world/` — TileMap, A* Pathfinding, WorldGen (rooms → tilemap + doors).
+- `ecs/` — minimal entity/component store; `sim/Simulation.ts` runs needs/schedule/AI/combat systems.
+- `data/` — gangs, names, traits, schedule (JSON + Zod planned).
+- `ui/HUD.ts` — DOM overlay HUD (safe-area aware).
+
+Milestone-1 playable slice: isometric prison (cell block, cafeteria, yard, showers, guard room,
+hallway), 8 prisoners + 3 guards, daily schedule moving inmates between rooms, decaying needs, A*
+movement, emergent fights with nearest-guard response/break-up, **tap-to-select** with a live stats
+panel + selection ring, save/load (localStorage), riot-risk meter, and a mobile action bar
+(pause / speed / save / load). Simulation is decoupled from rendering.
+
 ## v1.7.0 — "Impact" (character models + game feel)
 - **Character models overhauled again**: smooth-shaded bodies with **shoulders, a tapered chest, a
   rounded head with jaw & ears**, capsule limbs and sphere hands — properly humanoid silhouettes
