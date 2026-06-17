@@ -6,7 +6,7 @@ import { findPath } from '../world/Pathfinding';
 import { Random } from '../core/Random';
 import { EventBus } from '../core/EventBus';
 import { GANGS, GANG_MAP, areEnemies, NAME_POOL, GUARD_NAMES, PRISONER_TRAITS, phaseAt } from '../data/content';
-import { ITEMS, CONTRABAND_IDS, ITEM_IDS, isContraband } from '../data/items';
+import { ITEMS, CONTRABAND_IDS, ITEM_IDS, LEGIT_IDS, isContraband } from '../data/items';
 import { JOB_BY_ROOM } from '../data/jobs';
 import { Interactable, InteractableDef, OBJ_ACTIONS, OBJ_ACTION_LABEL, isExclusive } from '../world/Interactable';
 import { LockdownState, newLockdown, LOCKDOWN_SECONDS, LOCKDOWN_COOLDOWN, lockdownLocks, sanitizeLockdown } from './LockdownSystem';
@@ -22,6 +22,7 @@ import { AttackType, CombatOutcome, ATTACKS, COMBAT_SPACING, SQUARE_UP, HITREACT
 import { Progression, Objective, newProgression, sanitizeProgression, repTier, rollObjectives, objectivesByIds, DailyStats, newDaily, dayRating } from './Progression';
 import { NewGameSetup, sanitizeSetup, defaultSetup, randomSetup, traitSimTokens, backstoryDef, diffDef } from './NewGameSetup';
 import { PlayerGangState, newGangState, sanitizeGangState, RANKS, standingLabel, rankFromState, perksForRank, rollGangGoals, INVITE_STANDING, INVITE_RESPECT, INVITE_LIFE, INVITE_CD } from './FactionSystem';
+import { EconomyState, MarketOffer, newEconomy, sanitizeEconomy, priceFor, refusesToTrade, searchRisk, jobPay, stashInfo, stashLabel, driftEconomy } from './EconomySystem';
 
 const SECONDS_PER_HOUR = 5;
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
@@ -73,6 +74,7 @@ export class Simulation {
   playerId: Entity = 0;
   private fightCd = 6;
   private suspTimer = 0;
+  private jobStreak = 0;
 
   // ---------- chaos layer (Stage 3.0): lockdown / alarm / riot / tension / escape ----------
   lockdown: LockdownState = newLockdown();
@@ -100,11 +102,12 @@ export class Simulation {
   lastSummaryDay = 0;
   pendingSummary: any = null;          // built at a day rollover; the UI shows + clears it
   setup: NewGameSetup = defaultSetup();
-  diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1 };
+  diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1, moneyScale: 1 };
   gang: PlayerGangState = newGangState();
+  economy: EconomyState = newEconomy();
 
   // lightweight playtest telemetry (?debug)
-  metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0, newGameStarted: 0, setupRandomized: 0, setupCompleted: 0, invitesGenerated: 0, invitesAccepted: 0, invitesDeclined: 0, invitesExpired: 0, rankUps: 0, gangJoined: 0, gangStandingChanges: 0, allyHelp: 0 };
+  metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0, newGameStarted: 0, setupRandomized: 0, setupCompleted: 0, invitesGenerated: 0, invitesAccepted: 0, invitesDeclined: 0, invitesExpired: 0, rankUps: 0, gangJoined: 0, gangStandingChanges: 0, allyHelp: 0, trades: 0, buys: 0, sells: 0, itemsUsed: 0, itemsStashed: 0, itemsConfiscated: 0, jobMoneyEarned: 0, marketRestocks: 0, gangOffersGenerated: 0, economyObjectivesCompleted: 0 };
 
   constructor(public bus: EventBus, seed = Math.floor(Math.random() * 1e9)) { this.rng = new Random(seed); }
 
@@ -124,8 +127,9 @@ export class Simulation {
     this.lockdown = newLockdown(); this.alarm = { active: false, timer: 0, reason: '' };
     this.heat = 0; this.riotPressure = 0; this.riotLevel = 'calm'; this.riotEventTimer = 0; this.escape = newEscape();
     this.tension = {}; this.progression = newProgression(); this.objectives = []; this.pendingSummary = null; this.lastSummaryDay = 0;
-    this.fightCd = 6; this.suspTimer = 0; this.diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1 };
+    this.fightCd = 6; this.suspTimer = 0; this.jobStreak = 0; this.diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1, moneyScale: 1 };
     this.gang = newGangState();
+    this.economy = newEconomy();
     const layout = generatePrison();
     this.map = layout.map;
     this.rooms = layout.rooms;
@@ -141,6 +145,7 @@ export class Simulation {
     for (const r of this.rooms) this.tension[r.id] = 0;
     this.daily = newDaily(ps.reputation, ps.respect, this.inv(this.playerId)!.money);
     this.objectives = rollObjectives(() => this.rng.float(), this.day);
+    this.restockMarket();
   }
 
   // apply a created character setup to the player entity + run state (Stage 3.5)
@@ -163,7 +168,7 @@ export class Simulation {
     inv.money = Math.max(0, Math.round(back.money * dd.moneyMul));
     inv.items = back.item ? [back.item] : [];
     // difficulty + chaos intensity
-    this.diff = { heatMul: dd.heatMul, searchAt: dd.searchAt, riotMul: dd.riotMul, rewardMul: dd.rewardMul, decayMul: dd.decayMul };
+    this.diff = { heatMul: dd.heatMul, searchAt: dd.searchAt, riotMul: dd.riotMul, rewardMul: dd.rewardMul, decayMul: dd.decayMul, moneyScale: dd.moneyMul };
     if (s.chaosIntensity === 'low') this.diff.riotMul *= 0.8; else if (s.chaosIntensity === 'high') this.diff.riotMul *= 1.25;
     // gang lean (standing only — joining is planned): warm to chosen gang, cool to its rivals
     let lean = s.gangLean;
@@ -611,6 +616,7 @@ export class Simulation {
   }
   private completeObjective(o: Objective) {
     o.done = true; this.progression.objectivesCompleted++; this.daily.objectivesDone++;
+    if (['buy', 'sell', 'use', 'stash', 'earn'].includes(o.kind)) this.metrics.economyObjectivesCompleted++;
     if (o.gang && this.gang.membership) { this.gang.goalsDone++; this.gangStanding(this.gang.membership, 6); }
     const ps = this.social(this.playerId); const pinv = this.inv(this.playerId);
     if (ps && o.reward.rep) ps.reputation = clamp(ps.reputation + o.reward.rep, -100, 100);
@@ -649,14 +655,18 @@ export class Simulation {
     this.lastSummaryDay = this.day;
     this.daily = newDaily(ps.reputation, ps.respect, pinv.money);
     this.objectives = rollObjectives(() => this.rng.float(), this.day);
+    if (this.gang.membership) this.objectives.push(...rollGangGoals(() => this.rng.float()));
+    this.economy.day = this.day; driftEconomy(this.economy, () => this.rng.float()); this.restockMarket(); this.economy.lastRestockDay = this.day;
   }
   private buildSummary(rep: number, resp: number, money: number) {
-    const d = this.daily;
+    const d = this.daily; const moneyChange = money - d.moneyStart;
     return {
-      day: this.day - 1, rating: dayRating(d),
-      repChange: Math.round(rep - d.repStart), respChange: Math.round(resp - d.respStart), moneyChange: money - d.moneyStart,
+      day: this.day - 1, rating: dayRating(d, moneyChange),
+      repChange: Math.round(rep - d.repStart), respChange: Math.round(resp - d.respStart), moneyChange,
       fights: d.fights, wins: d.wins, jobs: d.jobs, searches: d.searches, contraband: d.contraband,
       solitary: d.solitary, lockdowns: d.lockdowns, objectivesDone: d.objectivesDone, relImproved: d.relImproved,
+      bought: d.bought, sold: d.sold, jobEarnings: d.jobEarnings, confiscated: d.confiscated,
+      gang: this.gang.membership ? GANG_MAP[this.gang.membership].name : '', rank: this.gang.membership ? RANKS[this.gang.rank] : '',
       tier: repTier(rep, resp).name, daysSurvived: this.progression.daysSurvived
     };
   }
@@ -748,6 +758,107 @@ export class Simulation {
     this.bus.emit('alert', { type: 'info', text: `You walked away from the ${name}.` });
     return `Left the ${name}.`;
   }
+  // ---------- economy / contraband market (Stage 3.7) ----------
+  private econDiffMul() { return 2 - this.diff.moneyScale; }   // harder difficulty → pricier (set in applySetup)
+  private priceCtx(seller: Entity, buying: boolean) {
+    const ps = this.social(this.playerId)!; const ts = this.social(seller); const tb = this.brain(seller);
+    const mem = this.gang.membership;
+    return { relationship: ts?.rel ?? 0, sameGang: !!(mem && tb?.gang === mem), rival: !!(mem && tb?.gang && areEnemies(tb.gang, mem)), rank: this.gang.rank, reputation: ps.reputation, heat: this.heat, difficultyMul: this.econDiffMul(), buying };
+  }
+  itemPrice(itemId: string, seller: Entity, buying = true): number {
+    const it = ITEMS[itemId]; if (!it) return 1;
+    return priceFor(it, this.economy.demand[itemId] ?? 1, this.economy.supply[itemId] ?? 1, this.priceCtx(seller, buying)).price;
+  }
+  // data for the trade panel: seller info + each of their items priced with a reason
+  tradePanel(seller: Entity) {
+    const tb = this.brain(seller); const ts = this.social(seller); const tinv = this.inv(seller); if (!tb || !tinv) return null;
+    const ctx = this.priceCtx(seller, true);
+    const refuses = refusesToTrade(ctx);
+    const items = tinv.items.map((id) => { const it = ITEMS[id]; const pr = priceFor(it, this.economy.demand[id] ?? 1, this.economy.supply[id] ?? 1, ctx); return { id, name: it.name, icon: it.icon, price: pr.price, reason: pr.reason, risk: Math.round(it.risk * 100), contraband: it.contraband, category: it.category }; });
+    const pinv = this.inv(this.playerId)!;
+    const sellCtx = this.priceCtx(seller, false);
+    const sellable = pinv.items.map((id) => { const it = ITEMS[id]; const pr = priceFor(it, this.economy.demand[id] ?? 1, this.economy.supply[id] ?? 1, sellCtx); return { id, name: it.name, icon: it.icon, price: pr.price, contraband: it.contraband }; });
+    return { seller, name: tb.name, gang: tb.gang ? GANG_MAP[tb.gang].name : '', relation: this.relWordSim(ts?.rel ?? 0), money: pinv.money, refuses, crew: ctx.sameGang, rival: ctx.rival, items, sellable };
+  }
+  buyItem(seller: Entity, itemId: string): string {
+    const tinv = this.inv(seller), pinv = this.inv(this.playerId); const tb = this.brain(seller); if (!tinv || !pinv || !tb) return '';
+    if (refusesToTrade(this.priceCtx(seller, true))) return `${tb.name} won't deal with you.`;
+    const i = tinv.items.indexOf(itemId); if (i < 0) return 'They no longer have that.';
+    const price = this.itemPrice(itemId, seller, true);
+    if (pinv.money < price) return `You can't afford ${ITEMS[itemId].name} ($${price}).`;
+    pinv.money -= price; tinv.money += price;
+    tinv.items.splice(i, 1); pinv.items.push(itemId); const ts = this.social(seller);
+    const it = ITEMS[itemId];
+    this.economy.demand[itemId] = clamp((this.economy.demand[itemId] ?? 1) + 0.06, 0.5, 1.8);
+    this.economy.supply[itemId] = clamp((this.economy.supply[itemId] ?? 1) - 0.06, 0.4, 1.7);
+    this.economy.trades++; this.metrics.trades++; this.metrics.buys++;
+    this.daily.bought++; this.daily.moneySpent += price; this.prog('spend', price);
+    if (it.contraband) this.social(this.playerId)!.suspicion = clamp(this.social(this.playerId)!.suspicion + 4, 0, 100);
+    if (ts) ts.rel = clamp(ts.rel + 3, -100, 100); if (tb.gang) this.gangStanding(tb.gang, 1.5);
+    this.bumpObjective('buy');
+    this.bus.emit('alert', { type: 'trade', text: `Bought ${it.name} for $${price}` });
+    return `Bought ${it.name} for $${price}.`;
+  }
+  sellItem(buyer: Entity, itemId: string): string {
+    const binv = this.inv(buyer), pinv = this.inv(this.playerId); const bb = this.brain(buyer); if (!binv || !pinv || !bb) return '';
+    if (refusesToTrade(this.priceCtx(buyer, false))) return `${bb.name} won't deal with you.`;
+    const i = pinv.items.indexOf(itemId); if (i < 0) return 'You don\'t have that.';
+    const price = this.itemPrice(itemId, buyer, false);
+    if (binv.money < price) return `${bb.name} can't afford that.`;
+    pinv.items.splice(i, 1); binv.items.push(itemId); pinv.money += price; binv.money = Math.max(0, binv.money - price);
+    this.economy.trades++; this.metrics.trades++; this.metrics.sells++; this.daily.sold++; this.prog('earn', price);
+    this.bumpObjective('sell');
+    this.bus.emit('alert', { type: 'trade', text: `Sold ${ITEMS[itemId].name} for $${price}` });
+    return `Sold ${ITEMS[itemId].name} for $${price}.`;
+  }
+  // use an item from the player's inventory (food/hygiene/comfort/medical effects)
+  useItem(itemId: string): string {
+    const pinv = this.inv(this.playerId)!; const i = pinv.items.indexOf(itemId); if (i < 0) return '';
+    const it = ITEMS[itemId]; const n = this.ecs.get<Needs>(this.playerId, 'Needs')!;
+    if (it.use === 'none' || it.use === 'barter' || !it.useAmt) return `${it.name} has no use — it's for trading.`;
+    pinv.items.splice(i, 1); this.metrics.itemsUsed++; this.bumpObjective('use');
+    switch (it.use) {
+      case 'food': n.hunger = clamp01(n.hunger - it.useAmt); this.floatBy(this.playerId, 'Fed', '#e8b52e'); break;
+      case 'hygiene': n.hygiene = clamp01(n.hygiene - it.useAmt); this.floatBy(this.playerId, '+Hygiene', '#9fcad8'); break;
+      case 'comfort': n.fear = clamp01(n.fear - it.useAmt); n.anger = clamp01(n.anger - it.useAmt * 0.6); this.floatBy(this.playerId, '+Calm', '#9fe0a0'); break;
+      case 'medical': n.health = clamp01(n.health + it.useAmt); this.floatBy(this.playerId, '+Health', '#6dff9e'); break;
+    }
+    this.bus.emit('actionResult', { text: `You use the ${it.name}.` });
+    return `Used ${it.name}.`;
+  }
+  // stash a specific item in the nearest reachable stash spot with room (menu convenience)
+  stashNearest(itemId: string): string {
+    const pinv = this.inv(this.playerId)!; const i = pinv.items.indexOf(itemId); if (i < 0) return '';
+    const pp = this.pos(this.playerId)!; const start = this.map.worldToIdx(pp.x, pp.z);
+    let best: Interactable | null = null, bd = Infinity;
+    for (const o of this.objs.values()) { if (!(OBJ_ACTIONS[o.type] ?? []).includes('hide')) continue; if (o.stash.length >= stashInfo(o.type).cap) continue; const d = Math.hypot(o.ix - pp.x, o.iz - pp.z); if (d < bd) { bd = d; best = o; } }
+    if (!best) return 'No stash spot with room nearby.';
+    if (bd > 1.6 && !this.path(start, this.map.worldToIdx(best.ix, best.iz), this.playerId)) return 'Can\'t reach a stash spot.';
+    pinv.items.splice(i, 1); best.stash.push(itemId); this.metrics.itemsStashed++;
+    if (isContraband(itemId)) this.bumpObjective('stash');
+    this.social(this.playerId)!.suspicion = clamp(this.social(this.playerId)!.suspicion - 8, 0, 100);
+    return `Stashed ${ITEMS[itemId].name} in the ${best.name}.`;
+  }
+  // rebuild a handful of market offers (inmate + crew supply) for the day
+  private restockMarket() {
+    const e = this.economy; e.offers = e.offers.filter((o) => o.expiresAt > this.day);
+    const sellers = this.ecs.query('Brain', 'Inventory').filter((x) => { const b = this.brain(x)!; return b.role === 'prisoner' && !b.isPlayer && this.inv(x)!.items.length > 0; });
+    let made = 0;
+    for (let i = 0; i < 5 && e.offers.length < 8 && sellers.length; i++) {
+      const s = this.rng.pick(sellers); const inv = this.inv(s)!; if (!inv.items.length) continue;
+      const itemId = this.rng.pick(inv.items); const b = this.brain(s)!;
+      const crew = !!(this.gang.membership && b.gang === this.gang.membership);
+      e.offers.push({ id: 'o' + this.day + '_' + i, sellerId: s, gangId: b.gang ?? '', itemId, price: this.itemPrice(itemId, s, true), expiresAt: this.day + 1, risk: ITEMS[itemId].risk, sourceType: crew ? 'crew' : 'inmate' });
+      if (crew) this.metrics.gangOffersGenerated++; made++;
+    }
+    if (made) this.metrics.marketRestocks++;
+  }
+  // crew supply offers for the Gangs menu
+  crewOffers() {
+    const mem = this.gang.membership; if (!mem) return [];
+    return this.economy.offers.filter((o) => o.gangId === mem).map((o) => ({ item: ITEMS[o.itemId]?.name ?? o.itemId, icon: ITEMS[o.itemId]?.icon ?? '▪', price: o.price, seller: this.brain(o.sellerId)?.name ?? 'crew' }));
+  }
+
   // info for the inspect panel about a prisoner's gang vs the player
   gangInfoFor(e: Entity): { gang: string; gangId: string; standing: number; label: string; relation: string; inviteActive: boolean; canAsk: boolean } | null {
     const b = this.brain(e); if (!b || !b.gang || !GANG_MAP[b.gang]) return null;
@@ -774,7 +885,7 @@ export class Simulation {
       const b = this.brain(e)!; const s = this.social(e)!;
       return { id: e, name: b.name, role: b.role, gang: b.gang ? GANG_MAP[b.gang].name : '', rel: Math.round(s.rel), word: this.relWordSim(s.rel), hint: memHint(b) };
     }).sort((a, c) => c.rel - a.rel);
-    const inventory = inv.items.map((id) => ({ id, name: ITEMS[id]?.name ?? id, icon: ITEMS[id]?.icon ?? '▪', contraband: isContraband(id), value: ITEMS[id]?.value ?? 0, risk: ITEMS[id]?.risk ?? 0, concealment: ITEMS[id]?.concealment ?? 0, combat: ITEMS[id]?.combat ?? 0 }));
+    const inventory = inv.items.map((id) => { const it = ITEMS[id]; return { id, name: it?.name ?? id, icon: it?.icon ?? '▪', contraband: isContraband(id), value: it?.value ?? 0, risk: it?.risk ?? 0, concealment: it?.concealment ?? 0, combat: it?.combat ?? 0, category: it?.category ?? '', usable: !!it && it.use !== 'none' && it.use !== 'barter' && it.useAmt > 0, demand: Math.round((this.economy.demand[id] ?? 1) * 100) }; });
     const gangs = GANGS.map((g) => {
       const members = this.ecs.query('Brain', 'Social').filter((e) => this.brain(e)!.gang === g.id);
       const avg = members.length ? members.reduce((s, e) => s + this.social(e)!.rel, 0) / members.length : 0;
@@ -786,7 +897,8 @@ export class Simulation {
       rank: RANKS[g.rank], rankIndex: g.rank, perks: perksForRank(g.rank), goalsDone: g.goalsDone,
       invite: g.invite ? { gang: GANG_MAP[g.invite.gang]?.name ?? '', gangId: g.invite.gang } : null,
       standings: GANGS.map((gg) => ({ id: gg.id, name: gg.name, color: gg.color, territory: gg.territory, value: Math.round(g.standing[gg.id] ?? 0), label: standingLabel(g.standing[gg.id] ?? 0), ally: g.membership ? gg.id === g.membership : false, rival: g.membership ? areEnemies(gg.id, g.membership) : false })),
-      goals: this.objectives.filter((o) => o.gang).map((o) => ({ text: o.text, progress: o.progress, goal: o.goal, done: o.done }))
+      goals: this.objectives.filter((o) => o.gang).map((o) => ({ text: o.text, progress: o.progress, goal: o.goal, done: o.done })),
+      crewOffers: this.crewOffers()
     };
     return { stats, tier, progression: this.progression, objectives: this.objectives, relationships, inventory, gangs, faction, contrabandCarried: inv.items.some(isContraband) };
   }
@@ -1701,8 +1813,10 @@ export class Simulation {
         break;
       }
       case 'hide': {
+        const cap = stashInfo(o.type).cap;
+        if (o.stash.length >= cap) { result = `The ${o.name} is full (${cap}).`; break; }
         const id = pinv.items.find(isContraband) ?? pinv.items[0];
-        if (id) { pinv.items.splice(pinv.items.indexOf(id), 1); o.stash.push(id); ps.suspicion = clamp(ps.suspicion - 12, 0, 100); this.floatBy(pl, `Hid ${ITEMS[id]?.name ?? id}`, '#9fe0a0'); result = `You stash ${ITEMS[id]?.name ?? id} in the ${o.name}.`; this.bus.emit('alert', { type: 'trade', text: `Hid ${ITEMS[id]?.name ?? id}` }); }
+        if (id) { pinv.items.splice(pinv.items.indexOf(id), 1); o.stash.push(id); ps.suspicion = clamp(ps.suspicion - 12, 0, 100); this.floatBy(pl, `Hid ${ITEMS[id]?.name ?? id}`, '#9fe0a0'); this.metrics.itemsStashed++; if (isContraband(id)) this.bumpObjective('stash'); result = `You stash ${ITEMS[id]?.name ?? id} in the ${o.name}.`; this.bus.emit('alert', { type: 'trade', text: `Hid ${ITEMS[id]?.name ?? id}` }); }
         break;
       }
       case 'take': { const got = o.stash.splice(0); for (const it of got) pinv.items.push(it); if (got.length) { this.floatBy(pl, 'Took items', '#6dff9e'); result = `You retrieve your stash from the ${o.name}.`; } break; }
@@ -1765,9 +1879,13 @@ export class Simulation {
     if (this.playerHas('quiet')) rise *= 0.85;
     ps.suspicion = clamp(ps.suspicion + rise - dt * 0.6, 0, 100);
 
-    // a nearby guard moves in to search a suspicious player (visible)
+    // a nearby guard moves in to search a suspicious player (visible).
+    // carrying risky/unconcealed items raises the effective threshold-crossing chance.
     this.suspTimer -= dt;
-    if (this.suspTimer <= 0 && ps.suspicion > this.diff.searchAt + (this.playerHas('watchful') ? 12 : 0) && pb.state !== 'beingSearched' && pb.state !== 'fight') {
+    const carried = (this.inv(pl)?.items ?? []).map((id) => ITEMS[id]).filter(Boolean);
+    const risk = searchRisk(ps.suspicion, carried, this.heat, this.diff.heatMul - 1);
+    const threshold = this.diff.searchAt + (this.playerHas('watchful') ? 12 : 0);
+    if (this.suspTimer <= 0 && (ps.suspicion > threshold || risk > 0.6) && pb.state !== 'beingSearched' && pb.state !== 'fight') {
       this.suspTimer = 6;
       const guard = this.nearestGuard(pl, 9);
       if (guard != null) this.beginSearch(guard, pl);
@@ -1801,7 +1919,8 @@ export class Simulation {
     let found: string | null = null;
     for (const id of contraband) { if (this.rng.float() < 0.78 - ITEMS[id].concealment * 0.6) { found = id; break; } }
     if (found) {
-      inv.items.splice(inv.items.indexOf(found), 1); this.metrics.contrabandFound++; if (tb.isPlayer) this.prog('contraband');
+      inv.items.splice(inv.items.indexOf(found), 1); this.metrics.contrabandFound++;
+      if (tb.isPlayer) { this.prog('contraband'); this.metrics.itemsConfiscated++; this.daily.confiscated++; if (this.gang.membership && (ITEMS[found].category === 'crew' || ITEMS[found].risk >= 0.5)) this.gangStanding(this.gang.membership, -4); }
       this.bus.emit('alert', { type: 'search', text: `Contraband found on ${tb.name}: ${ITEMS[found].name} — confiscated!` });
       this.bubble(guard, 'Found it.', 'search', 1.4); this.floatBy(target, 'Contraband!', '#ff7a6a');
       if (tb.isPlayer) ps.reputation = clamp(ps.reputation + 4, -100, 100);
@@ -1985,17 +2104,20 @@ export class Simulation {
   }
   private playerHas(token: string) { return !!this.brain(this.playerId)?.traits.includes(token); }
   private doJob(roomType: string): string {
-    let job = JOB_BY_ROOM[roomType]; if (!job) return 'No work here.';
+    const job = JOB_BY_ROOM[roomType]; if (!job) return 'No work here.';
     const pl = this.playerId; const n = this.ecs.get<Needs>(pl, 'Needs')!; if (n.energy < job.energyCost) return 'Too tired to work.';
     n.energy = clamp01(n.energy - job.energyCost);
-    const mul = this.playerHas('worker') ? 1.5 : this.playerHas('lazy') ? 0.6 : 1;   // trait: job payout
-    const s = this.social(pl)!; s.reputation = clamp(s.reputation + job.rep, -100, 100); s.respect = clamp(s.respect + Math.round(job.respect * mul), 0, 100);
-    job = { ...job, money: Math.max(1, Math.round(job.money * mul)) };
-    this.inv(pl)!.money += job.money;
+    const trait = this.playerHas('worker') ? 1.5 : this.playerHas('lazy') ? 0.6 : 1;
+    const s = this.social(pl)!; s.reputation = clamp(s.reputation + job.rep, -100, 100); s.respect = clamp(s.respect + Math.round(job.respect * trait), 0, 100);
+    const pay = jobPay(job.money, { trait, reputation: s.reputation, rank: this.gang.rank, streak: this.jobStreak, difficultyMul: this.diff.rewardMul });
+    this.inv(pl)!.money += pay; this.jobStreak = Math.min(6, this.jobStreak + 1);
+    this.daily.jobEarnings += pay; this.metrics.jobMoneyEarned += pay;
     this.brain(pl)!.action = job.name;
-    this.prog('job'); this.prog('earn', job.money); if (job.respect > 0) this.prog('respect', job.respect);
-    this.bus.emit('alert', { type: 'job', text: `${job.verb} — +$${job.money}` });
-    return `${job.verb}. Earned $${job.money}.`;
+    this.prog('job'); this.prog('earn', pay); if (job.respect > 0) this.prog('respect', job.respect);
+    let extra = '';
+    if (this.rng.chance(0.18)) { const drop = this.rng.pick(LEGIT_IDS); this.inv(pl)!.items.push(drop); extra = ` (+${ITEMS[drop].name})`; }
+    this.bus.emit('alert', { type: 'job', text: `${job.verb} — +$${pay}${extra}` });
+    return `${job.verb}. Earned $${pay}${extra}.`;
   }
 
   // ---------- debug self-test (?debug) — read-only invariant check, never mutates live state ----------
@@ -2047,6 +2169,9 @@ export class Simulation {
       gangStateOk: !!this.gang && typeof this.gang.standing === 'object',
       rankDerivesOk: rankFromState('iron_block', 50, 40, 2) >= 2 && rankFromState('', 50, 40, 2) === 0,
       factionInSnapshot: (() => { try { return Array.isArray(this.uiSnapshot().faction.standings); } catch { return false; } })(),
+      economyOk: !!this.economy && typeof this.economy.demand === 'object',
+      priceSane: (() => { const p = this.itemPrice('snack', this.playerId, true); return typeof p === 'number' && p >= 1 && p < 999; })(),
+      offersGenerated: this.economy.offers.length,
       metrics: this.metrics
     };
   }
@@ -2074,8 +2199,8 @@ export class Simulation {
       riotPressure: this.riotPressure,
       tension: this.tension
     };
-    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang };
-    return { version: 10, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
+    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang, economy: this.economy, jobStreak: this.jobStreak };
+    return { version: 11, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -2133,8 +2258,9 @@ export class Simulation {
     this.gang = sanitizeGangState(data.gang);
     if (!data.gang) { this.gang.lean = this.setup.gangLean === 'none' ? '' : this.setup.gangLean; if (this.gang.lean) this.gang.standing[this.gang.lean] = 18; }
     if (this.gang.membership && this.brain(this.playerId)) this.brain(this.playerId)!.gang = this.gang.membership;   // re-link player to crew
+    this.economy = sanitizeEconomy(data.economy); this.jobStreak = typeof data.jobStreak === 'number' ? data.jobStreak : 0;
     const dd = diffDef(this.setup.difficulty);
-    this.diff = { heatMul: dd.heatMul, searchAt: dd.searchAt, riotMul: dd.riotMul, rewardMul: dd.rewardMul, decayMul: dd.decayMul };
+    this.diff = { heatMul: dd.heatMul, searchAt: dd.searchAt, riotMul: dd.riotMul, rewardMul: dd.rewardMul, decayMul: dd.decayMul, moneyScale: dd.moneyMul };
     if (this.setup.chaosIntensity === 'low') this.diff.riotMul *= 0.8; else if (this.setup.chaosIntensity === 'high') this.diff.riotMul *= 1.25;
 
     // reset object reservations, derive door states for the loaded phase (respects restored lockdown), then restore saved overrides

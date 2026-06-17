@@ -15,13 +15,19 @@ export interface MenuHooks {
   onAcceptInvite: () => void;
   onDeclineInvite: () => void;
   onLeaveGang: () => void;
+  onUseItem: (id: string) => void;
+  onDropItem: (id: string) => void;
+  onStashItem: (id: string) => void;
+  onBuy: (seller: number, id: string) => void;
+  onSell: (buyer: number, id: string) => void;
+  tradeData: (seller: number) => any;
   hasSave: () => boolean;
   saveInfo: () => { name: string; day: number } | null;
   snapshot: () => any;
   version: string;
 }
 
-type Mode = 'hidden' | 'title' | 'pause' | 'summary' | 'setup';
+type Mode = 'hidden' | 'title' | 'pause' | 'summary' | 'setup' | 'trade';
 const GANG_NAMES: Record<string, string> = { none: 'Unaffiliated', iron_block: 'Iron Block', yard_kings: 'Yard Kings', blue_chain: 'Blue Chain', redline_crew: 'Redline Crew', north_hall: 'North Hall', cell_rats: 'Cell Rats' };
 
 export class Menus {
@@ -31,6 +37,7 @@ export class Menus {
   private summary: any = null;
   private setup: NewGameSetup = defaultSetup();
   private step = 0;
+  private tradeSeller = 0;
   constructor(private hooks: MenuHooks) {
     this.root = document.createElement('div');
     this.root.id = 'menu-root';
@@ -41,6 +48,7 @@ export class Menus {
 
   isOpen() { return this.mode !== 'hidden'; }
   refresh() { if (this.mode !== 'hidden') this.render(); }
+  showTrade(seller: number) { this.tradeSeller = seller; this.mode = 'trade'; this.render(); }
   showSetup() { this.setup = defaultSetup(); this.setup.traits = ['tough']; this.step = 0; this.mode = 'setup'; this.render(); }
   showTitle() { this.mode = 'title'; this.render(); }
   showPause() { this.mode = 'pause'; this.render(); }
@@ -55,6 +63,12 @@ export class Menus {
     if (a === 'help-title') { document.getElementById('m-help-title')?.classList.toggle('hidden'); return; }
     if (a === 'pick') { this.pick(el.dataset.field!, el.dataset.val!); return; }
     if (a === 'setup-nav') { this.nav(el.dataset.dir!); return; }
+    if (a === 'buy') { this.hooks.onBuy(this.tradeSeller, el.dataset.id!); this.render(); return; }
+    if (a === 'sell') { this.hooks.onSell(this.tradeSeller, el.dataset.id!); this.render(); return; }
+    if (a === 'use') { this.hooks.onUseItem(el.dataset.id!); this.render(); return; }
+    if (a === 'drop') { this.hooks.onDropItem(el.dataset.id!); this.render(); return; }
+    if (a === 'stash') { this.hooks.onStashItem(el.dataset.id!); this.render(); return; }
+    if (a === 'closetrade') { this.hooks.onResume(); return; }
     if (a === 'accept-invite') { this.hooks.onAcceptInvite(); this.render(); return; }
     if (a === 'decline-invite') { this.hooks.onDeclineInvite(); this.render(); return; }
     if (a === 'leave-gang') { this.hooks.onLeaveGang(); this.render(); return; }
@@ -110,6 +124,7 @@ export class Menus {
     if (this.mode === 'title') { this.root.innerHTML = this.title(); return; }
     if (this.mode === 'summary') { this.root.innerHTML = this.summaryCard(this.summary); return; }
     if (this.mode === 'setup') { this.root.innerHTML = this.setupCard(); return; }
+    if (this.mode === 'trade') { this.root.innerHTML = this.tradeCard(); return; }
     this.root.innerHTML = this.pause();
   }
 
@@ -225,12 +240,13 @@ export class Menus {
   }
   private invTab(s: any): string {
     const warn = s.contrabandCarried ? `<div class="m-warn">⚠ Carrying contraband — guards may search you.</div>` : '';
-    if (!s.inventory.length) return `${warn}<div class="m-note">Your pockets are empty.</div>`;
-    const rows = s.inventory.map((it: any) => `<div class="m-item ${it.contraband ? 'contra' : ''}">
-      <span class="m-item-n">${it.icon} ${it.name}${it.contraband ? ' ⚠' : ''}</span>
-      <span class="m-item-s">$${it.value} · risk ${Math.round(it.risk * 100)}% · hide ${Math.round(it.concealment * 100)}%${it.combat ? ` · ⚔${it.combat}` : ''}</span>
+    if (!s.inventory.length) return `${warn}<div class="m-note">Your pockets are empty. Buy items by trading with inmates.</div>`;
+    const rows = s.inventory.map((it: any) => `<div class="m-inv ${it.contraband ? 'contra' : ''}">
+      <div class="m-inv-top"><span class="m-item-n">${it.icon} ${it.name}${it.contraband ? ' ⚠' : ''}</span>
+        <span class="m-inv-act">${it.usable ? `<button class="su-card on" data-m="use" data-id="${it.id}">Use</button>` : ''}${it.contraband ? `<button class="su-card" data-m="stash" data-id="${it.id}">Stash</button>` : ''}<button class="su-card" data-m="drop" data-id="${it.id}">Drop</button></span></div>
+      <div class="m-item-s">value $${it.value} · risk ${Math.round(it.risk * 100)}% · hide ${Math.round(it.concealment * 100)}% · demand ${it.demand}%${it.combat ? ` · ⚔${it.combat}` : ''} · ${it.category}</div>
     </div>`).join('');
-    return `<div class="m-h">Inventory</div>${warn}${rows}<div class="m-sub">Tap an item in the in-game panel to drop it; hide contraband in a bed/locker/shelf.</div>`;
+    return `<div class="m-h">Inventory</div>${warn}${rows}<div class="m-sub">Use items to manage needs; stash contraband near a bed/locker/shelf; sell via Trade.</div>`;
   }
   private gangTab(s: any): string {
     const f = s.faction;
@@ -244,13 +260,14 @@ export class Menus {
     } else {
       head = `<div class="m-h">Gangs</div><div class="m-sub">Build standing with a crew (talk, favours, time in turf) until they invite you in.</div>`;
     }
+    const offers = f.crewOffers && f.crewOffers.length ? `<div class="m-label2">Crew supply</div>${f.crewOffers.map((o: any) => `<div class="m-item"><span class="m-item-n">${o.icon} ${o.item}</span><span class="m-item-s">${o.seller} · $${o.price}</span></div>`).join('')}` : '';
     const goals = f.goals && f.goals.length ? `<div class="m-label2">Crew goals</div>${f.goals.map((o: any) => `<div class="m-obj ${o.done ? 'done' : ''}"><span class="m-obj-c">${o.done ? '✓' : '○'}</span><span class="m-obj-t">${o.text}${o.goal > 1 ? ` <i>(${o.progress}/${o.goal})</i>` : ''}</span></div>`).join('')}` : '';
     const rows = f.standings.map((g: any) => `<div class="m-gang">
       <span class="m-gang-d" style="color:#${(g.color >>> 0).toString(16).padStart(6, '0')}">●</span>
       <span class="m-gang-n">${g.name}${g.ally ? ' <i>· your crew</i>' : g.rival ? ' <i>· rival</i>' : ''} <i>· ${g.territory}</i></span>
       <span class="m-gang-s">${g.label} (${g.value})</span>
     </div>`).join('');
-    return `${head}<div class="m-label2">Standing</div>${rows}${goals}`;
+    return `${head}<div class="m-label2">Standing</div>${rows}${offers}${goals}`;
   }
   private helpBody(): string {
     return `<div class="m-help-grid">
@@ -337,6 +354,25 @@ export class Menus {
   }
   private esc(t: string) { return (t || '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c] || c)); }
 
+  private tradeCard(): string {
+    const t = this.hooks.tradeData(this.tradeSeller);
+    if (!t) return '';
+    if (t.refuses) return `<div class="m-overlay"><div class="m-card narrow"><div class="m-head"><b>${t.name}</b><button class="m-x" data-m="closetrade">✕</button></div><div class="m-body col"><div class="m-warn">${t.name} (${t.gang || 'no crew'}) won't deal with you.</div></div></div></div>`;
+    const tag = t.crew ? '<span class="m-pill">crew price</span>' : t.rival ? '<span class="m-pill" style="background:#c0392b">rival markup</span>' : '';
+    const buy = t.items.length ? t.items.map((it: any) => `<div class="m-item ${it.contraband ? 'contra' : ''}">
+      <span class="m-item-n">${it.icon} ${it.name}${it.contraband ? ' ⚠' : ''}<br><span class="m-item-s">${it.reason}${it.risk ? ` · risk ${it.risk}%` : ''}</span></span>
+      <button class="su-card on" data-m="buy" data-id="${it.id}">Buy $${it.price}</button></div>`).join('') : '<div class="m-note">They have nothing to sell.</div>';
+    const sell = t.sellable.length ? t.sellable.map((it: any) => `<div class="m-item">
+      <span class="m-item-n">${it.icon} ${it.name}</span><button class="su-card" data-m="sell" data-id="${it.id}">Sell $${it.price}</button></div>`).join('') : '<div class="m-note">Nothing of yours to sell.</div>';
+    return `<div class="m-overlay"><div class="m-card">
+      <div class="m-head"><b>Trade — ${t.name} ${tag}</b><button class="m-x" data-m="closetrade">✕</button></div>
+      <div class="m-body col">
+        <div class="m-sub">${t.gang ? t.gang + ' · ' : ''}${t.relation} · your money: <b>$${t.money}</b></div>
+        <div class="m-label2">Buy from ${t.name}</div>${buy}
+        <div class="m-label2">Sell to ${t.name}</div>${sell}
+      </div></div></div>`;
+  }
+
   private summaryCard(d: any): string {
     if (!d) return '';
     const sign = (n: number) => (n > 0 ? `+${n}` : `${n}`);
@@ -346,6 +382,10 @@ export class Menus {
         <div class="m-kv"><span>Reputation</span><b>${sign(d.repChange)}</b></div>
         <div class="m-kv"><span>Respect</span><b>${sign(d.respChange)}</b></div>
         <div class="m-kv"><span>Money</span><b>${sign(d.moneyChange)}</b></div>
+        <div class="m-kv"><span>Bought / sold</span><b>${d.bought ?? 0} / ${d.sold ?? 0}</b></div>
+        <div class="m-kv"><span>Job earnings</span><b>$${d.jobEarnings ?? 0}</b></div>
+        ${d.confiscated ? `<div class="m-kv"><span>Confiscated</span><b>${d.confiscated}</b></div>` : ''}
+        ${d.gang ? `<div class="m-kv"><span>Crew</span><b>${d.gang} (${d.rank})</b></div>` : ''}
         <div class="m-kv"><span>Objectives done</span><b>${d.objectivesDone}</b></div>
         <div class="m-kv"><span>Fights (won)</span><b>${d.fights} (${d.wins})</b></div>
         <div class="m-kv"><span>Jobs</span><b>${d.jobs}</b></div>
