@@ -120,9 +120,10 @@ export class IsoCamera {
       // in character mode, a horizontal drag rotates the fixed viewing direction (user-initiated only)
       this.charAngle -= screenDx * 0.004;
     } else {
+      // direct manipulation: drag the world with your finger (content follows the finger)
       const scale = this.zoom / 320;
-      this.target.addScaledVector(this.right, -screenDx * scale);
-      this.target.addScaledVector(this.fwd, -screenDy * scale);
+      this.target.addScaledVector(this.right, screenDx * scale);
+      this.target.addScaledVector(this.fwd, screenDy * scale);
       this.clamp(); this.apply();
     }
   }
