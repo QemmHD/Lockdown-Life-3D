@@ -20,7 +20,7 @@ export const THEME = {
   // per room-type look: floor tint, accent, and a moody light color
   rooms: {
     hallway:   { floor: 0x474b54, accent: 0x33363d, light: 0xbcccea, lightI: 0.75 },
-    cellblock: { floor: 0x565a63, accent: 0x6a6e78, light: 0x9fb6dc, lightI: 0.9 },
+    cellblock: { floor: 0x565a63, accent: 0x6a6e78, light: 0xb4c6e6, lightI: 1.15 },
     cafeteria: { floor: 0x7a6850, accent: 0x8a7350, light: 0xffd9a0, lightI: 1.15 },
     shower:    { floor: 0x52707c, accent: 0x6f97a4, light: 0xaed4e6, lightI: 0.95 },
     guardroom: { floor: 0x44505f, accent: 0x556074, light: 0x8fa6d0, lightI: 0.9 },

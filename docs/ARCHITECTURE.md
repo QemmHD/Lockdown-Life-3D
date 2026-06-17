@@ -32,7 +32,18 @@ refactored as it grows. This describes the **current ECS-lite game** (`src/` exc
    the right entities (guards pass everything; prisoners are stopped by locked/restricted). All
    NPC/guard/player routing goes through `Simulation.path(...)`.
 
-7. **Save/load owns persistence.** `Simulation.serialize()` snapshots state (versioned, currently v9 before this stage);
+6b. **Two-layer collision (Stage 3.8).** `TileMap` carries `walkable` (1 = floor, 0 = structural
+   concrete wall, rendered by `wallTiles`) **and** `blocked` (1 = a prop solid — cell bars, bunks,
+   counter, desks, shelves, lockers, gym gear). A tile is enterable only if `map.pathable(idx)`
+   (`walkable && !blocked`); the start tile is always allowed so nothing gets stuck. `WorldGen`
+   carves cell walls + bars into the map (survives `generate()`); furniture footprints live on the
+   `InteractableDef` and are re-applied to `blocked` by `Simulation.setInteractables` on every
+   generate/new-run (so collision survives `startNewRun`). Small decals never block, and every
+   blocking prop keeps a reachable interaction tile. `?debug`'s `selfTest()` asserts
+   `noBlockedOnPath`, `roomsReachable`, `anchorsReachable`, `noEntityInWall`, `cellsOk`,
+   `diningClearsCounter`.
+
+7. **Save/load owns persistence.** `Simulation.serialize()` snapshots state (versioned, currently v12);
    `Simulation.hydrate()` restores it defensively (defaults for missing/garbage fields, transient
    action/reservation state reset, invalid object ids ignored, bad data → keep a fresh world).
    `core/SaveManager.ts` is just the `localStorage` read/write.
@@ -74,7 +85,7 @@ input (tap/drag/pinch)
 | Factions | `sim/FactionSystem.ts` | pure gang state/ranks/standing-labels/invite thresholds/crew-goal templates/perks; the Simulation owns one `PlayerGangState` and drives invites/joining/ranks |
 | Economy | `sim/EconomySystem.ts` | pure dynamic pricing / search-risk / job-payout / stash-capacity / demand-drift; the Simulation owns one `EconomyState` and runs trade/use/stash/restock |
 | Menus | `ui/Menus.ts` | title screen, **new-game setup flow**, tabbed pause overlay (Stats/People/Inventory/Objectives/Gangs/Help), and daily-summary modal — reads `Simulation.uiSnapshot()`, never writes |
-| World | `world/TileMap.ts`, `Pathfinding.ts`, `WorldGen.ts`, `Interactable.ts` | grid, A*, floorplan, object model |
+| World | `world/TileMap.ts`, `Pathfinding.ts`, `WorldGen.ts`, `Interactable.ts` | grid (walkable + blocked), A*, floorplan + cell carving, object model + footprints |
 | Render | `render/ThreeApp.ts`, `IsoCamera.ts`, `WorldRenderer.ts`, `PropRenderer.ts`, `CharacterFactory.ts`, `RenderSync.ts`, `Feedback.ts`, `VisualTheme.ts`, `textures/` | rendering (read-only) |
 | UI | `ui/HUD.ts` | DOM overlay |
 | Data | `data/content.ts`, `items.ts`, `jobs.ts` | gangs/names/traits/schedule, items, jobs |
@@ -111,6 +122,14 @@ cluster/separation geometry so crowds read as loose groups. All of it is pure he
 integration; transient AI (intent, memory refs) resets on load. Still **partial**: no full GOAP
 planner, no formal squad tactics, group clustering is geometric (not negotiated), and guard routes are
 fixed tables rather than learned/dynamic.
+
+**World / visual / collision (Stage 3.8).** No new sim systems — a render/world/collision pass.
+`WorldGen.carveCellBlock` builds real enclosed cells; `TileMap` gains a `blocked` grid and
+`pathable()` so props are solid; `Interactable` defs carry a tile `footprint` applied by
+`setInteractables`; `Game` draws per-cell barred gates + `?debug` overlays; the cafeteria counter is a
+real barrier. Save **v12** with a safe-spawn migration. Still **partial**: the floorplan is hand-
+authored (not procedurally generated), cells share one stand tile, and cell gates are visual (the
+block door owns lockdown corralling).
 
 **Economy (Stage 3.7).** `EconomySystem.ts` is pure (dynamic `priceFor`, `searchRisk`, `jobPay`,
 `stashInfo`, demand drift). The Simulation owns one `EconomyState` (demand/supply/offers) and runs

@@ -1,16 +1,50 @@
 # Changelog
 
 > **Current State (read me first).** The active game is the **rebuilt ECS-lite simulation** —
-> all `v2.x` entries below. Stack: **Vite + TypeScript + Three.js**, DOM/CSS HUD, `localStorage`
-> saves (v4), procedural low-poly geometry. Implemented: player prisoner, tap-to-move (A*),
-> follow camera, daily schedule, autonomous prisoners/guards, basic fights, gangs v1,
-> reputation/relationships, inventory/contraband v1, search/discipline/solitary v1, jobs v1,
-> interactable props, doors/gates with schedule-driven locking + NPC schedule anchors, object
-> reservations, save/load (v5), and a **chaos layer** (lockdowns, alarm, riot pressure, area tension,
-> guard checkpoints, abstract escape attempts). **Not yet built:** audio, character creation,
-> Capacitor/IPA, deep riot warfare. The `v1.x` entries are **archived legacy history** for the original
+> all `v2.x`+ entries below. Stack: **Vite + TypeScript + Three.js**, DOM/CSS HUD, `localStorage`
+> saves (v12), procedural low-poly geometry. Implemented: player prisoner, tap-to-move (A*),
+> follow camera, daily schedule, autonomous prisoners/guards, basic fights, gangs/factions,
+> reputation/relationships, inventory/contraband + dynamic economy, search/discipline/solitary, jobs,
+> a **believable floorplan with real individual cells + prop collision** (no walking through walls/
+> bars/counters/beds), interactable props, doors/gates with schedule-driven locking + NPC schedule
+> anchors, object reservations, character creation, save/load (v12), and a **chaos layer** (lockdowns,
+> alarm, riot pressure, area tension, guard checkpoints, abstract escape attempts). **Not yet built:**
+> audio, Capacitor/IPA, deep riot warfare. The `v1.x` entries are **archived legacy history** for the original
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
+
+## v3.8.0-world — Stage World / Visual / Layout Overhaul 3.8
+A pass over the **world/render/collision** layer (no new sim systems): a believable floorplan with
+**real individual cells**, a **prop-collision model** so characters can no longer walk through walls,
+bars, counters, beds, or desks, a cleaner cafeteria, stronger art direction, and a collision audit.
+Sim authoritative, RenderSync read-only, build + typecheck pass, 0 runtime errors. All `?debug`
+collision invariants PASS.
+- **Prop-collision model** (`world/TileMap.ts`): new `blocked` grid distinct from `walkable`.
+  `walkable=0` = structural concrete walls (rendered by `wallTiles`); `blocked=1` = prop solids
+  (cell bars, bunks, counter, desks, shelves, lockers, gym gear) — not pathable, but **not** drawn as
+  concrete. `pathable()`/`isPathable()` gate all movement; `Pathfinding.findPath` routes around both
+  (start tile always allowed so nothing gets stuck). Small decals (trash, trays, puddles, signs,
+  benches, dirt) never block.
+- **Real individual cells** (`world/WorldGen.ts` `carveCellBlock` + `Cell`): each housing wing is a
+  2-tile cell-block corridor lined with enclosed cells — concrete side/back walls, a barred front with
+  a **1-tile door gap**, a bunk + toilet + sink, and a guaranteed reachable stand tile. 24 cells total.
+- **Barred cell gates** (`core/Game.buildCellGates`): every cell gets a visual sliding barred gate at
+  its gap that opens/closes/locks with its block's door state (read-only view of the sim).
+- **Cafeteria fix**: dining tables on the entry side; the **serving counter is a real barrier**
+  (blocked tiles) with the kitchen behind it reachable only through a staff gap — a prisoner pathing
+  from the door to a table provably never crosses the counter.
+- **Furniture footprints**: blocking props declare a tile `footprint` (`world/Interactable.ts`);
+  `Simulation.setInteractables` re-applies cell bars + footprints to the collision grid on every
+  generate/new-run, and nudges any entity caught on a freshly-blocked tile.
+- **Art direction**: brighter cell lighting, shorter cell-block interior partitions so the iso camera
+  sees into cells while the outer shell stays tall, richer bunk/sink/counter dressing, layered
+  serving counter with warming wells. Procedural CanvasTextures + instancing only — no external assets.
+- **Collision audit** (`?debug`): `selfTest()` adds `cellsOk`, `blockedTiles`, `noEntityInWall`,
+  `roomsReachable`, `anchorsReachable`, `noBlockedOnPath`, `diningClearsCounter`. New overlays draw
+  blocked tiles (red), door/interaction anchors, and the live player path.
+- **Save/load v12**: bumped for the new layout/object ids; **safe v11→v4 migration** snaps any saved
+  entity that now sits inside a wall/cell-bar to the nearest pathable tile on load (no entity ever
+  loads inside a wall).
 
 ## v3.7.0-economy — Stage Economy / Contraband Depth 3.7
 Turns inventory/money/contraband/jobs/trading into a real loop. Sim authoritative, RenderSync

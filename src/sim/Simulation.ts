@@ -1,7 +1,7 @@
 import { ECS, Entity } from '../ecs/world';
 import { Position, Render, Agent, Needs, Brain, Social, Inventory } from '../ecs/components';
 import { TileMap } from '../world/TileMap';
-import { generatePrison, randomTileInRoom, Room } from '../world/WorldGen';
+import { generatePrison, randomTileInRoom, Room, Cell } from '../world/WorldGen';
 import { findPath } from '../world/Pathfinding';
 import { Random } from '../core/Random';
 import { EventBus } from '../core/EventBus';
@@ -67,6 +67,7 @@ export class Simulation {
   ecs = new ECS();
   map!: TileMap;
   rooms: Room[] = [];
+  cells: Cell[] = [];
   rng: Random;
   day = 1;
   hour = 6;
@@ -133,6 +134,7 @@ export class Simulation {
     const layout = generatePrison();
     this.map = layout.map;
     this.rooms = layout.rooms;
+    this.cells = layout.cells;
     for (let i = 0; i < 14; i++) this.spawnPrisoner();
     for (let i = 0; i < 4; i++) this.spawnGuard(i);
     // promote the first prisoner to the directly-controlled player
@@ -190,6 +192,17 @@ export class Simulation {
   player(): Entity { return this.playerId; }
   dropItem(id: string): string { const inv = this.inv(this.playerId); if (!inv) return ''; const i = inv.items.indexOf(id); if (i >= 0) { inv.items.splice(i, 1); return `Dropped ${ITEMS[id]?.name ?? id}.`; } return ''; }
   currentRoomName(e: Entity): string { const p = this.pos(e); if (!p) return ''; const k = this.map.worldToIdx(p.x, p.z); const ri = k >= 0 ? this.map.room[k] : -1; return ri >= 0 ? this.rooms[ri].name : 'Hallway'; }
+
+  // nearest walkable, prop-free tile to a world point (BFS ring) — used for safe-spawn on load
+  private nearestPathable(wx: number, wz: number): { x: number; z: number } | null {
+    const t = this.map.worldToTile(wx, wz);
+    for (let r = 0; r <= 12; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const nx = t.x + dx, ny = t.y + dy;
+      if (this.map.isPathable(nx, ny)) return this.map.toWorld(nx, ny);
+    }
+    return null;
+  }
 
   // ---------- spawning ----------
   private spawnAtType(type: string) {
@@ -1483,10 +1496,18 @@ export class Simulation {
   private doorTiles = new Map<number, string>();   // grid tile idx -> door/gate object id
   setInteractables(defs: InteractableDef[]) {
     this.objs.clear(); this.doorTiles.clear();
+    // re-apply prop footprints to the collision grid (cells/walls are already in map.walkable from
+    // generate(); this adds furniture + counters as blocked tiles, and is safe to run after a fresh
+    // generate() on a new run). Door/gate tiles never block — they are the gap.
+    for (let i = 0; i < this.map.blocked.length; i++) this.map.blocked[i] = 0;
+    for (const c of this.cells) for (const k of c.gateTiles) this.map.blocked[k] = 1;   // cell-front bars
     for (const d of defs) {
       this.objs.set(d.id, { ...d, reservedBy: 0, reservedUntil: 0, open: !d.restricted, locked: false, stash: [] });
       if (d.type === 'door' || d.type === 'gate') { const k = this.map.worldToIdx(d.x, d.z); if (k >= 0) this.doorTiles.set(k, d.id); }
+      else if (d.footprint) for (const k of d.footprint) { if (k >= 0 && k < this.map.blocked.length) this.map.blocked[k] = 1; }
     }
+    // entities spawn before furniture footprints exist — nudge any caught on a now-blocked tile
+    for (const e of this.ecs.query('Position')) { const p = this.pos(e)!; const k = this.map.worldToIdx(p.x, p.z); if (k < 0 || !this.map.pathable(k)) { const s = this.nearestPathable(p.x, p.z); if (s) { p.x = s.x; p.z = s.z; } } }
     this.applyDoorSchedule();
   }
   getObj(id: string) { return this.objs.get(id); }
@@ -2149,12 +2170,53 @@ export class Simulation {
       if (b.role === 'guard') { guards++; if (b.guardRole) guardsWithRole++; }
       else { prisoners++; if (b.intent && b.mem) prisonersWithIntent++; }
     }
+    // ---- collision / layout invariants (Stage 3.8) ----
+    let blockedTiles = 0; for (let i = 0; i < this.map.blocked.length; i++) if (this.map.blocked[i]) blockedTiles++;
+    // no entity is standing inside a wall or a prop solid
+    let noEntityInWall = true;
+    for (const e of this.ecs.query('Position')) { const p = this.pos(e)!; const k = this.map.worldToIdx(p.x, p.z); if (k < 0 || !this.map.pathable(k)) { noEntityInWall = false; break; } }
+    // a guard (passes every door) can reach every room and every interaction anchor — proves the
+    // geometry is connected and no prop sealed off its own use tile
+    const guard2 = this.ecs.query('Brain', 'Position').find((e) => this.brain(e)!.role === 'guard');
+    const gstart = guard2 != null ? this.map.worldToIdx(this.pos(guard2)!.x, this.pos(guard2)!.z) : -1;
+    let roomsReachable = gstart >= 0, anchorsReachable = gstart >= 0, noBlockedOnPath = true;
+    const gpass = guard2 != null ? this.passFor(guard2) : undefined;
+    const stepsClean = (path: number[] | null) => { if (!path) return; for (const k of path) if (!this.map.pathable(k)) noBlockedOnPath = false; };
+    if (gstart >= 0) {
+      for (const r of this.rooms) {
+        let kk = -1; for (let yy = r.y; yy < r.y + r.h && kk < 0; yy++) for (let xx = r.x; xx < r.x + r.w && kk < 0; xx++) if (this.map.isPathable(xx, yy)) kk = this.map.idx(xx, yy);
+        const path = kk >= 0 ? findPath(this.map, gstart, kk, gpass) : null;
+        if (kk < 0 || !path) roomsReachable = false; else stepsClean(path);
+      }
+      for (const o of this.objs.values()) {
+        if (o.type === 'door' || o.type === 'gate') continue;
+        const k = this.map.worldToIdx(o.ix, o.iz);
+        const path = (k >= 0 && this.map.pathable(k)) ? findPath(this.map, gstart, k, gpass) : null;
+        if (!path) anchorsReachable = false; else stepsClean(path);
+      }
+    }
+    // every individual cell is furnished with a reachable stand tile
+    let cellsOk = this.cells.length > 0;
+    for (const c of this.cells) if (!this.map.pathable(c.stand) || !this.map.pathable(c.doorTile)) cellsOk = false;
+    // a prisoner walking from the cafeteria door to a dining table never crosses the serving counter
+    let diningClearsCounter = true;
+    const caf = this.rooms.find((r) => r.type === 'cafeteria');
+    const counterObj = [...this.objs.values()].find((o) => o.type === 'counter');
+    const tableObj = [...this.objs.values()].find((o) => o.type === 'table' && caf && o.room === caf.id);
+    if (caf && caf.door != null && counterObj && tableObj) {
+      const path = findPath(this.map, caf.door, this.map.worldToIdx(tableObj.ix, tableObj.iz)) ?? [];
+      const cset = new Set(counterObj.footprint ?? []);
+      diningClearsCounter = !path.some((k) => cset.has(k));
+    }
     return {
       playerOk: this.brain(this.playerId)?.isPlayer === true,
       mapOk: !!this.map && this.map.width > 0,
       interactables: this.objs.size,
       hasBed: has('bed'), hasSink: has('sink'), hasTable: has('table'), hasDoor: has('door'), hasGate: has('gate'),
       doorsMapped, npcPathOk, saveOk,
+      // collision / layout (Stage 3.8)
+      cells: this.cells.length, cellsOk, blockedTiles, noEntityInWall,
+      roomsReachable, anchorsReachable, noBlockedOnPath, diningClearsCounter,
       checkpoints: this.checkpoints.length, guardToCheckpoint,
       riotPressureValid: typeof this.riotPressure === 'number' && isFinite(this.riotPressure),
       riotLevel: this.riotLevel, lockdownSane,
@@ -2200,7 +2262,7 @@ export class Simulation {
       tension: this.tension
     };
     const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang, economy: this.economy, jobStreak: this.jobStreak };
-    return { version: 11, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
+    return { version: 12, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -2231,6 +2293,9 @@ export class Simulation {
       const pb = this.brain(this.playerId);
       if (pb) { pb.isPlayer = true; pb.name = 'You'; pb.action = 'Idle'; const r = this.ecs.get<Render>(this.playerId, 'Render'); if (r) r.color = 0xef7a22; }
     }
+    // safe-spawn migration (v12): the 3.8 floorplan added cell walls + prop solids, so an older
+    // save's entity may now sit inside a wall/cell-bar — nudge each to the nearest pathable tile.
+    for (const e of this.ecs.query('Position')) { const p = this.pos(e)!; const k = this.map.worldToIdx(p.x, p.z); if (k < 0 || !this.map.pathable(k)) { const s = this.nearestPathable(p.x, p.z); if (s) { p.x = s.x; p.z = s.z; } } }
     // restore chaos state defensively (escape is always reset to a stable state on load)
     this.lockdown = sanitizeLockdown(data.lockdown);
     this.alarm = { active: !!data.alarm?.active, timer: num(data.alarm?.timer, 0), reason: typeof data.alarm?.reason === 'string' ? data.alarm.reason : '' };
