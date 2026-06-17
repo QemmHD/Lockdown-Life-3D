@@ -43,6 +43,7 @@ export class Game {
   private interactableDefs: any[] = [];
   private panelDirty = true;     // request an immediate panel refresh
   private panelTimer = 0;        // throttle background refreshes to ~6.7/s (not every frame)
+  private combatOn = false;      // dedicated combat HUD cluster is currently shown
 
   constructor(canvas: HTMLCanvasElement) {
     this.app = new ThreeApp(canvas);
@@ -83,7 +84,8 @@ export class Game {
       hasSave: () => SaveManager.has(),
       onAction: (key) => this.doAction(key),
       onItem: (key) => { const r = this.sim.dropItem(key); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; this.refreshPanel(); },
-      onToggleCam: () => { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); }
+      onToggleCam: () => { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); },
+      onCombat: (key) => { const r = this.sim.requestCombatAction(key); if (r) this.hud.alert(r, 'fight'); }
     });
     this.select(this.playerEntity);   // panel shows the player by default
 
@@ -109,7 +111,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v3.8.0-world'
+      version: 'v3.9.0-combat'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -117,7 +119,7 @@ export class Game {
     this.bus.on('zoom', ({ factor }) => this.cam.zoomBy(factor));
     this.bus.on('tap', ({ x, y }) => this.onTap(x, y));
     this.bus.on('alert', ({ text, type }) => this.hud.alert(text, type));
-    this.bus.on('impact', ({ x, z }) => this.addImpact(x, z));
+    this.bus.on('impact', ({ x, z }) => { this.addImpact(x, z); if (this.combatOn) this.cam.shake(0.45); });
     this.bus.on('float', ({ x, z, text, color }) => this.feedback.float(x, z, text, color));
     this.bus.on('bubble', ({ e, text, kind, dur }) => this.feedback.bubble(e, text, kind, dur));
     this.bus.on('actionResult', ({ text }) => this.hud.alert(text, 'info'));
@@ -509,25 +511,37 @@ export class Game {
     this.feedback.update(dt, this.cam.activeCamera, (e) => this.sync.worldOf(e));
     this.hud.setAction(this.sim.actionLabel(), this.sim.actionProgress());
 
-    // character-focused follow: always track the player prisoner with a small movement lead
+    // character-focused follow: track the player; during combat, frame the midpoint of both fighters
+    const inCombat = this.sim.combatActive();
     const ft = this.followTarget();
     const w = this.sync.worldOf(ft) ?? this.sim.ecs.get<Position>(ft, 'Position');
     if (w) {
       const pos = this.sim.ecs.get<Position>(ft, 'Position');
-      const moving = !!this.sim.ecs.get<Agent>(ft, 'Agent')?.path;
-      const lead = moving && pos ? 2 : 0;
-      this.cam.setFollow(w.x + (pos ? Math.sin(pos.facing) * lead : 0), w.z + (pos ? Math.cos(pos.facing) * lead : 0), pos?.facing);
+      if (inCombat) {
+        const foe = this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')!.foe!;
+        const fw = this.sync.worldOf(foe) ?? this.sim.ecs.get<Position>(foe, 'Position');
+        const mx = fw ? (w.x + fw.x) / 2 : w.x, mz = fw ? (w.z + fw.z) / 2 : w.z;
+        this.cam.setFollow(mx, mz, pos?.facing);     // keep both visible, no movement lead during a fight
+      } else {
+        const moving = !!this.sim.ecs.get<Agent>(ft, 'Agent')?.path;
+        const lead = moving && pos ? 2 : 0;
+        this.cam.setFollow(w.x + (pos ? Math.sin(pos.facing) * lead : 0), w.z + (pos ? Math.cos(pos.facing) * lead : 0), pos?.facing);
+      }
     }
     this.cam.tick(dt);
 
-    // while the player is fighting, force the combat panel (so combat buttons are reachable)
-    if (!this.selectedObj && this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.state === 'fight' && this.selected !== this.playerEntity) { this.selected = this.playerEntity; this.panelDirty = true; }
-
-    // panel: refresh on demand (selection/action/inventory) or a few times a second — never every frame
-    this.panelTimer -= dt;
-    if (this.panelDirty || this.panelTimer <= 0) {
-      if (this.selectedObj) this.refreshObjectPanel(); else this.refreshPanel();
-      this.panelDirty = false; this.panelTimer = 0.15;
+    // combat HUD: a dedicated control cluster replaces the side panel while the player is fighting
+    if (inCombat) {
+      if (!this.combatOn) { this.combatOn = true; this.hud.showPanel(null); this.hud.showCombat(this.sim.playerCombatActions()); this.selected = this.playerEntity; this.selectedObj = null; }
+      this.hud.updateCombat(this.sim.combatSnapshot());
+    } else {
+      if (this.combatOn) { this.combatOn = false; this.hud.hideCombat(); this.panelDirty = true; }
+      // panel: refresh on demand (selection/action/inventory) or a few times a second — never every frame
+      this.panelTimer -= dt;
+      if (this.panelDirty || this.panelTimer <= 0) {
+        if (this.selectedObj) this.refreshObjectPanel(); else this.refreshPanel();
+        this.panelDirty = false; this.panelTimer = 0.15;
+      }
     }
     // chaos-driven HUD: eased heat + riot pressure, lockdown chip + chaos banner
     const riot = this.sim.riotPressure;

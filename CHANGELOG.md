@@ -13,6 +13,31 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v3.9.0-combat — Stage Combat/HUD 3.9 — Manual, Player-Controlled Fights
+Replaces the old "tap Fight and watch the sim auto-resolve it" combat with an interactive, player-driven
+combat mode + a dedicated combat HUD. Sim authoritative, RenderSync read-only, build + typecheck pass,
+0 runtime errors. No gore / no real-world fighting detail — abstract game combat.
+- **Manual combat mode**: the player is **never auto-driven**. Entering a fight puts the player in a
+  controllable stance (lock-on facing for aim/read); the player only acts on button press. Idle does
+  not auto-win (verified: no auto-swing, foe takes no damage while you do nothing) — but the NPC AI
+  still fights you.
+- **Movement matters**: tap-to-move works *during* combat and no longer ends the fight; the foe (NPC)
+  closes distance via AI. Attacks only land **in range** — an out-of-range swing whiffs (verified).
+  Knockback/backstep stay path-safe (no moving through walls/props).
+- **Dedicated combat HUD cluster** (replaces side-panel combat): large thumb-reachable buttons —
+  **Quick Hit / Heavy Hit / Shove / Block / Dodge / Back Off / Call It Off** — with cooldown grey-out
+  and active-window highlight, plus player & opponent health/energy bars, opponent name/gang/relationship,
+  and a live state read (In Range / Too Far / Winding Up / Guarding / Dodging / Hit! / Backing Off /
+  Guard Watching). The normal interaction panel is hidden during a fight.
+- **Timing**: Quick (short windup), Heavy (long windup, big hit), Shove (spacing), Block (short guard
+  window), Dodge (backstep + brief i-frames). Attacks cost stamina (energy); too winded → shove/back off.
+- **Disengage**: Back Off steps back + tries to break contact (lowers escalation); Call It Off exits
+  combat mode; auto-disengage if the foe ends up far away; guard break-up / knockdown still end it.
+- **Camera**: character camera frames the midpoint of both fighters during a fight; small impact shake
+  on hits (iso + character both supported).
+- NPC combat is unchanged (still AI-driven via the existing phase machine). Save/load mid-fight resets
+  transient combat safely (no crash).
+
 ## v3.8.0-world — Stage World / Visual / Layout Overhaul 3.8
 A pass over the **world/render/collision** layer (no new sim systems): a believable floorplan with
 **real individual cells**, a **prop-collision model** so characters can no longer walk through walls,

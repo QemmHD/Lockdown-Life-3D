@@ -1278,15 +1278,41 @@ export class Simulation {
       const fb = this.ecs.get<Brain>(b.foe, 'Brain');
       const fp = this.ecs.get<Position>(b.foe, 'Position');
       if (!fb || !fp || fb.state === 'down' || fb.state === 'solitary') { this.endFighter(e, b); continue; }
-      // always face the foe + keep fighting spacing (no overlap)
-      p.facing = Math.atan2(fp.x - p.x, fp.z - p.z);
       const d = Math.hypot(fp.x - p.x, fp.z - p.z);
-      const reacting = b.cphase === 'hitReact' || b.cphase === 'stumble' || b.cphase === 'dodge';
-      if (!reacting) {
-        if (d > COMBAT_SPACING + 0.35) { const sp = Math.min(dt * 1.7, d - COMBAT_SPACING); p.x += Math.sin(p.facing) * sp; p.z += Math.cos(p.facing) * sp; }
-        else if (d < COMBAT_SPACING - 0.35) { this.nudge(p, -Math.sin(p.facing) * dt * 1.2, -Math.cos(p.facing) * dt * 1.2); }
+      const moving = !!this.ecs.get<Agent>(e, 'Agent')?.path;
+      if (b.isPlayer) {
+        // MANUAL combat (Stage 3.9): the player is never auto-driven. Lock onto the foe for aim/read
+        // when standing still; while moving, tap-to-move controls facing. No auto-spacing, no auto-swing.
+        if (!moving && b.cphase !== 'hitReact' && b.cphase !== 'stumble') p.facing = Math.atan2(fp.x - p.x, fp.z - p.z);
+        this.advancePlayerCombat(e, b, p, b.foe, fp, fb, dt, d);
+      } else {
+        // NPC fighters keep the auto phase machine: face foe, hold spacing, choose attacks via AI
+        p.facing = Math.atan2(fp.x - p.x, fp.z - p.z);
+        const reacting = b.cphase === 'hitReact' || b.cphase === 'stumble' || b.cphase === 'dodge';
+        if (!reacting) {
+          if (d > COMBAT_SPACING + 0.35) { const sp = Math.min(dt * 1.7, d - COMBAT_SPACING); p.x += Math.sin(p.facing) * sp; p.z += Math.cos(p.facing) * sp; }
+          else if (d < COMBAT_SPACING - 0.35) { this.nudge(p, -Math.sin(p.facing) * dt * 1.2, -Math.cos(p.facing) * dt * 1.2); }
+        }
+        this.advanceCombat(e, b, p, b.foe, fb, fp, dt);
       }
-      this.advanceCombat(e, b, p, b.foe, fb, fp, dt);
+    }
+  }
+  // player phase machine: progresses an in-flight manual attack / reaction, but never auto-initiates
+  // an attack and never auto-moves. Attacks come only from requestCombatAction.
+  private advancePlayerCombat(e: Entity, b: Brain, _p: Position, foe: Entity, fp: Position, fb: Brain, dt: number, dist: number) {
+    b.cTimer = (b.cTimer ?? 0) - dt;
+    b.attackCd = Math.max(0, (b.attackCd ?? 0) - dt);
+    if (b.blockT) b.blockT = Math.max(0, b.blockT - dt);
+    if (b.dodgeT) b.dodgeT = Math.max(0, b.dodgeT - dt);
+    // auto-disengage if the foe gets/stays far away (player has wandered off) — keeps combat from sticking
+    b.farT = dist > 5.5 ? (b.farT ?? 0) + dt : 0;
+    if ((b.farT ?? 0) > 1.6) { this.endFighter(e, b); const fbn = this.brain(foe); if (fbn && fbn.foe === e && fbn.state === 'fight' && !fbn.traits.includes('aggressive')) this.endFighter(foe, fbn); b.action = 'Idle'; return; }
+    if ((b.cTimer ?? 0) > 0) return;                 // mid-phase — let the pose play
+    switch (b.cphase) {
+      case 'windup': this.doStrike(e, b, foe, fb, fp); break;   // resolve the manual swing (range/aim checked inside)
+      case 'strike': b.cphase = 'recover'; b.cTimer = (b.cResult as AttackType) in ATTACKS ? ATTACKS[b.cResult as AttackType].recover : RECOVER; break;
+      case 'recover': case 'hitReact': case 'stumble': case 'dodge': case 'block': b.cphase = 'squareUp'; b.cTimer = 0; break;
+      default: b.cphase = 'squareUp';                 // idle stance — waits for player input
     }
   }
   // per-fighter phase progression: squareUp → windup → strike → recover → squareUp.
@@ -1328,9 +1354,15 @@ export class Simulation {
     const atk = (b.cResult as AttackType) in ATTACKS ? (b.cResult as AttackType) : 'quick';
     const an = this.ecs.get<Needs>(e, 'Needs')!; an.energy = clamp01(an.energy - ATTACKS[atk].stamina);
     const fn = this.ecs.get<Needs>(foe, 'Needs')!;
-    const def = { fear: fn.fear, energy: fn.energy, coward: fb.traits.includes('cowardly') || fb.traits.includes('weak'), blocking: !!fb.blockT };
-    const outcome = resolveDefense(atk, def, this.rng.float(), this.rng.float(), this.rng.float());
     const ep = this.pos(e)!;
+    const reach = COMBAT_SPACING + (atk === 'heavy' ? 0.5 : atk === 'shove' ? 0.3 : 0.55);
+    const dist = Math.hypot(fp.x - ep.x, fp.z - ep.z);
+    const def = { fear: fn.fear, energy: fn.energy, coward: fb.traits.includes('cowardly') || fb.traits.includes('weak'), blocking: !!fb.blockT };
+    let outcome = resolveDefense(atk, def, this.rng.float(), this.rng.float(), this.rng.float());
+    // a player swing only connects in range; the defender's active Block/Dodge windows take priority
+    if (b.isPlayer && dist > reach) outcome = 'miss';
+    if (fb.isPlayer && fb.dodgeT && outcome !== 'miss') outcome = 'dodged';
+    if (fb.isPlayer && fb.blockT && outcome === 'hit') outcome = 'blocked';
     if (outcome === 'miss' || outcome === 'dodged' || outcome === 'blocked') {
       this.metrics[outcome === 'blocked' ? 'blocks' : outcome === 'dodged' ? 'dodges' : 'misses']++;
       if (outcome !== 'miss') { fb.cphase = outcome === 'blocked' ? 'block' : 'dodge'; fb.cTimer = 0.3; }
@@ -1474,7 +1506,8 @@ export class Simulation {
     if (pb.state === 'solitary' || pb.state === 'down' || pb.state === 'escorted') return null;
     if (this.act && this.act.phase === 'perform') return null;   // locked mid-action
     this.releaseObj(); this.act = null;                          // tapping cancels a queued action
-    if (pb.state === 'fight') { pb.state = 'idle'; pb.foe = undefined; }
+    // NOTE: tap-to-move during combat is allowed and combat-aware — it no longer ends the fight.
+    // (To leave combat, the player uses Back Off / Call It Off.)
     let idx = this.map.worldToIdx(wx, wz);
     // forgiving tap: corridors/cells are narrow, so snap a near-miss onto a wall/prop to the closest
     // walkable tile within a couple of tiles instead of doing nothing
@@ -2078,7 +2111,8 @@ export class Simulation {
 
   private startPlayerFight(target: Entity) {
     const pl = this.playerId; const pb = this.brain(pl)!; const tb = this.brain(target)!;
-    pb.state = 'fight'; pb.foe = target; pb.attackCd = 0.3; pb.action = 'Fighting'; pb.cphase = 'squareUp'; pb.cTimer = 0.4;
+    // player enters a controllable stance — no auto-swing; the foe (NPC) keeps the auto phase machine
+    pb.state = 'fight'; pb.foe = target; pb.attackCd = 0; pb.action = 'Fighting'; pb.cphase = 'squareUp'; pb.cTimer = 0; pb.blockT = 0; pb.dodgeT = 0; pb.farT = 0; pb.pendingAtk = undefined;
     tb.state = 'fight'; tb.foe = pl; tb.attackCd = 0.5; tb.cphase = 'squareUp'; tb.cTimer = 0.4;
     if (tb.mem) rememberFoe(tb.mem, pl);
     this.bus.emit('alert', { type: 'fight', text: `Fight: You vs ${tb.name}!` });
@@ -2089,25 +2123,77 @@ export class Simulation {
   // ---------- player combat actions (Stage 3.3) ----------
   // contextual fight buttons: only while fighting, or when standing next to a hostile inmate
   playerCombatActions(): { key: string; label: string }[] {
-    const pl = this.playerId; const pb = this.brain(pl); if (!pb) return [];
-    if (pb.state === 'fight') return [
-      { key: 'strike', label: 'Strike' }, { key: 'heavy', label: 'Heavy' }, { key: 'shove', label: 'Shove' },
-      { key: 'block', label: 'Block' }, { key: 'backoff', label: 'Back Off' }
+    const pl = this.playerId; const pb = this.brain(pl); if (!pb || pb.state !== 'fight') return [];
+    return [
+      { key: 'quick', label: 'Quick Hit' }, { key: 'heavy', label: 'Heavy Hit' }, { key: 'shove', label: 'Shove' },
+      { key: 'block', label: 'Block' }, { key: 'dodge', label: 'Dodge' },
+      { key: 'backoff', label: 'Back Off' }, { key: 'calloff', label: 'Call It Off' }
     ];
-    return [];
   }
-  // queue a combat input for the player's next phase / set a block window / disengage
+  // manual combat input (Stage 3.9): swings start a windup the player committed to; block/dodge open
+  // short defensive windows; back off tries to disengage; call it off exits combat mode.
   requestCombatAction(key: string): string {
     const pl = this.playerId; const pb = this.brain(pl)!; if (pb.state !== 'fight') return '';
-    this.metrics.playerCombatChoices++;
+    const p = this.pos(pl)!; const foe = pb.foe; const fp = foe != null ? this.pos(foe) : null; const fb = foe != null ? this.brain(foe) : null;
+    const busy = pb.cphase === 'windup' || pb.cphase === 'strike' || pb.cphase === 'recover' || pb.cphase === 'hitReact' || pb.cphase === 'stumble';
+    const faceFoe = () => { if (fp) p.facing = Math.atan2(fp.x - p.x, fp.z - p.z); };
+    const swing = (type: AttackType, label: string): string => {
+      if (busy || (pb.attackCd ?? 0) > 0) return '';
+      const n = this.ecs.get<Needs>(pl, 'Needs')!;
+      if (type !== 'shove' && n.energy < ATTACKS[type].stamina + 0.02) return 'Too winded — shove or back off.';
+      faceFoe();                                   // lock-on aim; range is checked when the strike lands
+      pb.cphase = 'windup'; pb.cResult = type; pb.cTimer = ATTACKS[type].windup; pb.pendingAtk = undefined;
+      pb.attackCd = ATTACKS[type].windup + ATTACKS[type].recover + 0.12;
+      this.metrics.playerCombatChoices++; this.metrics.attacksAttempted++;
+      return label;
+    };
     switch (key) {
-      case 'strike': pb.pendingAtk = 'quick'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Strike!';
-      case 'heavy': pb.pendingAtk = 'heavy'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Heavy swing!';
-      case 'shove': pb.pendingAtk = 'shove'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Shove!';
-      case 'block': pb.blockT = 0.9; pb.cphase = 'block'; pb.cTimer = 0.5; this.bubble(pl, '🛡️', 'search', 0.8); return 'Blocking.';
-      case 'backoff': { const foe = pb.foe; this.endFighter(pl, pb); pb.action = 'Idle'; if (foe != null) { const fb = this.brain(foe); if (fb && fb.state === 'fight') { fb.state = 'idle'; fb.foe = undefined; fb.cphase = undefined; } } this.social(pl)!.reputation = clamp(this.social(pl)!.reputation - 1, -100, 100); return 'You back off.'; }
+      case 'quick': case 'strike': return swing('quick', 'Quick hit!');
+      case 'heavy': return swing('heavy', 'Heavy swing!');
+      case 'shove': return swing('shove', 'Shove!');
+      case 'block': if (busy) return ''; pb.blockT = 0.85; pb.cphase = 'block'; pb.cTimer = 0.4; faceFoe(); this.bubble(pl, '🛡️', 'search', 0.7); this.metrics.playerCombatChoices++; return 'Guarding.';
+      case 'dodge': {
+        if (pb.cphase === 'strike') return '';
+        pb.dodgeT = 0.5; pb.cphase = 'dodge'; pb.cTimer = 0.38;
+        if (fp) { const ang = Math.atan2(p.x - fp.x, p.z - fp.z); this.nudge(p, Math.sin(ang) * 0.95, Math.cos(ang) * 0.95); }
+        this.metrics.playerCombatChoices++; return 'Backstep!';
+      }
+      case 'backoff': {
+        const n = this.ecs.get<Needs>(pl, 'Needs')!; n.anger = clamp01(n.anger - 0.15);
+        if (fp) { const ang = Math.atan2(p.x - fp.x, p.z - fp.z); this.nudge(p, Math.sin(ang) * 0.8, Math.cos(ang) * 0.8); }
+        const d = fp ? Math.hypot(fp.x - p.x, fp.z - p.z) : 99;
+        if (d > 2.0 || !fb || !fb.traits.includes('aggressive')) { this.endFighter(pl, pb); pb.action = 'Idle'; if (foe != null && fb && fb.foe === pl && fb.state === 'fight' && !fb.traits.includes('aggressive')) this.endFighter(foe, fb); this.social(pl)!.reputation = clamp(this.social(pl)!.reputation - 1, -100, 100); this.metrics.playerCombatChoices++; return 'You back off.'; }
+        pb.action = 'Backing off'; return 'You give ground — they\'re still on you.';
+      }
+      case 'calloff': { this.endFighter(pl, pb); pb.action = 'Idle'; if (foe != null && fb && fb.foe === pl) { fb.state = 'idle'; fb.foe = undefined; fb.cphase = undefined; } this.metrics.playerCombatChoices++; return 'You call it off.'; }
     }
     return '';
+  }
+  // ---------- combat HUD snapshot (Stage 3.9) ----------
+  combatActive(): boolean { const pb = this.brain(this.playerId); return !!pb && pb.state === 'fight' && pb.foe != null; }
+  combatSnapshot() {
+    const pl = this.playerId; const pb = this.brain(pl)!; const foe = pb.foe!;
+    const p = this.pos(pl)!; const fp = this.pos(foe)!; const fb = this.brain(foe)!;
+    const pn = this.ecs.get<Needs>(pl, 'Needs')!; const fn = this.ecs.get<Needs>(foe, 'Needs')!;
+    const d = Math.hypot(fp.x - p.x, fp.z - p.z);
+    const inRange = d <= COMBAT_SPACING + 0.55;
+    const guardNear = this.ecs.query('Brain', 'Position').some((g) => { const gb = this.brain(g)!; if (gb.role !== 'guard') return false; const gp = this.pos(g)!; return Math.hypot(gp.x - p.x, gp.z - p.z) < 6; });
+    let state = inRange ? 'In Range' : 'Too Far';
+    if (pb.cphase === 'windup') state = 'Winding Up';
+    else if (pb.cphase === 'block' || (pb.blockT ?? 0) > 0) state = 'Guarding';
+    else if (pb.cphase === 'dodge' || (pb.dodgeT ?? 0) > 0) state = 'Dodging';
+    else if (pb.cphase === 'hitReact' || pb.cphase === 'stumble') state = 'Hit!';
+    else if (pb.action === 'Backing off') state = 'Backing Off';
+    else if (guardNear) state = 'Guard Watching';
+    const sc = this.social(foe);
+    const rel = sc ? (sc.rel <= -40 ? 'Hostile' : sc.rel < -10 ? 'Rival' : sc.rel > 30 ? 'Friendly' : 'Neutral') : 'Neutral';
+    return {
+      foeName: fb.name, foeGang: fb.gang ? (GANG_MAP[fb.gang]?.name ?? fb.gang) : '', rel,
+      pHealth: pn.health, pEnergy: pn.energy, fHealth: fn.health, fEnergy: fn.energy,
+      inRange, guardNear, state,
+      atkCd: Math.max(0, Math.min(1, (pb.attackCd ?? 0) / 1.1)),
+      blocking: (pb.blockT ?? 0) > 0, dodging: (pb.dodgeT ?? 0) > 0
+    };
   }
 
   private smalltalk(tb: Brain): string {

@@ -15,6 +15,13 @@ export interface HUDHooks {
   onAction: (key: string) => void;       // interaction / self-action / job button
   onItem: (key: string) => void;         // tap an inventory item (drop)
   onToggleCam?: () => void;              // Stage 3.8A: toggle iso / character camera
+  onCombat?: (key: string) => void;      // Stage 3.9: dedicated combat-cluster button
+}
+
+export interface CombatSnap {
+  foeName: string; foeGang: string; rel: string;
+  pHealth: number; pEnergy: number; fHealth: number; fEnergy: number;
+  inRange: boolean; guardNear: boolean; state: string; atkCd: number; blocking: boolean; dodging: boolean;
 }
 
 export class HUD {
@@ -43,6 +50,30 @@ export class HUD {
       <div id="obj-tracker" class="hidden"></div>
       <div id="action-bar" style="display:none"><div class="ab-label"></div><div class="ab-track"><div class="ab-fill"></div></div></div>
       <div id="panel" class="hidden"></div>
+      <div id="combat-hud" class="hidden">
+        <div class="ch-top">
+          <div class="ch-side">
+            <div class="ch-name">YOU</div>
+            <div class="ch-bar"><i class="hp" id="ch-php"></i></div>
+            <div class="ch-bar"><i class="en" id="ch-pen"></i></div>
+          </div>
+          <div class="ch-mid"><div class="ch-state" id="ch-state">In Range</div></div>
+          <div class="ch-side right">
+            <div class="ch-name" id="ch-foe">Foe</div>
+            <div class="ch-bar"><i class="hp" id="ch-fhp"></i></div>
+            <div class="ch-bar"><i class="en" id="ch-fen"></i></div>
+          </div>
+        </div>
+        <div class="ch-btns">
+          <button data-cact="quick" class="cbtn atk"><b>Quick</b></button>
+          <button data-cact="heavy" class="cbtn atk heavy"><b>Heavy</b></button>
+          <button data-cact="shove" class="cbtn"><b>Shove</b></button>
+          <button data-cact="block" class="cbtn def"><b>Block</b></button>
+          <button data-cact="dodge" class="cbtn def"><b>Dodge</b></button>
+          <button data-cact="backoff" class="cbtn back"><b>Back Off</b></button>
+          <button data-cact="calloff" class="cbtn off"><b>Call Off</b></button>
+        </div>
+      </div>
       <div id="bottombar">
         <button data-b="pause" class="hud-btn"><span class="b-ico">⏸</span><span class="b-lbl">Pause</span></button>
         <button data-b="speed" class="hud-btn"><span class="b-ico" id="speed-x">1×</span><span class="b-lbl">Speed</span></button>
@@ -51,7 +82,8 @@ export class HUD {
         <button data-b="cam" class="hud-btn cam-toggle"><span class="b-ico" id="cam-ico">🎥</span><span class="b-lbl">Camera</span></button>
       </div>`;
     document.getElementById('ui-root')!.appendChild(this.root);
-    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'chip-lock', 'tb-lock', 'chaos-banner', 'alert-feed', 'obj-tracker', 'panel', 'speed-x', 'alarm', 'cam-ico'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
+    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'chip-lock', 'tb-lock', 'chaos-banner', 'alert-feed', 'obj-tracker', 'panel', 'speed-x', 'alarm', 'cam-ico', 'combat-hud', 'ch-php', 'ch-pen', 'ch-fhp', 'ch-fen', 'ch-state', 'ch-foe'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
+    this.root.querySelectorAll('#combat-hud [data-cact]').forEach((b) => (b as HTMLElement).addEventListener('click', () => this.hooks.onCombat && this.hooks.onCombat((b as HTMLElement).dataset.cact!)));
     this.root.querySelectorAll('#bottombar button').forEach((b) => {
       const k = (b as HTMLElement).dataset.b!;
       b.addEventListener('click', () => {
@@ -92,6 +124,24 @@ export class HUD {
     else if (info.objective) { text = info.objective; cls = 'cb-warn'; }
     if (text) { banner.classList.remove('hidden'); banner.textContent = text; banner.className = 'chaos ' + cls; }
     else banner.classList.add('hidden');
+  }
+  // ---------- combat cluster (Stage 3.9) ----------
+  showCombat(_actions: { key: string; label: string }[]) { this.els['combat-hud'].classList.remove('hidden'); }
+  hideCombat() { this.els['combat-hud'].classList.add('hidden'); }
+  updateCombat(s: CombatSnap) {
+    this.els['ch-php'].style.width = Math.round(s.pHealth * 100) + '%';
+    this.els['ch-pen'].style.width = Math.round(s.pEnergy * 100) + '%';
+    this.els['ch-fhp'].style.width = Math.round(s.fHealth * 100) + '%';
+    this.els['ch-fen'].style.width = Math.round(s.fEnergy * 100) + '%';
+    this.els['ch-foe'].textContent = (s.foeName + (s.foeGang ? ` · ${s.foeGang}` : '') + ` · ${s.rel}`).toUpperCase();
+    const st = this.els['ch-state'];
+    st.textContent = s.state;
+    st.className = 'ch-state ' + (s.state === 'In Range' ? 'good' : s.state === 'Too Far' ? 'far' : s.state === 'Guard Watching' ? 'warn' : s.state === 'Hit!' ? 'bad' : 'act');
+    // attack buttons grey out while on cooldown; defensive buttons light up while active
+    const cd = s.atkCd > 0.02;
+    this.root.querySelectorAll('#combat-hud .cbtn.atk, #combat-hud .cbtn:not(.atk):not(.def):not(.back):not(.off)').forEach((b) => (b as HTMLElement).classList.toggle('cool', cd));
+    this.root.querySelector('#combat-hud [data-cact="block"]')!.classList.toggle('on', s.blocking);
+    this.root.querySelector('#combat-hud [data-cact="dodge"]')!.classList.toggle('on', s.dodging);
   }
   setAction(label: string, progress: number) {
     const bar = this.root.querySelector('#action-bar') as HTMLElement;

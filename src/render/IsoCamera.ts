@@ -100,6 +100,9 @@ export class IsoCamera {
   }
   recenter() { this.manualTimer = 0; }
   isFollowing() { return this.follow && this.manualTimer <= 0; }
+  // brief impact shake (combat hits) — decays in tick(), applied as a small camera offset
+  private shakeT = 0; private shakeMag = 0;
+  shake(mag: number) { this.shakeMag = Math.max(this.shakeMag, mag); this.shakeT = 0.22; }
 
   tick(dt: number) {
     if (this.manualTimer > 0) this.manualTimer -= dt;
@@ -119,6 +122,16 @@ export class IsoCamera {
         this.clamp();
         this.apply();
       }
+    }
+    // impact shake: jitter the active camera briefly after a strong hit
+    if (this.shakeT > 0) {
+      this.shakeT = Math.max(0, this.shakeT - dt);
+      const m = this.shakeMag * (this.shakeT / 0.22) * (this._charMode ? 0.6 : 0.5);
+      const cam = this.activeCamera;
+      cam.position.x += (Math.random() - 0.5) * m;
+      cam.position.y += (Math.random() - 0.5) * m;
+      cam.position.z += (Math.random() - 0.5) * m;
+      if (this.shakeT <= 0) this.shakeMag = 0;
     }
   }
 
