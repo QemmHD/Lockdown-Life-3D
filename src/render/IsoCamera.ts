@@ -23,6 +23,9 @@ export class IsoCamera {
   private manualTimer = 0;             // seconds of suspended auto-follow after a manual pan
   private bx = 28; private bz = 20;   // clamp bounds (set from map)
   private frameRight = THEME.camera.frameRight;
+  // world half-extent (iso screen-space) needed to frame the whole prison; drives a device-aware
+  // max zoom-out so the entire map can fit on any aspect (tall iPhone portrait included)
+  private fitExtent = THEME.camera.max;
 
   // character camera: fixed 3/4 viewing direction (radians) + horizontal pullback. Only manual
   // pan rotates the direction — it never auto-rotates to face the player (that caused spinning).
@@ -50,6 +53,9 @@ export class IsoCamera {
   }
 
   setBounds(hx: number, hz: number) { this.bx = hx; this.bz = hz; }
+  // tell the camera the map size so "fully zoomed out" frames the whole prison on any screen.
+  // iso view is rotated 45°, so the world footprint projects to a diamond of half-size ~0.707*(W/2+H/2).
+  setWorldSize(w: number, h: number) { this.fitExtent = 0.7071 * (w / 2 + h / 2) * 1.06; this.updateProjection(); }
   setOccluder(fn: (wx: number, wz: number) => boolean) { this.occluder = fn; }
 
   private computeBasis() {
@@ -58,6 +64,9 @@ export class IsoCamera {
   }
   private updateProjection() {
     const aspect = window.innerWidth / window.innerHeight;
+    // allow zooming out far enough to fit the whole prison given this aspect (narrow portrait needs more)
+    this.maxZoom = Math.max(THEME.camera.max, this.fitExtent * Math.max(1, 1 / aspect));
+    this.zoom = THREE.MathUtils.clamp(this.zoom, this.minZoom, this.maxZoom);
     const h = this.zoom, w = h * aspect;
     this.camera.left = -w; this.camera.right = w; this.camera.top = h; this.camera.bottom = -h;
     this.camera.updateProjectionMatrix();

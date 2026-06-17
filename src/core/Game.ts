@@ -66,6 +66,8 @@ export class Game {
     this.feedback = new Feedback();
     // character-focused camera: clamp to the prison, follow the player prisoner
     this.cam.setBounds(this.sim.map.width / 2 - 5, this.sim.map.height / 2 - 5);
+    // device-aware fit: pinch all the way out frames the whole prison on any screen (tall iPhone too)
+    this.cam.setWorldSize(this.sim.map.width, this.sim.map.height);
     // character-cam wall test: keep the perspective camera from clipping behind corridor walls
     this.cam.setOccluder((wx, wz) => { const k = this.sim.map.worldToIdx(wx, wz); return k < 0 || this.sim.map.walkable[k] === 0; });
     this.playerEntity = this.sim.player();
@@ -120,7 +122,10 @@ export class Game {
     this.bus.on('bubble', ({ e, text, kind, dur }) => this.feedback.bubble(e, text, kind, dur));
     this.bus.on('actionResult', ({ text }) => this.hud.alert(text, 'info'));
 
-    window.addEventListener('resize', () => { this.app.resize(); this.cam.resize(); });
+    const onResize = () => { this.app.resize(); this.cam.resize(); };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', () => setTimeout(onResize, 250));   // iOS settles after rotate
+    window.visualViewport?.addEventListener('resize', onResize);                     // iOS toolbar show/hide
     window.addEventListener('keydown', (ev) => { if (ev.key === 'c' || ev.key === 'C') { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); } });
     // debug hook (only with ?debug): inspect sim/door state + run an invariant self-test + draw overlays
     if (/[?&]debug/.test(location.search)) { (window as any).__game = this; console.info('[selfTest]', this.sim.selfTest()); this.buildDebugOverlay(); }
