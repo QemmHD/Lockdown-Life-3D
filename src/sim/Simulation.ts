@@ -194,9 +194,10 @@ export class Simulation {
   currentRoomName(e: Entity): string { const p = this.pos(e); if (!p) return ''; const k = this.map.worldToIdx(p.x, p.z); const ri = k >= 0 ? this.map.room[k] : -1; return ri >= 0 ? this.rooms[ri].name : 'Hallway'; }
 
   // nearest walkable, prop-free tile to a world point (BFS ring) — used for safe-spawn on load
-  private nearestPathable(wx: number, wz: number): { x: number; z: number } | null {
+  // and for forgiving tap-to-move (with a small maxR so a tap can't jump across walls)
+  private nearestPathable(wx: number, wz: number, maxR = 12): { x: number; z: number } | null {
     const t = this.map.worldToTile(wx, wz);
-    for (let r = 0; r <= 12; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    for (let r = 0; r <= maxR; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
       if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
       const nx = t.x + dx, ny = t.y + dy;
       if (this.map.isPathable(nx, ny)) return this.map.toWorld(nx, ny);
@@ -1474,8 +1475,11 @@ export class Simulation {
     if (this.act && this.act.phase === 'perform') return null;   // locked mid-action
     this.releaseObj(); this.act = null;                          // tapping cancels a queued action
     if (pb.state === 'fight') { pb.state = 'idle'; pb.foe = undefined; }
-    const idx = this.map.worldToIdx(wx, wz);
-    if (idx < 0 || !this.map.walkable[idx]) return null;
+    let idx = this.map.worldToIdx(wx, wz);
+    // forgiving tap: corridors/cells are narrow, so snap a near-miss onto a wall/prop to the closest
+    // walkable tile within a couple of tiles instead of doing nothing
+    if (idx < 0 || !this.map.pathable(idx)) { const s = this.nearestPathable(wx, wz, 2); if (!s) return null; idx = this.map.worldToIdx(s.x, s.z); }
+    if (idx < 0) return null;
     const start = this.map.worldToIdx(this.pos(pl)!.x, this.pos(pl)!.z);
     const path = start >= 0 ? this.path(start, idx, pl) : null;
     if (!path) { this.bus.emit('actionResult', { text: 'No path — a door is locked.' }); return null; }
