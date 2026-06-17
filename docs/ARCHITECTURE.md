@@ -72,6 +72,7 @@ input (tap/drag/pinch)
 | Progression | `sim/Progression.ts` | pure reputation tiers, objective templates/roll, daily-summary rating; the Simulation owns live progression/objectives/daily state and a `prog()` event hook |
 | Setup | `sim/NewGameSetup.ts` | pure character-creation model: appearance/traits/backstory/gang-lean/difficulty defs + randomize/sanitize; `Simulation.applySetup()` writes it onto the player |
 | Factions | `sim/FactionSystem.ts` | pure gang state/ranks/standing-labels/invite thresholds/crew-goal templates/perks; the Simulation owns one `PlayerGangState` and drives invites/joining/ranks |
+| Economy | `sim/EconomySystem.ts` | pure dynamic pricing / search-risk / job-payout / stash-capacity / demand-drift; the Simulation owns one `EconomyState` and runs trade/use/stash/restock |
 | Menus | `ui/Menus.ts` | title screen, **new-game setup flow**, tabbed pause overlay (Stats/People/Inventory/Objectives/Gangs/Help), and daily-summary modal — reads `Simulation.uiSnapshot()`, never writes |
 | World | `world/TileMap.ts`, `Pathfinding.ts`, `WorldGen.ts`, `Interactable.ts` | grid, A*, floorplan, object model |
 | Render | `render/ThreeApp.ts`, `IsoCamera.ts`, `WorldRenderer.ts`, `PropRenderer.ts`, `CharacterFactory.ts`, `RenderSync.ts`, `Feedback.ts`, `VisualTheme.ts`, `textures/` | rendering (read-only) |
@@ -110,6 +111,13 @@ cluster/separation geometry so crowds read as loose groups. All of it is pure he
 integration; transient AI (intent, memory refs) resets on load. Still **partial**: no full GOAP
 planner, no formal squad tactics, group clustering is geometric (not negotiated), and guard routes are
 fixed tables rather than learned/dynamic.
+
+**Economy (Stage 3.7).** `EconomySystem.ts` is pure (dynamic `priceFor`, `searchRisk`, `jobPay`,
+`stashInfo`, demand drift). The Simulation owns one `EconomyState` (demand/supply/offers) and runs
+trade/use/stash/restock; trading reads `tradePanel()` and applies `buyItem`/`sellItem`. Prices factor
+demand/supply, contraband heat, relationship, gang membership/rank, reputation, and difficulty. Save
+v11 persists it. **Fictional/abstract only** — no real-world contraband/smuggling/concealment detail.
+Still **partial**: no deep market simulation or NPC-to-NPC trading economy.
 
 **Factions (Stage 3.6).** `FactionSystem.ts` is pure (ranks/standing labels/invite thresholds/crew-goal
 templates/perks). The Simulation owns one `PlayerGangState` and runs `factionSystem(dt)` (invite

@@ -168,6 +168,18 @@ selected-object / blocked-path info to the console.
 - [ ] Daily summary / stats reflect gang standing & rank
 - [ ] Save/load (v10) restores membership/rank/standing; an older save migrates to unaffiliated
 
+## Economy / contraband (Stage 3.7)
+- [ ] Open an inmate → Trade opens a panel with their items priced + risk/contraband
+- [ ] Buying transfers the item and deducts money; selling returns less (markdown)
+- [ ] Prices differ: crew member cheaper, rival pricier/refuses, demand/heat shift prices
+- [ ] Use an item (food/hygiene/comfort/medical) and see the need change
+- [ ] Stash from the inventory menu / object panel; capacity + risk label show; full stash is rejected
+- [ ] Carrying risky/unconcealed items raises search chance; confiscation hits the daily summary
+- [ ] Jobs pay via the model (trait/reputation/rank/streak); occasional item reward
+- [ ] A new day drifts demand and restocks market offers
+- [ ] Economy objectives (earn/buy/sell/use/stash) complete; daily summary shows economy lines
+- [ ] Save/load (v11) restores economy; an older save loads with a default economy
+
 ## Stability
 - [ ] Run a full in-game day at 4× → no runtime errors, no soft-locks
 - [ ] No leaking DOM feedback elements after many floats/bubbles

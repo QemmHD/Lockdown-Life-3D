@@ -61,7 +61,11 @@ const POOL: ObjTemplate[] = [
   { id: 'earn', text: 'Earn $5', kind: 'earn', goal: 5, reward: { respect: 1 } },
   { id: 'respect', text: 'Gain +5 respect', kind: 'respect', goal: 5, reward: { rep: 2 } },
   { id: 'train', text: 'Train once', kind: 'train', goal: 1, reward: { respect: 1 } },
-  { id: 'returncell', text: 'Return to your cell during a lockdown', kind: 'returncell', goal: 1, reward: { respect: 1 } }
+  { id: 'returncell', text: 'Return to your cell during a lockdown', kind: 'returncell', goal: 1, reward: { respect: 1 } },
+  { id: 'buy', text: 'Buy something useful', kind: 'buy', goal: 1, reward: {} },
+  { id: 'sell', text: 'Sell an item for profit', kind: 'sell', goal: 1, reward: { respect: 1 } },
+  { id: 'use', text: 'Use an item to manage a need', kind: 'use', goal: 1, reward: {} },
+  { id: 'stash', text: 'Stash a risky item safely', kind: 'stash', goal: 1, reward: { respect: 1 } }
 ];
 const SURVIVE: ObjTemplate = { id: 'survive', text: 'Make it through the day without solitary', kind: 'surviveNoSolitary', goal: 1, reward: { rep: 2, respect: 2 } };
 
@@ -83,13 +87,17 @@ export function objectivesByIds(ids: string[]): Objective[] {
 }
 
 // ---------- daily summary ----------
-export interface DailyStats { repStart: number; respStart: number; moneyStart: number; fights: number; wins: number; jobs: number; searches: number; contraband: number; solitary: number; lockdowns: number; objectivesDone: number; relImproved: number; }
+export interface DailyStats { repStart: number; respStart: number; moneyStart: number; fights: number; wins: number; jobs: number; searches: number; contraband: number; solitary: number; lockdowns: number; objectivesDone: number; relImproved: number; bought: number; sold: number; moneySpent: number; jobEarnings: number; confiscated: number; }
 export function newDaily(rep: number, resp: number, money: number): DailyStats {
-  return { repStart: rep, respStart: resp, moneyStart: money, fights: 0, wins: 0, jobs: 0, searches: 0, contraband: 0, solitary: 0, lockdowns: 0, objectivesDone: 0, relImproved: 0 };
+  return { repStart: rep, respStart: resp, moneyStart: money, fights: 0, wins: 0, jobs: 0, searches: 0, contraband: 0, solitary: 0, lockdowns: 0, objectivesDone: 0, relImproved: 0, bought: 0, sold: 0, moneySpent: 0, jobEarnings: 0, confiscated: 0 };
 }
-export function dayRating(d: DailyStats): string {
+export function dayRating(d: DailyStats, moneyChange = 0): string {
+  if (d.confiscated > 0) return 'Costly Search';
   if (d.solitary > 0) return 'Lockdown Magnet';
-  if (d.lockdowns >= 2) return 'Troublemaker';
+  if (moneyChange >= 12) return 'Hustling';
+  if (d.bought >= 2) return 'Stocked Up';
+  if (d.jobEarnings >= 8) return 'Crew Earner';
+  if (moneyChange <= -6) return 'Broke';
   if (d.wins >= 2) return 'Rising Name';
   if (d.fights >= 2) return 'Rough Day';
   if (d.jobs >= 1 || d.objectivesDone >= 2) return 'Survivor';

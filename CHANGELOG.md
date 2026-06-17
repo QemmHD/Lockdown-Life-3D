@@ -12,6 +12,35 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v3.7.0-economy — Stage Economy / Contraband Depth 3.7
+Turns inventory/money/contraband/jobs/trading into a real loop. Sim authoritative, RenderSync
+read-only, build passes, 0 runtime errors. New pure module `EconomySystem.ts`. Fictional/abstract
+only — no real-world contraband/smuggling/concealment detail.
+- **Richer items** (`data/items.ts`): categories (food/hygiene/comfort/utility/barter/risky/crew/rare/
+  medical), demand/supply weights, rarity, and use effects + new items (soap, towel, cards, book,
+  batteries, commissary token, medical wrap, repair part, crew marker).
+- **Dynamic prices**: base × rarity × demand/supply × contraband-heat × relationship × gang × reputation
+  × difficulty, each with a short reason ("in demand", "crew price", "rival markup", "they like you").
+- **Trade panel**: open an inmate → **Trade** → buy/sell their items at live prices with risk/contraband
+  warnings; rivals charge more or **refuse**; crew members give a discount.
+- **Item use**: food/hygiene/comfort/medical items affect needs; barter/currency items are trade-only.
+- **Stash depth**: per-object capacity + concealment + risk label ("looks safe/so-so/risky") on the
+  object panel; stash from the inventory menu or in-world.
+- **Search risk** now factors carried item **risk + concealment + count** (not just suspicion); crew
+  goods confiscated cost gang standing.
+- **Gang economy**: crew discounts scale with rank, crew **supply offers** in the Gangs menu, rivals
+  overcharge/refuse.
+- **Jobs**: payouts via an economy model (trait × reputation × gang rank × work-streak × difficulty),
+  occasional item rewards, daily job earnings tracked.
+- **Daily market**: demand/supply drift + market restock at each day rollover.
+- **Economy objectives** (earn/buy/sell/use/stash) + **daily-summary** economy lines (bought/sold/job
+  earnings/confiscated/crew) and ratings (Broke/Hustling/Stocked Up/Crew Earner/Costly Search…).
+- **Inventory menu** is now active: Use / Stash / Drop + value/risk/concealment/demand/category.
+- **Save/load v11**: persists economy (demand/supply/offers/trades), job streak; backward-compatible
+  with v10–v4 (old saves get a default economy).
+- **?debug self-test+** (economy state, price sanity, offers) + telemetry (trades/buys/sells/itemsUsed/
+  stashed/confiscated/jobMoney/restocks/crew offers/economy objectives).
+
 ## v3.6.0-factions — Stage Gang Joining / Faction Progression 3.6
 Turns gang **lean** into real, joinable factions. Sim authoritative, RenderSync read-only, build
 passes, 0 runtime errors. New pure module `FactionSystem.ts`; the Simulation owns one `PlayerGangState`.

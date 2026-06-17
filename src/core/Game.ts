@@ -16,6 +16,7 @@ import { Brain, Needs, Position, Agent, Social, Inventory } from '../ecs/compone
 import { phaseAt, GANG_MAP } from '../data/content';
 import { ITEMS, isContraband } from '../data/items';
 import { InteractAction } from '../sim/Simulation';
+import { stashInfo, stashLabel } from '../sim/EconomySystem';
 
 const FIXED = 1 / 30;
 const SPEEDS = [1, 2, 4];
@@ -93,6 +94,12 @@ export class Game {
       onAcceptInvite: () => { const inv = this.sim.gang.invite; if (inv) { const r = this.sim.requestGangAction(inv.by, 'acceptinvite'); if (r) this.hud.alert(r, 'player'); } },
       onDeclineInvite: () => { const inv = this.sim.gang.invite; if (inv) { const r = this.sim.requestGangAction(inv.by, 'declineinvite'); if (r) this.hud.alert(r, 'info'); } },
       onLeaveGang: () => { const r = this.sim.leaveGang(); if (r) this.hud.alert(r, 'info'); },
+      onUseItem: (id) => { const r = this.sim.useItem(id); if (r) this.hud.alert(r, 'info'); this.panelDirty = true; },
+      onDropItem: (id) => { const r = this.sim.dropItem(id); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; },
+      onStashItem: (id) => { const r = this.sim.stashNearest(id); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; },
+      onBuy: (seller, id) => { const r = this.sim.buyItem(seller, id); if (r) this.hud.alert(r, 'trade'); },
+      onSell: (buyer, id) => { const r = this.sim.sellItem(buyer, id); if (r) this.hud.alert(r, 'trade'); },
+      tradeData: (seller) => this.sim.tradePanel(seller),
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
@@ -222,7 +229,9 @@ export class Game {
     if (o.restricted) meta.push('Staff Only');
     else if (isDoor && o.locked) meta.push(this.sim.lockdown.active ? 'Lockdown' : 'Locked Down');
     if (isDoor) meta.push(o.open ? 'Open' : 'Closed');
-    if (o.stash.length) meta.push(`Hidden: ${o.stash.length}`);
+    const canHide = ['bed', 'toilet', 'sink', 'locker', 'shelf', 'trash', 'desk'].includes(o.type);
+    if (canHide) { const si = stashInfo(o.type); meta.push(`Stash ${o.stash.length}/${si.cap} · ${stashLabel(si.risk)}`); }
+    else if (o.stash.length) meta.push(`Hidden: ${o.stash.length}`);
     if (o.room) { const t = this.sim.tensionAt(o.room); if (t.value >= 25) meta.push(`Area: ${t.label}`); }
     const actions: PanelAction[] = this.sim.objActions(id).map((a) => ({
       key: a.key, label: a.label, disabled: a.disabled, reason: a.reason,
@@ -321,6 +330,7 @@ export class Game {
     const isPlayerSel = sel === this.playerEntity || !!this.sim.ecs.get<Brain>(sel, 'Brain')?.isPlayer;
     const fighting = isPlayerSel && this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.state === 'fight';
     let status: string;
+    if (!isPlayerSel && key === 'trade') { this.menus.showTrade(sel); this.paused = true; return; }   // open the trade panel
     if (fighting && (Game.COMBAT_KEYS.includes(key) || key === 'backoff')) status = this.sim.requestCombatAction(key);
     else if (!isPlayerSel && Game.GANG_KEYS.includes(key)) status = this.sim.requestGangAction(sel, key);
     else if (isPlayerSel && key === 'escape') status = this.sim.requestEscape();

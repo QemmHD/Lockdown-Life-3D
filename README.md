@@ -24,7 +24,7 @@ low-poly geometry** — no external art/audio assets.
 - **TypeScript** (strict)
 - **Three.js** for rendering (orthographic isometric camera)
 - **DOM / CSS** overlay HUD (no UI framework)
-- **`localStorage`** saves (versioned, currently v10)
+- **`localStorage`** saves (versioned, currently v11)
 - **Procedural low-poly geometry** built at runtime (no model/texture/audio files)
 - A small **ECS-lite** simulation (`src/ecs` + `src/sim`)
 
@@ -139,6 +139,7 @@ Gangs are purely fictional game data. You can build standing with a crew, get in
 - **Structure layer**: title screen, tabbed pause menu (Stats/People/Inventory/Objectives/Gangs/Help), reputation tiers, daily objectives + HUD tracker, end-of-day summary, progression totals
 - **Character creation**: new-game setup (name/appearance/traits/backstory/gang-lean/difficulty), randomize, run identity applied to the player
 - **Faction progression**: build standing → NPC gang invite → join, ranks (Associate→Shot Caller), crew goals, small perks, rival consequences, Gangs menu
+- **Economy / contraband depth**: item categories + dynamic prices (demand/supply/heat/relationship/gang), trade panel (buy/sell), item use, stash capacity/risk, job payouts + streak, daily market restock, gang/crew supply, economy objectives & daily summary
 
 **Partial**
 - Guard AI (roles + routes + checkpoints, but no formal squad tactics / dynamic routes)
