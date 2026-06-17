@@ -28,6 +28,8 @@ export class IsoCamera {
   private charAngle = 0;
   private charHeight = THEME.charCamera.height;
   private charDist = THEME.charCamera.distance;
+  // optional wall test (world x,z -> true if a tall wall blocks the camera there)
+  private occluder: ((wx: number, wz: number) => boolean) | null = null;
 
   constructor() {
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
@@ -53,6 +55,7 @@ export class IsoCamera {
   }
 
   setBounds(hx: number, hz: number) { this.bx = hx; this.bz = hz; }
+  setOccluder(fn: (wx: number, wz: number) => boolean) { this.occluder = fn; }
 
   private computeBasis() {
     this.fwd.set(-this.offset.x, 0, -this.offset.z).normalize();
@@ -76,10 +79,20 @@ export class IsoCamera {
     const cfg = THEME.charCamera;
     const tx = this.target.x + Math.sin(this.followFacing) * cfg.lookAhead;
     const tz = this.target.z + Math.cos(this.followFacing) * cfg.lookAhead;
-    // camera orbits behind the player
-    const cx = this.target.x - Math.sin(this.charAngle) * this.charDist;
-    const cz = this.target.z - Math.cos(this.charAngle) * this.charDist;
-    this.perspCam.position.set(cx, this.charHeight, cz);
+    // camera orbits behind the player; pull it in if a wall sits between them so the view never
+    // clips through / hides behind a corridor wall
+    const dirX = -Math.sin(this.charAngle), dirZ = -Math.cos(this.charAngle);
+    let dist = this.charDist;
+    const minD = (cfg as any).minDistance ?? 3.5;
+    if (this.occluder) {
+      for (let d = 1.5; d <= dist; d += 0.5) {
+        if (this.occluder(this.target.x + dirX * d, this.target.z + dirZ * d)) { dist = Math.max(minD, d - 0.7); break; }
+      }
+    }
+    const cx = this.target.x + dirX * dist;
+    const cz = this.target.z + dirZ * dist;
+    const h = Math.max(minD, this.charHeight * (dist / this.charDist));   // keep the down-angle as it pulls in
+    this.perspCam.position.set(cx, h, cz);
     this.perspCam.lookAt(tx, cfg.lookHeight, tz);
   }
   private clamp() {

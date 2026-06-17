@@ -50,6 +50,11 @@ collision invariants PASS.
   a toggleable character-follow **perspective** camera mode (HUD Camera button / `C` key) alongside the
   classic iso overview, in-world status bars, and improved animations. Combined with the world/cell/
   collision pass above, this completes the visual overhaul. All collision invariants still PASS.
+- **Navigation fixes** (post-merge): tap-to-move is now **forgiving** — a tap that lands on a wall/prop
+  beside a narrow corridor or cell snaps to the nearest walkable tile within 2 tiles instead of doing
+  nothing (you can no longer "miss" a 3-wide hallway at close zoom). The **character camera** angle was
+  raised + steepened and given a **wall pull-in** so it clears the 2.0-tall corridor walls instead of
+  clipping/hiding behind them.
 
 ## v3.7.0-economy — Stage Economy / Contraband Depth 3.7
 Turns inventory/money/contraband/jobs/trading into a real loop. Sim authoritative, RenderSync

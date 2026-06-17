@@ -66,6 +66,8 @@ export class Game {
     this.feedback = new Feedback();
     // character-focused camera: clamp to the prison, follow the player prisoner
     this.cam.setBounds(this.sim.map.width / 2 - 5, this.sim.map.height / 2 - 5);
+    // character-cam wall test: keep the perspective camera from clipping behind corridor walls
+    this.cam.setOccluder((wx, wz) => { const k = this.sim.map.worldToIdx(wx, wz); return k < 0 || this.sim.map.walkable[k] === 0; });
     this.playerEntity = this.sim.player();
     const sp = this.sim.ecs.get<Position>(this.playerEntity, 'Position');
     this.cam.focus(sp ? sp.x : 0, sp ? sp.z : 0);

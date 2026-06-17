@@ -3,8 +3,9 @@
 export const THEME = {
   // Camera defaults for the classic iso overview.
   camera: { zoom: 9, min: 5.5, max: 40, offset: { x: 22, y: 28, z: 22 }, frameRight: 3, panHold: 4 },
-  // Character camera: perspective, behind+above player, lower angle.
-  charCamera: { fov: 55, distance: 10, height: 6.5, lookAhead: 2, lookHeight: 1.8 },
+  // Character camera: perspective, behind+above player. Higher + steeper so it clears the
+  // 2.0-tall corridor walls instead of sitting down between them.
+  charCamera: { fov: 52, distance: 9, height: 9, lookAhead: 2.5, lookHeight: 1.4, minDistance: 3.5 },
 
   bg: 0x2a3040,
   fog: { color: 0x2a3040, near: 90, far: 200 },
