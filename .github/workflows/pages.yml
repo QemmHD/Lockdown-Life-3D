@@ -32,6 +32,8 @@ jobs:
       - run: npm ci
       - run: npm run build
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true   # auto-enable Pages (GitHub Actions source) — no manual Settings step
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
