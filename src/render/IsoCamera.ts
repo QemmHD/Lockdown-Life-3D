@@ -24,12 +24,11 @@ export class IsoCamera {
   private bx = 28; private bz = 20;   // clamp bounds (set from map)
   private frameRight = THEME.camera.frameRight;
 
-  // character camera orbital state (smooth)
-  private charAngle = 0;
-  private charHeight = THEME.charCamera.height;
+  // character camera: fixed 3/4 viewing direction (radians) + horizontal pullback. Only manual
+  // pan rotates the direction — it never auto-rotates to face the player (that caused spinning).
+  private charAngle = Math.PI / 4;
   private charDist = THEME.charCamera.distance;
-  // optional wall test (world x,z -> true if a tall wall blocks the camera there)
-  private occluder: ((wx: number, wz: number) => boolean) | null = null;
+  private occluder: ((wx: number, wz: number) => boolean) | null = null;   // retained for API compatibility
 
   constructor() {
     this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 400);
@@ -47,11 +46,7 @@ export class IsoCamera {
 
   toggleMode() {
     this._charMode = !this._charMode;
-    if (this._charMode) {
-      // entering character mode: snap behind the follow target
-      this.charAngle = this.followFacing + Math.PI;
-      this.manualTimer = 0;
-    }
+    if (this._charMode) { this.charAngle = Math.PI / 4; this.charDist = THEME.charCamera.distance; this.manualTimer = 0; }
   }
 
   setBounds(hx: number, hz: number) { this.bx = hx; this.bz = hz; }
@@ -77,23 +72,12 @@ export class IsoCamera {
   }
   private applyPersp() {
     const cfg = THEME.charCamera;
-    const tx = this.target.x + Math.sin(this.followFacing) * cfg.lookAhead;
-    const tz = this.target.z + Math.cos(this.followFacing) * cfg.lookAhead;
-    // camera orbits behind the player; pull it in if a wall sits between them so the view never
-    // clips through / hides behind a corridor wall
-    const dirX = -Math.sin(this.charAngle), dirZ = -Math.cos(this.charAngle);
-    let dist = this.charDist;
-    const minD = (cfg as any).minDistance ?? 3.5;
-    if (this.occluder) {
-      for (let d = 1.5; d <= dist; d += 0.5) {
-        if (this.occluder(this.target.x + dirX * d, this.target.z + dirZ * d)) { dist = Math.max(minD, d - 0.7); break; }
-      }
-    }
-    const cx = this.target.x + dirX * dist;
-    const cz = this.target.z + dirZ * dist;
-    const h = Math.max(minD, this.charHeight * (dist / this.charDist));   // keep the down-angle as it pulls in
-    this.perspCam.position.set(cx, h, cz);
-    this.perspCam.lookAt(tx, cfg.lookHeight, tz);
+    // fixed high 3/4 angle: camera sits up and to one side of the player and looks straight at them.
+    // height scales with the pullback so the down-angle stays constant while zooming (no spin, clears walls).
+    const dirX = Math.sin(this.charAngle), dirZ = Math.cos(this.charAngle);
+    const h = this.charDist * (cfg.height / cfg.distance);
+    this.perspCam.position.set(this.target.x + dirX * this.charDist, h, this.target.z + dirZ * this.charDist);
+    this.perspCam.lookAt(this.target.x, cfg.lookHeight, this.target.z);
   }
   private clamp() {
     this.target.x = THREE.MathUtils.clamp(this.target.x, -this.bx, this.bx);
@@ -112,16 +96,9 @@ export class IsoCamera {
     if (this.manualTimer > 0) this.manualTimer -= dt;
     if (this.follow && this.manualTimer <= 0) {
       if (this._charMode) {
-        // character camera: smoothly follow player, orbit behind them
+        // character camera: smoothly follow the player's position only — the angle stays fixed
         this.target.x = THREE.MathUtils.lerp(this.target.x, this.follow.x, Math.min(1, dt * 6));
         this.target.z = THREE.MathUtils.lerp(this.target.z, this.follow.z, Math.min(1, dt * 6));
-        // smoothly rotate camera behind the player's facing direction
-        const desiredAngle = this.followFacing + Math.PI;
-        let da = desiredAngle - this.charAngle;
-        // shortest rotation
-        while (da > Math.PI) da -= Math.PI * 2;
-        while (da < -Math.PI) da += Math.PI * 2;
-        this.charAngle += da * Math.min(1, dt * 3);
         this.clamp();
         this.applyPersp();
       } else {
@@ -140,9 +117,8 @@ export class IsoCamera {
   pan(screenDx: number, screenDy: number) {
     this.manualTimer = THEME.camera.panHold;
     if (this._charMode) {
-      // in character mode, pan rotates the orbital camera
-      this.charAngle -= screenDx * 0.005;
-      this.charHeight = THREE.MathUtils.clamp(this.charHeight + screenDy * 0.02, 2, 18);
+      // in character mode, a horizontal drag rotates the fixed viewing direction (user-initiated only)
+      this.charAngle -= screenDx * 0.004;
     } else {
       const scale = this.zoom / 320;
       this.target.addScaledVector(this.right, -screenDx * scale);
@@ -152,7 +128,7 @@ export class IsoCamera {
   }
   zoomBy(factor: number) {
     if (this._charMode) {
-      this.charDist = THREE.MathUtils.clamp(this.charDist * factor, 4, 25);
+      this.charDist = THREE.MathUtils.clamp(this.charDist * factor, THEME.charCamera.minDistance, THEME.charCamera.maxDistance);
     } else {
       this.zoom = THREE.MathUtils.clamp(this.zoom * factor, this.minZoom, this.maxZoom);
       this.updateProjection();

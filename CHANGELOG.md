@@ -52,9 +52,11 @@ collision invariants PASS.
   collision pass above, this completes the visual overhaul. All collision invariants still PASS.
 - **Navigation fixes** (post-merge): tap-to-move is now **forgiving** — a tap that lands on a wall/prop
   beside a narrow corridor or cell snaps to the nearest walkable tile within 2 tiles instead of doing
-  nothing (you can no longer "miss" a 3-wide hallway at close zoom). The **character camera** angle was
-  raised + steepened and given a **wall pull-in** so it clears the 2.0-tall corridor walls instead of
-  clipping/hiding behind them.
+  nothing (you can no longer "miss" a 3-wide hallway at close zoom). The **character camera** was rebuilt
+  as a **fixed high 3/4 follow** — a perspective close-up that tracks the player's position but does not
+  orbit behind them. This removes the spin/disorientation when turning, sits high enough to clear the
+  2.0-tall corridor walls, and pulls back far enough not to feel cramped (horizontal drag rotates the
+  view; pinch dollies in/out).
 
 ## v3.7.0-economy — Stage Economy / Contraband Depth 3.7
 Turns inventory/money/contraband/jobs/trading into a real loop. Sim authoritative, RenderSync

@@ -3,9 +3,10 @@
 export const THEME = {
   // Camera defaults for the classic iso overview.
   camera: { zoom: 9, min: 5.5, max: 40, offset: { x: 22, y: 28, z: 22 }, frameRight: 3, panHold: 4 },
-  // Character camera: perspective, behind+above player. Higher + steeper so it clears the
-  // 2.0-tall corridor walls instead of sitting down between them.
-  charCamera: { fov: 52, distance: 9, height: 9, lookAhead: 2.5, lookHeight: 1.4, minDistance: 3.5 },
+  // Character camera: a perspective close-up that FOLLOWS the player from a fixed high 3/4 angle
+  // (does not orbit behind the player — that caused spinning). High enough to clear the 2.0 walls,
+  // far enough not to feel cramped. distance = horizontal pullback, height = camera elevation.
+  charCamera: { fov: 50, distance: 12, height: 15, lookHeight: 1.2, minDistance: 7, maxDistance: 22 },
 
   bg: 0x2a3040,
   fog: { color: 0x2a3040, near: 90, far: 200 },
