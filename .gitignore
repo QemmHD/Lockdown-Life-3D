@@ -18,3 +18,4 @@ android/
 shot*.mjs
 smoke.mjs
 probe.mjs
+probe_pan.mjs
