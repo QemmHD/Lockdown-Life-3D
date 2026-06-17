@@ -14,6 +14,7 @@ export interface HUDHooks {
   onPause: () => void; onSpeed: () => void; onSave: () => void; onLoad: () => void; onDeselect: () => void; hasSave: () => boolean;
   onAction: (key: string) => void;       // interaction / self-action / job button
   onItem: (key: string) => void;         // tap an inventory item (drop)
+  onToggleCam?: () => void;              // Stage 3.8A: toggle iso / character camera
 }
 
 export class HUD {
@@ -47,14 +48,16 @@ export class HUD {
         <button data-b="speed" class="hud-btn"><span class="b-ico" id="speed-x">1×</span><span class="b-lbl">Speed</span></button>
         <button data-b="save" class="hud-btn"><span class="b-ico">▣</span><span class="b-lbl">Save</span></button>
         <button data-b="load" class="hud-btn"><span class="b-ico">▤</span><span class="b-lbl">Load</span></button>
+        <button data-b="cam" class="hud-btn cam-toggle"><span class="b-ico" id="cam-ico">🎥</span><span class="b-lbl">Camera</span></button>
       </div>`;
     document.getElementById('ui-root')!.appendChild(this.root);
-    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'chip-lock', 'tb-lock', 'chaos-banner', 'alert-feed', 'obj-tracker', 'panel', 'speed-x', 'alarm'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
+    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'chip-lock', 'tb-lock', 'chaos-banner', 'alert-feed', 'obj-tracker', 'panel', 'speed-x', 'alarm', 'cam-ico'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
     this.root.querySelectorAll('#bottombar button').forEach((b) => {
       const k = (b as HTMLElement).dataset.b!;
       b.addEventListener('click', () => {
         if (k === 'pause') hooks.onPause(); else if (k === 'speed') hooks.onSpeed();
         else if (k === 'save') hooks.onSave(); else if (k === 'load') hooks.onLoad();
+        else if (k === 'cam' && hooks.onToggleCam) hooks.onToggleCam();
       });
     });
     this.hooks = hooks;
@@ -73,6 +76,7 @@ export class HUD {
     this.els['chip-heat'].className = 'tb-chip ' + (heat > 66 ? 'sev-high' : heat > 33 ? 'sev-mid' : '');
   }
   setSpeed(label: string) { this.els['speed-x'].textContent = label; }
+  setCamMode(isChar: boolean) { this.els['cam-ico'].textContent = isChar ? '🏠' : '🎥'; }
   setAlarm(level: number) { this.els['alarm'].style.opacity = level > 0.6 ? String(Math.min(0.42, (level - 0.6) * 1.05)) : '0'; }
   // chaos banner + lockdown chip. info.level: 'calm' | 'warning' | 'event'
   setChaos(info: { lockdown: boolean; lockdownTimer: number; lockdownReason: string; alarm: boolean; level: string; objective: string }) {

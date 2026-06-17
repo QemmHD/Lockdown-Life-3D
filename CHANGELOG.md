@@ -45,6 +45,11 @@ collision invariants PASS.
 - **Save/load v12**: bumped for the new layout/object ids; **safe v11→v4 migration** snaps any saved
   entity that now sits inside a wall/cell-bar to the nearest pathable tile on load (no entity ever
   loads inside a wall).
+- **Merged: Stage 3.8A Visual Direction** (parallel branch) — brighter, more readable palette (vibrant
+  orange jumpsuits, less muddy grey), upgraded low-poly character models (faces/hair/body variation),
+  a toggleable character-follow **perspective** camera mode (HUD Camera button / `C` key) alongside the
+  classic iso overview, in-world status bars, and improved animations. Combined with the world/cell/
+  collision pass above, this completes the visual overhaul. All collision invariants still PASS.
 
 ## v3.7.0-economy — Stage Economy / Contraband Depth 3.7
 Turns inventory/money/contraband/jobs/trading into a real loop. Sim authoritative, RenderSync
