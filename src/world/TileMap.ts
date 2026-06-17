@@ -1,12 +1,14 @@
 // Logical grid the whole sim runs on. No rendering here.
 export class TileMap {
-  walkable: Uint8Array;
+  walkable: Uint8Array;    // 1 = floor, 0 = structural wall (rendered as concrete)
+  blocked: Uint8Array;     // 1 = a prop solid sits here (bars/furniture/counter) — not pathable, but NOT a concrete wall
   room: Int16Array;        // index into rooms list, -1 = none
   reserved: Int32Array;    // entity id that reserved this tile for a task, 0 = free
 
   constructor(public width: number, public height: number) {
     const n = width * height;
     this.walkable = new Uint8Array(n);
+    this.blocked = new Uint8Array(n);
     this.room = new Int16Array(n).fill(-1);
     this.reserved = new Int32Array(n);
   }
@@ -14,6 +16,9 @@ export class TileMap {
   idx(x: number, y: number) { return y * this.width + x; }
   inBounds(x: number, y: number) { return x >= 0 && y >= 0 && x < this.width && y < this.height; }
   isWalkable(x: number, y: number) { return this.inBounds(x, y) && this.walkable[this.idx(x, y)] === 1; }
+  // a tile a character can actually stand on / path through: floor AND not occupied by a prop solid
+  pathable(idx: number) { return idx >= 0 && this.walkable[idx] === 1 && this.blocked[idx] === 0; }
+  isPathable(x: number, y: number) { return this.inBounds(x, y) && this.pathable(this.idx(x, y)); }
 
   tileXY(idx: number) { return { x: idx % this.width, y: Math.floor(idx / this.width) }; }
 

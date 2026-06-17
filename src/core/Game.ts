@@ -53,8 +53,9 @@ export class Game {
     this.sim = new Simulation(this.bus);
     this.sim.generate();
     buildPrison(this.app.scene, this.sim.map, this.sim.rooms);
-    const dressed = dressRooms(this.app.scene, this.sim.map, this.sim.rooms);
+    const dressed = dressRooms(this.app.scene, this.sim.map, this.sim.rooms, this.sim.cells);
     const doors = this.buildDoorObjects();        // register doors/gates as interactables
+    this.buildCellGates();                        // barred sliding gates on each individual cell
     this.objHits = [...dressed.hitMeshes, ...doors.hitMeshes];
     this.interactableDefs = [...dressed.interactables, ...doors.defs];
     this.sim.setInteractables(this.interactableDefs);
@@ -65,6 +66,8 @@ export class Game {
     this.feedback = new Feedback();
     // character-focused camera: clamp to the prison, follow the player prisoner
     this.cam.setBounds(this.sim.map.width / 2 - 5, this.sim.map.height / 2 - 5);
+    // character-cam wall test: keep the perspective camera from clipping behind corridor walls
+    this.cam.setOccluder((wx, wz) => { const k = this.sim.map.worldToIdx(wx, wz); return k < 0 || this.sim.map.walkable[k] === 0; });
     this.playerEntity = this.sim.player();
     const sp = this.sim.ecs.get<Position>(this.playerEntity, 'Position');
     this.cam.focus(sp ? sp.x : 0, sp ? sp.z : 0);
@@ -77,7 +80,8 @@ export class Game {
       onDeselect: () => this.select(this.playerEntity),
       hasSave: () => SaveManager.has(),
       onAction: (key) => this.doAction(key),
-      onItem: (key) => { const r = this.sim.dropItem(key); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; this.refreshPanel(); }
+      onItem: (key) => { const r = this.sim.dropItem(key); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; this.refreshPanel(); },
+      onToggleCam: () => { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); }
     });
     this.select(this.playerEntity);   // panel shows the player by default
 
@@ -103,7 +107,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v3.5.0-newgame'
+      version: 'v3.8.0-world'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -117,8 +121,9 @@ export class Game {
     this.bus.on('actionResult', ({ text }) => this.hud.alert(text, 'info'));
 
     window.addEventListener('resize', () => { this.app.resize(); this.cam.resize(); });
-    // debug hook (only with ?debug): inspect sim/door state + run an invariant self-test
-    if (/[?&]debug/.test(location.search)) { (window as any).__game = this; console.info('[selfTest]', this.sim.selfTest()); }
+    window.addEventListener('keydown', (ev) => { if (ev.key === 'c' || ev.key === 'C') { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); } });
+    // debug hook (only with ?debug): inspect sim/door state + run an invariant self-test + draw overlays
+    if (/[?&]debug/.test(location.search)) { (window as any).__game = this; console.info('[selfTest]', this.sim.selfTest()); this.buildDebugOverlay(); }
     this.loop();
   }
 
@@ -140,11 +145,11 @@ export class Game {
       // wall orientation: a door in a horizontal wall has walkable tiles above/below
       const vertWall = map.isWalkable(t.x, t.y - 1) && map.isWalkable(t.x, t.y + 1);  // movement runs N-S → leaf spans X
       const baseRot = vertWall ? 0 : Math.PI / 2;
-      // interaction point = an adjacent walkable, non-door tile (stand beside, not on, the door)
+      // interaction point = an adjacent pathable, non-door tile (stand beside, not on, the door)
       let ix = w.x, iz = w.z;
       for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
         const nx = t.x + dx, ny = t.y + dy;
-        if (map.isWalkable(nx, ny) && map.idx(nx, ny) !== r.door) { const nw = map.toWorld(nx, ny); ix = nw.x; iz = nw.z; break; }
+        if (map.isPathable(nx, ny) && map.idx(nx, ny) !== r.door) { const nw = map.toWorld(nx, ny); ix = nw.x; iz = nw.z; break; }
       }
       const id = 'door_' + r.id;
       const isGate = !!r.gate;
@@ -175,6 +180,31 @@ export class Game {
   private makeBox(w: number, h: number, d: number, mat: THREE.Material, x = 0, y = 0, z = 0) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = true; return m; }
   private makeCyl(r: number, h: number, mat: THREE.Material, x = 0, y = 0, z = 0) { const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 8), mat); m.position.set(x, y, z); m.castShadow = true; return m; }
 
+  // a barred sliding gate on the gap of every individual cell. Visual only — the gap tile stays
+  // walkable so the occupant can always reach the bunk; the leaf reflects the owning block's
+  // door state (open / closed / locked) so cells read as real and respond to lockdowns.
+  private cellGates: { pivot: THREE.Object3D; blockDoorId: string; lampMat: THREE.MeshStandardMaterial }[] = [];
+  private buildCellGates() {
+    const map = this.sim.map;
+    const barMat = new THREE.MeshStandardMaterial({ color: 0x23272e, roughness: 0.5, metalness: 0.6 });
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0x3a3e45, roughness: 0.7, metalness: 0.4 });
+    for (const c of this.sim.cells) {
+      const t = map.tileXY(c.doorTile); const w = map.toWorld(t.x, t.y);
+      const grp = new THREE.Group(); grp.position.set(w.x, 0, w.z); grp.rotation.y = 0;   // cell fronts run E-W → leaf spans X
+      grp.add(this.makeBox(0.12, 2.0, 0.14, frameMat, -0.5, 1.0, 0));
+      grp.add(this.makeBox(0.12, 2.0, 0.14, frameMat, 0.5, 1.0, 0));
+      const pivot = new THREE.Group(); pivot.position.set(-0.45, 0, 0);                    // hinge at left post
+      for (let i = 0; i < 4; i++) pivot.add(this.makeCyl(0.04, 1.7, barMat, 0.1 + i * 0.24, 0.85, 0));
+      pivot.add(this.makeBox(0.9, 0.08, 0.08, barMat, 0.45, 1.6, 0));
+      pivot.add(this.makeBox(0.9, 0.08, 0.08, barMat, 0.45, 0.2, 0));
+      grp.add(pivot);
+      const lampMat = new THREE.MeshStandardMaterial({ color: 0x222, emissive: 0x33ff66, emissiveIntensity: 0.9 });
+      grp.add(this.makeBox(0.12, 0.12, 0.12, lampMat, 0.5, 1.95, 0));
+      this.app.scene.add(grp);
+      this.cellGates.push({ pivot, blockDoorId: 'door_' + c.room, lampMat });
+    }
+  }
+
   // reflect each door/gate's open/locked/restricted state into its mesh (read-only view of sim)
   private updateDoors(dt: number) {
     const chaos = this.sim.alarm.active || this.sim.lockdown.active || this.sim.riotLevel === 'event';
@@ -187,6 +217,43 @@ export class Game {
       d.lampMat.emissive.setHex(col); d.lampMat.color.setHex(col & 0x222222);
       d.lampMat.emissiveIntensity = (chaos && (o.locked || o.restricted)) ? flash : 1.2;
     }
+    // cell gates mirror their block's main door state (open during cell time, locked in lockdown)
+    for (const g of this.cellGates) {
+      const o = this.sim.getObj(g.blockDoorId); if (!o) continue;
+      const target = o.open ? Math.PI * 0.44 : 0;
+      g.pivot.rotation.y += (target - g.pivot.rotation.y) * Math.min(1, dt * 8);
+      const col = o.locked ? 0xffaa22 : o.open ? 0x33ff66 : 0xccbb44;
+      g.lampMat.emissive.setHex(col); g.lampMat.emissiveIntensity = (chaos && o.locked) ? flash : 0.9;
+    }
+  }
+
+  // ---- ?debug overlays: blocked tiles, door/anchor markers, live player path ----
+  private dbgPath: THREE.Line | null = null;
+  private buildDebugOverlay() {
+    const map = this.sim.map; const root = new THREE.Group();
+    // blocked prop solids (red) + structural walls already render as concrete
+    const blkGeo = new THREE.PlaneGeometry(0.9, 0.9);
+    const blkMat = new THREE.MeshBasicMaterial({ color: 0xff3344, transparent: true, opacity: 0.32, depthWrite: false });
+    let nb = 0; for (let i = 0; i < map.blocked.length; i++) if (map.blocked[i]) nb++;
+    const blk = new THREE.InstancedMesh(blkGeo, blkMat, Math.max(1, nb)); const m = new THREE.Matrix4(); const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)); const s = new THREE.Vector3(1, 1, 1); let bi = 0;
+    for (let i = 0; i < map.blocked.length; i++) if (map.blocked[i]) { const t = map.tileXY(i); const w = map.toWorld(t.x, t.y); blk.setMatrixAt(bi++, m.compose(new THREE.Vector3(w.x, 0.09, w.z), q, s)); }
+    blk.instanceMatrix.needsUpdate = true; root.add(blk);
+    // door + interaction-anchor markers
+    for (const o of this.sim.objs.values()) {
+      const isDoor = o.type === 'door' || o.type === 'gate';
+      const dot = new THREE.Mesh(new THREE.CircleGeometry(0.16, 10), new THREE.MeshBasicMaterial({ color: isDoor ? 0x33aaff : 0x66ff88, depthWrite: false }));
+      dot.rotation.x = -Math.PI / 2; dot.position.set(o.ix, 0.11, o.iz); root.add(dot);
+    }
+    this.app.scene.add(root);
+    this.dbgPath = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xffe14a }));
+    this.dbgPath.position.y = 0.14; this.app.scene.add(this.dbgPath);
+  }
+  private updateDebugPath() {
+    const ag = this.sim.ecs.get<Agent>(this.playerEntity, 'Agent'); const map = this.sim.map;
+    const pts: THREE.Vector3[] = [];
+    const p = this.sim.ecs.get<Position>(this.playerEntity, 'Position'); if (p) pts.push(new THREE.Vector3(p.x, 0, p.z));
+    if (ag?.path) for (let i = ag.step; i < ag.path.length; i++) { const t = map.tileXY(ag.path[i]); const w = map.toWorld(t.x, t.y); pts.push(new THREE.Vector3(w.x, 0, w.z)); }
+    this.dbgPath!.geometry.setFromPoints(pts.length ? pts : [new THREE.Vector3(), new THREE.Vector3()]);
   }
 
   private onTap(x: number, y: number) {
@@ -433,7 +500,8 @@ export class Game {
     this.updateFx(dt);
     this.updateMarker(dt);
     this.updateDoors(dt);
-    this.feedback.update(dt, this.cam.camera, (e) => this.sync.worldOf(e));
+    if (this.dbgPath) this.updateDebugPath();
+    this.feedback.update(dt, this.cam.activeCamera, (e) => this.sync.worldOf(e));
     this.hud.setAction(this.sim.actionLabel(), this.sim.actionProgress());
 
     // character-focused follow: always track the player prisoner with a small movement lead
@@ -443,7 +511,7 @@ export class Game {
       const pos = this.sim.ecs.get<Position>(ft, 'Position');
       const moving = !!this.sim.ecs.get<Agent>(ft, 'Agent')?.path;
       const lead = moving && pos ? 2 : 0;
-      this.cam.setFollow(w.x + (pos ? Math.sin(pos.facing) * lead : 0), w.z + (pos ? Math.cos(pos.facing) * lead : 0));
+      this.cam.setFollow(w.x + (pos ? Math.sin(pos.facing) * lead : 0), w.z + (pos ? Math.cos(pos.facing) * lead : 0), pos?.facing);
     }
     this.cam.tick(dt);
 
@@ -468,7 +536,7 @@ export class Game {
     if (this.panelTimer >= 0.14) this.hud.setObjectives(this.sim.objectives, this.sim.tier());
     if (this.sim.pendingSummary && !this.menus.isOpen()) { this.menus.showSummary(this.sim.takeSummary()); this.paused = true; }
 
-    this.app.renderer.render(this.app.scene, this.cam.camera);
+    this.app.renderer.render(this.app.scene, this.cam.activeCamera);
     requestAnimationFrame(this.loop);
   };
 }

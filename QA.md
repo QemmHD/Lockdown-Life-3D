@@ -180,6 +180,16 @@ selected-object / blocked-path info to the console.
 - [ ] Economy objectives (earn/buy/sell/use/stash) complete; daily summary shows economy lines
 - [ ] Save/load (v11) restores economy; an older save loads with a default economy
 
+## World / visual / collision (Stage 3.8)
+- [ ] Cell blocks read as **rows of real individual cells** (concrete walls + barred fronts + bunk/toilet/sink), not open rooms of beds
+- [ ] Each cell has a barred sliding gate at its gap that opens/closes/locks (locks during lockdown)
+- [ ] No character walks through a wall, cell bars, the serving counter, a bunk, or a desk
+- [ ] Cafeteria: inmates enter the dining side and sit at tables; nobody paths across/behind the counter unless working the kitchen
+- [ ] Every room and every interaction object (bunks, sinks, counter, desks, shelves, gym gear) is reachable; schedule targeting still finds a usable object
+- [ ] `?debug` `selfTest()` reports `noEntityInWall`, `noBlockedOnPath`, `roomsReachable`, `anchorsReachable`, `cellsOk`, `diningClearsCounter` all **true**
+- [ ] `?debug` overlays draw blocked tiles (red), door/anchor dots, and the live player path
+- [ ] Loading an older (pre-3.8) save never leaves an entity inside a wall (safe-spawn nudge); v12 save round-trips
+
 ## Stability
 - [ ] Run a full in-game day at 4× → no runtime errors, no soft-locks
 - [ ] No leaking DOM feedback elements after many floats/bubbles

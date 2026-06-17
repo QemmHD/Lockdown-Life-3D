@@ -14,6 +14,7 @@ export interface InteractableDef {
   facing: number;           // facing toward the object from the interaction point
   restricted?: boolean;
   jobRoom?: string;         // room-type whose job this object performs
+  footprint?: number[];     // tile indices this prop occupies (non-pathable); the interaction tile is never included
 }
 
 export interface Interactable extends InteractableDef {

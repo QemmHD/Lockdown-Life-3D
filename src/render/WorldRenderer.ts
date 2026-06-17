@@ -64,23 +64,34 @@ export function buildPrison(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
   }
 
   // ---- layered walls (body + lighter top cap), instanced ----
-  const walls = wallTiles(map);
-  const bodyGeo = new THREE.BoxGeometry(1, WALL_H, 1);
-  const bodyMat = new THREE.MeshStandardMaterial({ map: createConcreteTexture('#5a5d66', 1), color: THEME.walls.side, roughness: 0.95, flatShading: true });
-  const body = new THREE.InstancedMesh(bodyGeo, bodyMat, walls.length);
-  body.castShadow = true; body.receiveShadow = true;
-  const capGeo = new THREE.BoxGeometry(1.04, 0.18, 1.04);
-  const capMat = new THREE.MeshStandardMaterial({ color: THEME.walls.top, roughness: 0.8 });
-  const cap = new THREE.InstancedMesh(capGeo, capMat, walls.length);
-  cap.castShadow = true;
-  const m = new THREE.Matrix4();
-  walls.forEach((k, i) => {
-    const t = map.tileXY(k), w = map.toWorld(t.x, t.y);
-    body.setMatrixAt(i, m.makeTranslation(w.x, WALL_H / 2, w.z));
-    cap.setMatrixAt(i, m.makeTranslation(w.x, WALL_H + 0.05, w.z));
-  });
-  body.instanceMatrix.needsUpdate = true; cap.instanceMatrix.needsUpdate = true;
-  root.add(body, cap);
+  // Cell-block interior partitions render shorter so the iso camera sees into the cells; the
+  // outer shell + inter-room walls stay full height for the prison-block silhouette.
+  const isCellWall = (k: number) => { const ri = map.room[k]; return ri >= 0 && rooms[ri]?.type === 'cellblock'; };
+  const all = wallTiles(map);
+  const tall = all.filter((k) => !isCellWall(k));
+  const low = all.filter((k) => isCellWall(k));
+  const concreteTex = createConcreteTexture('#5a5d66', 1);
+  const buildWalls = (list: number[], height: number, capColor: number) => {
+    if (!list.length) return;
+    const bodyGeo = new THREE.BoxGeometry(1, height, 1);
+    const bodyMat = new THREE.MeshStandardMaterial({ map: concreteTex, color: THEME.walls.side, roughness: 0.95, flatShading: true });
+    const body = new THREE.InstancedMesh(bodyGeo, bodyMat, list.length);
+    body.castShadow = true; body.receiveShadow = true;
+    const capGeo = new THREE.BoxGeometry(1.04, 0.16, 1.04);
+    const capMat = new THREE.MeshStandardMaterial({ color: capColor, roughness: 0.8 });
+    const cap = new THREE.InstancedMesh(capGeo, capMat, list.length);
+    cap.castShadow = true;
+    const m = new THREE.Matrix4();
+    list.forEach((k, i) => {
+      const t = map.tileXY(k), w = map.toWorld(t.x, t.y);
+      body.setMatrixAt(i, m.makeTranslation(w.x, height / 2, w.z));
+      cap.setMatrixAt(i, m.makeTranslation(w.x, height + 0.04, w.z));
+    });
+    body.instanceMatrix.needsUpdate = true; cap.instanceMatrix.needsUpdate = true;
+    root.add(body, cap);
+  };
+  buildWalls(tall, WALL_H, THEME.walls.top);
+  buildWalls(low, 1.4, THEME.walls.base);
 
   // ---- doorway signs + warning stripes only ----
   // The moving door/gate leaf, frame, and state lamp are owned by Game.buildDoorObjects

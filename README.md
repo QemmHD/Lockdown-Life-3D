@@ -24,7 +24,7 @@ low-poly geometry** — no external art/audio assets.
 - **TypeScript** (strict)
 - **Three.js** for rendering (orthographic isometric camera)
 - **DOM / CSS** overlay HUD (no UI framework)
-- **`localStorage`** saves (versioned, currently v11)
+- **`localStorage`** saves (versioned, currently v12)
 - **Procedural low-poly geometry** built at runtime (no model/texture/audio files)
 - A small **ECS-lite** simulation (`src/ecs` + `src/sim`)
 
@@ -125,8 +125,9 @@ Gangs are purely fictional game data. You can build standing with a crew, get in
 - Inventory + contraband v1 (trade / drop / hide / search / take)
 - Search → confiscation → discipline → solitary v1 (visible escort)
 - Jobs v1
-- Interactable props (beds, sinks, showers, toilets, tables, counters, weights, pull-ups, desks, shelves, trash, lockers)
-- Doors / gates as real pathfinding blockers + schedule-driven open/lock + schedule anchors for NPCs
+- **Believable floorplan with real individual cells** (concrete walls + barred fronts + bunk/toilet/sink) and a **two-layer collision model** — characters cannot walk through walls, bars, counters, beds, or desks
+- Interactable props (beds, sinks, showers, toilets, tables, serving counter, weights, pull-ups, desks, shelves, trash, lockers) with solid footprints + reachable interaction tiles
+- Doors / gates / cell gates as real pathfinding blockers + schedule-driven open/lock + schedule anchors for NPCs
 - Object reservations (NPC + player) with safety auto-release
 - **Chaos layer**: lockdowns, alarm state, riot pressure, area tension, guard checkpoints, blocked-prisoner reactions, abstract escape attempts, and player chaos actions
 - World feedback: floating text + speech/icon bubbles, selection/highlight rings, action progress bar, chaos banner + alarm vignette

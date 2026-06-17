@@ -1,12 +1,13 @@
 import { TileMap } from './TileMap';
 
 // A* over the walkable grid (4-connected — clean for tile prisons, no corner-cutting).
-// `canEnter` lets the caller veto tiles the walkable grid would otherwise allow (e.g. a
-// closed/locked door for a prisoner). The start tile is always allowed so an entity that
-// begins on a now-blocked door tile can still path away from it.
+// A tile is pathable only if it is floor AND free of prop solids (map.pathable). `canEnter`
+// lets the caller veto tiles the grid would otherwise allow (e.g. a closed/locked door for a
+// prisoner). The start tile is always allowed so an entity that begins on a now-blocked tile
+// (door, or a prop footprint after a layout change) can still path away from it.
 export function findPath(map: TileMap, startIdx: number, goalIdx: number, canEnter?: (idx: number) => boolean): number[] | null {
   if (startIdx === goalIdx) return [];
-  if (startIdx < 0 || goalIdx < 0 || !map.walkable[goalIdx]) return null;
+  if (startIdx < 0 || goalIdx < 0 || !map.pathable(goalIdx)) return null;
   if (canEnter && !canEnter(goalIdx)) return null;
   const W = map.width, H = map.height, N = W * H;
   const open: number[] = [startIdx];
@@ -34,7 +35,7 @@ export function findPath(map: TileMap, startIdx: number, goalIdx: number, canEnt
     for (const [nx, ny] of neigh) {
       if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
       const ni = ny * W + nx;
-      if (!map.walkable[ni]) continue;
+      if (ni !== startIdx && !map.pathable(ni)) continue;
       if (canEnter && ni !== startIdx && !canEnter(ni)) continue;
       const ng = g[cur] + 1;
       if (ng < g[ni]) {
