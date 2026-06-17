@@ -57,6 +57,10 @@ collision invariants PASS.
   orbit behind them. This removes the spin/disorientation when turning, sits high enough to clear the
   2.0-tall corridor walls, and pulls back far enough not to feel cramped (horizontal drag rotates the
   view; pinch dollies in/out).
+- **Mobile fit**: zoom-out is now **device-aware** — `IsoCamera.setWorldSize` makes "fully pinched out"
+  frame the entire prison on any aspect ratio (a tall iPhone portrait needs a much wider zoom than the
+  old fixed max of 40, so the whole map can finally fit on screen). Added `orientationchange` +
+  `visualViewport` resize handling so the canvas re-fits when iOS rotates or shows/hides its toolbar.
 
 ## v3.7.0-economy — Stage Economy / Contraband Depth 3.7
 Turns inventory/money/contraband/jobs/trading into a real loop. Sim authoritative, RenderSync

@@ -19,3 +19,5 @@ shot*.mjs
 smoke.mjs
 probe.mjs
 probe_pan.mjs
+probe*.mjs
+fit_*.png
