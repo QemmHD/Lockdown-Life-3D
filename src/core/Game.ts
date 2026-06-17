@@ -77,7 +77,8 @@ export class Game {
       onDeselect: () => this.select(this.playerEntity),
       hasSave: () => SaveManager.has(),
       onAction: (key) => this.doAction(key),
-      onItem: (key) => { const r = this.sim.dropItem(key); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; this.refreshPanel(); }
+      onItem: (key) => { const r = this.sim.dropItem(key); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; this.refreshPanel(); },
+      onToggleCam: () => { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); }
     });
     this.select(this.playerEntity);   // panel shows the player by default
 
@@ -117,6 +118,7 @@ export class Game {
     this.bus.on('actionResult', ({ text }) => this.hud.alert(text, 'info'));
 
     window.addEventListener('resize', () => { this.app.resize(); this.cam.resize(); });
+    window.addEventListener('keydown', (ev) => { if (ev.key === 'c' || ev.key === 'C') { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); } });
     // debug hook (only with ?debug): inspect sim/door state + run an invariant self-test
     if (/[?&]debug/.test(location.search)) { (window as any).__game = this; console.info('[selfTest]', this.sim.selfTest()); }
     this.loop();
@@ -433,7 +435,7 @@ export class Game {
     this.updateFx(dt);
     this.updateMarker(dt);
     this.updateDoors(dt);
-    this.feedback.update(dt, this.cam.camera, (e) => this.sync.worldOf(e));
+    this.feedback.update(dt, this.cam.activeCamera, (e) => this.sync.worldOf(e));
     this.hud.setAction(this.sim.actionLabel(), this.sim.actionProgress());
 
     // character-focused follow: always track the player prisoner with a small movement lead
@@ -443,7 +445,7 @@ export class Game {
       const pos = this.sim.ecs.get<Position>(ft, 'Position');
       const moving = !!this.sim.ecs.get<Agent>(ft, 'Agent')?.path;
       const lead = moving && pos ? 2 : 0;
-      this.cam.setFollow(w.x + (pos ? Math.sin(pos.facing) * lead : 0), w.z + (pos ? Math.cos(pos.facing) * lead : 0));
+      this.cam.setFollow(w.x + (pos ? Math.sin(pos.facing) * lead : 0), w.z + (pos ? Math.cos(pos.facing) * lead : 0), pos?.facing);
     }
     this.cam.tick(dt);
 
@@ -468,7 +470,7 @@ export class Game {
     if (this.panelTimer >= 0.14) this.hud.setObjectives(this.sim.objectives, this.sim.tier());
     if (this.sim.pendingSummary && !this.menus.isOpen()) { this.menus.showSummary(this.sim.takeSummary()); this.paused = true; }
 
-    this.app.renderer.render(this.app.scene, this.cam.camera);
+    this.app.renderer.render(this.app.scene, this.cam.activeCamera);
     requestAnimationFrame(this.loop);
   };
 }

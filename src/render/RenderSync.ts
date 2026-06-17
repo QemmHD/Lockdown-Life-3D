@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { ECS, Entity } from '../ecs/world';
-import { Position, Render, Brain, Needs, Agent } from '../ecs/components';
-import { makeCharacter, setIcon, CharView } from './CharacterFactory';
+import { Position, Render, Brain, Needs, Agent, Social } from '../ecs/components';
+import { makeCharacter, setIcon, updateBars, CharView } from './CharacterFactory';
 
 // Reads sim state and animates Three.js characters. Never writes to the simulation.
 export class RenderSync {
@@ -64,6 +64,15 @@ export class RenderSync {
       }
       const n = this.ecs.get<Needs>(e, 'Needs');
       if (b && n) { setIcon(v, this.icon(b, n)); if (v.icon.visible) v.icon.position.y = 1.85 + Math.sin(time * 4 + e) * 0.06; }
+
+      // Stage 3.8A: in-world status bars — show on selected or hurt characters
+      if (n) {
+        const soc = this.ecs.get<Social>(e, 'Social');
+        const showBars = e === selected || isPlayer || n.health < 0.85;
+        updateBars(v, n.health, n.energy, soc?.suspicion ?? 0, showBars);
+        // make bars face the camera (billboard)
+        v.barGroup.quaternion.copy(v.group.quaternion).invert();
+      }
     }
   }
 
@@ -83,6 +92,8 @@ export class RenderSync {
       v.armL.rotation.x = -sw * 0.7; v.armR.rotation.x = sw * 0.7;
       v.rig.position.y = Math.abs(Math.sin(v.walkPhase)) * 0.05;
       v.rig.rotation.x = THREE.MathUtils.lerp(v.rig.rotation.x, 0.1, 0.2); // lean into movement
+      // Stage 3.8A: head bob while walking
+      v.head.rotation.z = Math.sin(v.walkPhase * 0.5) * 0.04;
     } else if (state === 'fight') {
       // read the sim's combat phase and pose accordingly (read-only)
       const k = Math.min(1, dt * 16);
@@ -113,6 +124,9 @@ export class RenderSync {
       v.armR.rotation.x = THREE.MathUtils.lerp(v.armR.rotation.x, armBase, 0.15);
       v.rig.position.y = breathe;
       v.rig.rotation.x = THREE.MathUtils.lerp(v.rig.rotation.x, 0, 0.2);
+      // Stage 3.8A: subtle idle head turn
+      v.head.rotation.y = THREE.MathUtils.lerp(v.head.rotation.y, Math.sin(time * 0.8 + e * 2) * 0.12, 0.05);
+      v.head.rotation.z = THREE.MathUtils.lerp(v.head.rotation.z, 0, 0.1);
     }
   }
 

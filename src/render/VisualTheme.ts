@@ -1,44 +1,46 @@
 // Single source of truth for art direction. No magic colors scattered elsewhere.
+// Stage 3.8A: brighter, more readable palette — orange jumpsuits pop, less muddy grey.
 export const THEME = {
-  // Character-focused by default (zoom = ortho half-height in world units).
-  // ~9 ≈ one room + nearby hallway; pinch out to 40 for the full-prison overview.
+  // Camera defaults for the classic iso overview.
   camera: { zoom: 9, min: 5.5, max: 40, offset: { x: 22, y: 28, z: 22 }, frameRight: 3, panHold: 4 },
+  // Character camera: perspective, behind+above player, lower angle.
+  charCamera: { fov: 55, distance: 10, height: 6.5, lookAhead: 2, lookHeight: 1.8 },
 
-  bg: 0x14171e,
-  fog: { color: 0x14171e, near: 70, far: 170 },
+  bg: 0x2a3040,
+  fog: { color: 0x2a3040, near: 90, far: 200 },
 
   lights: {
-    ambient: 0xaab4cc, ambientI: 1.05,
-    key: 0xfff1da, keyI: 1.2,
-    hemiSky: 0xc3d4f2, hemiGround: 0x3a3a30, hemiI: 0.62
+    ambient: 0xd0d8ea, ambientI: 1.35,
+    key: 0xfff4e0, keyI: 1.55,
+    hemiSky: 0xd8e4ff, hemiGround: 0x5a5a48, hemiI: 0.85
   },
 
-  walls: { side: 0x53565f, top: 0x868b96, base: 0x33353c, grime: 0x2a2c32, bars: 0x20242b, frame: 0x474b54 },
+  walls: { side: 0x6a6e78, top: 0xa0a5b0, base: 0x44474f, grime: 0x3a3d46, bars: 0x30353e, frame: 0x585d68 },
 
-  floor: { base: 0x3a3d44 },
+  floor: { base: 0x505660 },
 
-  // per room-type look: floor tint, accent, and a moody light color
+  // per room-type look: brighter floor tints + warmer room lights
   rooms: {
-    hallway:   { floor: 0x474b54, accent: 0x33363d, light: 0xbcccea, lightI: 0.75 },
-    cellblock: { floor: 0x565a63, accent: 0x6a6e78, light: 0x9fb6dc, lightI: 0.9 },
-    cafeteria: { floor: 0x7a6850, accent: 0x8a7350, light: 0xffd9a0, lightI: 1.15 },
-    shower:    { floor: 0x52707c, accent: 0x6f97a4, light: 0xaed4e6, lightI: 0.95 },
-    guardroom: { floor: 0x44505f, accent: 0x556074, light: 0x8fa6d0, lightI: 0.9 },
-    yard:      { floor: 0x63724a, accent: 0x6f8050, light: 0xdfecff, lightI: 0.9 }
+    hallway:   { floor: 0x5a5f6a, accent: 0x44484f, light: 0xd0daf0, lightI: 1.0 },
+    cellblock: { floor: 0x686d78, accent: 0x7a7f8a, light: 0xbaccea, lightI: 1.15 },
+    cafeteria: { floor: 0x8a7858, accent: 0x9a8560, light: 0xffe4b0, lightI: 1.4 },
+    shower:    { floor: 0x628090, accent: 0x80aab8, light: 0xc0e4f4, lightI: 1.2 },
+    guardroom: { floor: 0x546070, accent: 0x667888, light: 0xa0b8e0, lightI: 1.15 },
+    yard:      { floor: 0x748258, accent: 0x809060, light: 0xf0f6ff, lightI: 1.15 }
   } as Record<string, { floor: number; accent: number; light: number; lightI: number }>,
 
   prisoners: {
-    uniforms: [0xef7a22, 0xe24a2f, 0xe8b52e, 0xde6a26, 0xd14a2a],
-    skins: [0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524, 0xffdbac, 0x6b4423],
+    // vibrant orange jumpsuits that pop against grey walls
+    uniforms: [0xff8c22, 0xf05a28, 0xffa030, 0xf07030, 0xe84828],
+    skins: [0xf5cc8d, 0xe4b878, 0xd49a5a, 0x9a6838, 0xffdeb8, 0x7a5030],
     hair: [0x2b1d0e, 0x111111, 0x5a3a1a, 0x888888, 0xd9b382, 0x7a3b2a]
   },
-  // prisoners: bright jumpsuit; darker trousers for a two-tone "uniform" read
-  prisonerTrousers: 0x394050,
-  guard: { uniform: 0x1f2c3e, trousers: 0x18222f, cap: 0x0e151f, badge: 0xf2cf4e, skin: 0xe0ac69 },
+  prisonerTrousers: 0x4a5060,
+  guard: { uniform: 0x28384e, trousers: 0x1e2a3a, cap: 0x141e2a, badge: 0xf5d55a, skin: 0xe4b878 },
 
   selection: 0x6dff9e,
   contactShadow: 0x000000,
-  exterior: 0x1a1c22
+  exterior: 0x242830
 };
 
 export const hex = (n: number) => '#' + (n >>> 0).toString(16).padStart(6, '0');
