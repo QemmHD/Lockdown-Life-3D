@@ -11,15 +11,17 @@ export const THEME = {
   bg: 0x2a3040,
   fog: { color: 0x2a3040, near: 90, far: 200 },
 
+  // more directional contrast (lower fill, stronger key) so the prison reads less flat/grey
   lights: {
-    ambient: 0xd0d8ea, ambientI: 1.35,
-    key: 0xfff4e0, keyI: 1.55,
-    hemiSky: 0xd8e4ff, hemiGround: 0x5a5a48, hemiI: 0.85
+    ambient: 0xc4cee6, ambientI: 1.12,
+    key: 0xfff1d6, keyI: 1.85,
+    hemiSky: 0xcfe0ff, hemiGround: 0x4e4e3c, hemiI: 0.8
   },
 
-  walls: { side: 0x6a6e78, top: 0xa0a5b0, base: 0x44474f, grime: 0x3a3d46, bars: 0x30353e, frame: 0x585d68 },
+  // cooler, slightly more saturated concrete with a brighter cap = walls pop off the floor
+  walls: { side: 0x5b6473, top: 0xacb4c6, base: 0x383c46, grime: 0x33363f, bars: 0x2a2f38, frame: 0x5a6070 },
 
-  floor: { base: 0x505660 },
+  floor: { base: 0x474e5b },
 
   // per room-type look: brighter floor tints + warmer room lights
   rooms: {

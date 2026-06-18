@@ -108,7 +108,7 @@ export class Simulation {
   economy: EconomyState = newEconomy();
 
   // lightweight playtest telemetry (?debug)
-  metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0, newGameStarted: 0, setupRandomized: 0, setupCompleted: 0, invitesGenerated: 0, invitesAccepted: 0, invitesDeclined: 0, invitesExpired: 0, rankUps: 0, gangJoined: 0, gangStandingChanges: 0, allyHelp: 0, trades: 0, buys: 0, sells: 0, itemsUsed: 0, itemsStashed: 0, itemsConfiscated: 0, jobMoneyEarned: 0, marketRestocks: 0, gangOffersGenerated: 0, economyObjectivesCompleted: 0 };
+  metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, shoves: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0, combatUIOpens: 0, combatUICloses: 0, newGameStarted: 0, setupRandomized: 0, setupCompleted: 0, invitesGenerated: 0, invitesAccepted: 0, invitesDeclined: 0, invitesExpired: 0, rankUps: 0, gangJoined: 0, gangStandingChanges: 0, allyHelp: 0, trades: 0, buys: 0, sells: 0, itemsUsed: 0, itemsStashed: 0, itemsConfiscated: 0, jobMoneyEarned: 0, marketRestocks: 0, gangOffersGenerated: 0, economyObjectivesCompleted: 0 };
 
   constructor(public bus: EventBus, seed = Math.floor(Math.random() * 1e9)) { this.rng = new Random(seed); }
 
@@ -1372,13 +1372,16 @@ export class Simulation {
     }
     // a landed hit
     this.metrics.hits++;
+    if (atk === 'shove') this.metrics.shoves++;
     const weapon = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.combat ?? 0).reduce((a, c) => Math.max(a, c), 0);
     let dmg = this.rng.range(ATTACKS[atk].dmgMin, ATTACKS[atk].dmgMax) * (b.traits.includes('tough') ? 1.2 : 1) * (b.traits.includes('weak') ? 0.7 : 1);
     dmg += weapon * 0.02; if (outcome === 'glancing') dmg *= 0.45;
     fn.health = clamp01(fn.health - dmg);
     fb.lastAttacker = e;
     this.bus.emit('impact', { x: fp.x, z: fp.z });
-    if (dmg > 0.02) this.bus.emit('float', { x: fp.x, z: fp.z, text: `-${Math.round(dmg * 100)}`, color: '#ff7a6a' });
+    // clearer feedback: shoves read as "Shoved!" (spacing), strikes show the damage number
+    if (atk === 'shove') this.bus.emit('float', { x: fp.x, z: fp.z, text: 'Shoved!', color: '#cfe0ff' });
+    else if (dmg > 0.02) this.bus.emit('float', { x: fp.x, z: fp.z, text: `-${Math.round(dmg * 100)}`, color: '#ff7a6a' });
     // knockback (path-safe) + hit reaction / stumble
     const ang = Math.atan2(fp.x - ep.x, fp.z - ep.z);
     this.nudge(fp, Math.sin(ang) * ATTACKS[atk].knockback * 0.6, Math.cos(ang) * ATTACKS[atk].knockback * 0.6);

@@ -210,3 +210,15 @@ button { font-family: inherit; cursor: pointer; }
 .cbtn.back { border-color: #6a6a3a; } .cbtn.off { border-color: #8a2f2f; }
 .cbtn.cool { opacity: 0.4; }
 .cbtn:active { transform: translateY(1px); }
+
+/* ---- mobile landscape: keep controls reachable without eating vertical space (Stage 3.9 opt) ---- */
+@media (orientation: landscape) and (max-height: 560px) {
+  #combat-hud { width: min(96%, 760px); bottom: calc(8px + env(safe-area-inset-bottom)); gap: 6px; }
+  .ch-btns { grid-template-columns: repeat(7, 1fr); }
+  .cbtn { min-height: 46px; font-size: 12px; }
+  #bottombar { bottom: calc(8px + env(safe-area-inset-bottom)); gap: 8px; }
+  .hud-btn { width: 58px; height: 48px; }
+  .hud-btn .b-lbl { font-size: 9px; }
+  #panel { top: 54px; max-height: calc(100% - 76px); width: 220px; }
+  #alert-feed { top: 54px; width: min(42%, 280px); }
+}

@@ -532,10 +532,10 @@ export class Game {
 
     // combat HUD: a dedicated control cluster replaces the side panel while the player is fighting
     if (inCombat) {
-      if (!this.combatOn) { this.combatOn = true; this.hud.showPanel(null); this.hud.showCombat(this.sim.playerCombatActions()); this.selected = this.playerEntity; this.selectedObj = null; }
+      if (!this.combatOn) { this.combatOn = true; this.sim.metrics.combatUIOpens = (this.sim.metrics.combatUIOpens || 0) + 1; this.hud.showPanel(null); this.hud.showCombat(this.sim.playerCombatActions()); this.selected = this.playerEntity; this.selectedObj = null; }
       this.hud.updateCombat(this.sim.combatSnapshot());
     } else {
-      if (this.combatOn) { this.combatOn = false; this.hud.hideCombat(); this.panelDirty = true; }
+      if (this.combatOn) { this.combatOn = false; this.sim.metrics.combatUICloses = (this.sim.metrics.combatUICloses || 0) + 1; this.hud.hideCombat(); this.panelDirty = true; }
       // panel: refresh on demand (selection/action/inventory) or a few times a second — never every frame
       this.panelTimer -= dt;
       if (this.panelDirty || this.panelTimer <= 0) {

@@ -170,7 +170,7 @@ export class HUD {
     const now = performance.now();
     // dedupe: drop the exact same message within a short window, and never duplicate the top line
     const last = this.alertSeen.get(text);
-    if (last != null && now - last < 4500) return;
+    if (last != null && now - last < 6000) return;                      // wider dedupe window = less spam
     this.alertSeen.set(text, now);
     if (this.alertSeen.size > 40) for (const [k, t] of this.alertSeen) if (now - t > 8000) this.alertSeen.delete(k);
     const feed = this.els['alert-feed'];
@@ -179,8 +179,8 @@ export class HUD {
     el.className = 'alert alert-' + type;
     el.textContent = text;
     feed.prepend(el);
-    while (feed.children.length > 5) feed.lastChild && feed.removeChild(feed.lastChild);
-    setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 600); }, 5000);
+    while (feed.children.length > 3) feed.lastChild && feed.removeChild(feed.lastChild);   // keep the feed short + readable
+    setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 500); }, 4000);
   }
 
   // identity of the panel's *structure* (buttons / inventory / which entity). When this is
