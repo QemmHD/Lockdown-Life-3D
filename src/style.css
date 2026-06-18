@@ -222,3 +222,19 @@ button { font-family: inherit; cursor: pointer; }
   #panel { top: 54px; max-height: calc(100% - 76px); width: 220px; }
   #alert-feed { top: 54px; width: min(42%, 280px); }
 }
+
+/* ---- HUD visual polish (Stage 3.9 art pass): more premium cards/buttons, less debug look ---- */
+:root { --panel-edge: rgba(255,255,255,0.10); }
+#panel { background: linear-gradient(180deg, rgba(28,32,40,0.96), rgba(18,21,27,0.96)); border: 1px solid var(--panel-edge); border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
+.panel-head b { letter-spacing: 0.2px; }
+.chip { background: rgba(255,255,255,0.06); border: 1px solid var(--panel-edge); border-radius: 999px; }
+.hud-btn { background: linear-gradient(180deg, #424855, #20242c); border: 1px solid #545b68; border-top-color: #6b7280; border-radius: 14px; box-shadow: 0 5px 14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.14); }
+.hud-btn:active { transform: translateY(1px); box-shadow: 0 2px 6px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1); }
+.hud-btn .b-lbl { opacity: 0.82; letter-spacing: 0.3px; }
+.tb-block { background: linear-gradient(180deg, rgba(20,24,31,0.82), rgba(14,17,22,0.82)); border: 1px solid var(--panel-edge); border-radius: 12px; padding: 7px 11px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+.tb-chip { background: rgba(255,255,255,0.05); border: 1px solid var(--panel-edge); border-radius: 9px; }
+.tb-chip.sev-mid { border-color: rgba(255,180,60,0.5); } .tb-chip.sev-high { border-color: rgba(230,70,60,0.6); }
+#alert-feed .alert { border-radius: 10px; border: 1px solid var(--panel-edge); box-shadow: 0 3px 10px rgba(0,0,0,0.4); backdrop-filter: blur(4px); }
+#obj-tracker { border-radius: 11px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+.ch-top { background: linear-gradient(180deg, rgba(28,32,40,0.96), rgba(18,21,27,0.96)); box-shadow: 0 8px 24px rgba(0,0,0,0.55); }
+.cbtn { box-shadow: 0 4px 12px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1); }

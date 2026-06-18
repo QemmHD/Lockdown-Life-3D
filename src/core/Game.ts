@@ -201,9 +201,8 @@ export class Game {
       grp.add(this.makeBox(0.12, 2.0, 0.14, frameMat, -0.5, 1.0, 0));
       grp.add(this.makeBox(0.12, 2.0, 0.14, frameMat, 0.5, 1.0, 0));
       const pivot = new THREE.Group(); pivot.position.set(-0.45, 0, 0);                    // hinge at left post
-      for (let i = 0; i < 4; i++) pivot.add(this.makeCyl(0.04, 1.7, barMat, 0.1 + i * 0.24, 0.85, 0));
-      pivot.add(this.makeBox(0.9, 0.08, 0.08, barMat, 0.45, 1.6, 0));
-      pivot.add(this.makeBox(0.9, 0.08, 0.08, barMat, 0.45, 0.2, 0));
+      for (let i = 0; i < 5; i++) pivot.add(this.makeCyl(0.05, 1.7, barMat, 0.08 + i * 0.2, 0.85, 0));
+      for (const ry of [1.6, 0.9, 0.2]) pivot.add(this.makeBox(0.9, 0.09, 0.09, barMat, 0.45, ry, 0));
       grp.add(pivot);
       const lampMat = new THREE.MeshStandardMaterial({ color: 0x222, emissive: 0x33ff66, emissiveIntensity: 0.9 });
       grp.add(this.makeBox(0.12, 0.12, 0.12, lampMat, 0.5, 1.95, 0));

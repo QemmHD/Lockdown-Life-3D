@@ -71,24 +71,38 @@ export function buildPrison(scene: THREE.Scene, map: TileMap, rooms: Room[]) {
   const tall = all.filter((k) => !isCellWall(k));
   const low = all.filter((k) => isCellWall(k));
   const concreteTex = createConcreteTexture('#5a5d66', 1);
+  // fake ambient occlusion: a soft dark plane on the floor under every wall tile grounds the walls
+  // so rooms stop looking like floating boxes (one cheap instanced mesh for all walls).
+  const aoMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false });
+  const aoGeo = new THREE.PlaneGeometry(1.5, 1.5);
+  const ao = new THREE.InstancedMesh(aoGeo, aoMat, all.length); ao.renderOrder = 1;
+  const aoM = new THREE.Matrix4(); const aoQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)); const aoS = new THREE.Vector3(1, 1, 1);
+  all.forEach((k, i) => { const t = map.tileXY(k), w = map.toWorld(t.x, t.y); ao.setMatrixAt(i, aoM.compose(new THREE.Vector3(w.x, 0.05, w.z), aoQ, aoS)); });
+  ao.instanceMatrix.needsUpdate = true; root.add(ao);
+
   const buildWalls = (list: number[], height: number, capColor: number) => {
     if (!list.length) return;
     const bodyGeo = new THREE.BoxGeometry(1, height, 1);
     const bodyMat = new THREE.MeshStandardMaterial({ map: concreteTex, color: THEME.walls.side, roughness: 0.95, flatShading: true });
     const body = new THREE.InstancedMesh(bodyGeo, bodyMat, list.length);
     body.castShadow = true; body.receiveShadow = true;
-    const capGeo = new THREE.BoxGeometry(1.04, 0.16, 1.04);
-    const capMat = new THREE.MeshStandardMaterial({ color: capColor, roughness: 0.8 });
-    const cap = new THREE.InstancedMesh(capGeo, capMat, list.length);
-    cap.castShadow = true;
+    // lighter chamfered top cap reads as an intentional capping beam, not a white strip
+    const capGeo = new THREE.BoxGeometry(1.06, 0.2, 1.06);
+    const capMat = new THREE.MeshStandardMaterial({ color: capColor, roughness: 0.7, metalness: 0.1 });
+    const cap = new THREE.InstancedMesh(capGeo, capMat, list.length); cap.castShadow = true;
+    // dark scuffed baseboard kick-plate where wall meets floor — strong edge definition
+    const baseGeo = new THREE.BoxGeometry(1.08, 0.22, 1.08);
+    const baseMat = new THREE.MeshStandardMaterial({ color: THEME.walls.base, roughness: 0.9, metalness: 0.15 });
+    const base = new THREE.InstancedMesh(baseGeo, baseMat, list.length); base.castShadow = true; base.receiveShadow = true;
     const m = new THREE.Matrix4();
     list.forEach((k, i) => {
       const t = map.tileXY(k), w = map.toWorld(t.x, t.y);
       body.setMatrixAt(i, m.makeTranslation(w.x, height / 2, w.z));
-      cap.setMatrixAt(i, m.makeTranslation(w.x, height + 0.04, w.z));
+      cap.setMatrixAt(i, m.makeTranslation(w.x, height + 0.05, w.z));
+      base.setMatrixAt(i, m.makeTranslation(w.x, 0.11, w.z));
     });
-    body.instanceMatrix.needsUpdate = true; cap.instanceMatrix.needsUpdate = true;
-    root.add(body, cap);
+    body.instanceMatrix.needsUpdate = true; cap.instanceMatrix.needsUpdate = true; base.instanceMatrix.needsUpdate = true;
+    root.add(body, cap, base);
   };
   buildWalls(tall, WALL_H, THEME.walls.top);
   buildWalls(low, 1.4, THEME.walls.base);

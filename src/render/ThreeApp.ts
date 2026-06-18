@@ -32,6 +32,14 @@ export class ThreeApp {
     this.scene.add(dir);
 
     this.scene.add(new THREE.HemisphereLight(THEME.lights.hemiSky, THEME.lights.hemiGround, THEME.lights.hemiI));
+
+    // cool rim/back light (no shadows — cheap) opposite the key: separates characters/props from
+    // the background and adds depth instead of flat front-lighting.
+    const rim = new THREE.DirectionalLight(0x9fc0ff, 0.6);
+    rim.position.set(-22, 18, -16); this.scene.add(rim);
+    // faint warm bounce so shadowed sides aren't muddy black
+    const fill = new THREE.DirectionalLight(0xffe6c0, 0.16);
+    fill.position.set(10, -6, 12); this.scene.add(fill);
   }
 
   resize() { this.renderer.setSize(window.innerWidth, window.innerHeight); }
