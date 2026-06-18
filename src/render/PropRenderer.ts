@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { TileMap } from '../world/TileMap';
 import { Room, Cell } from '../world/WorldGen';
+import { createMetalTexture } from './textures/createMetalTexture';
 import { InteractableDef, ObjType } from '../world/Interactable';
 
 // Dresses rooms with simple-but-readable prison furniture. Blocking props (bunks, counter,
@@ -47,7 +48,8 @@ function vent() { return box(0.7, 0.4, 0.08, M.darkMetal, 0, 0, 0); }
 function securityLight() { return box(0.18, 0.18, 0.18, new THREE.MeshStandardMaterial({ color: 0x300, emissive: 0xff3322, emissiveIntensity: 1.6 }), 0, 0, 0); }
 function fencePost() { return cyl(0.07, 2.6, M.metal, 0, 1.3, 0); }
 // a run of vertical bars spanning `len` world units along X (cell fronts / partitions)
-function barRun(len: number, h = 1.95) { const g = new THREE.Group(); const n = Math.max(2, Math.round(len / 0.26)); for (let i = 0; i <= n; i++) g.add(cyl(0.04, h, M.bars, -len / 2 + (i / n) * len, h / 2, 0)); g.add(box(len, 0.08, 0.08, M.bars, 0, h, 0)); g.add(box(len, 0.08, 0.08, M.bars, 0, 0.2, 0)); return g; }
+// heavier, clearly-read prison bars: thicker uprights + top/mid/bottom rails
+function barRun(len: number, h = 1.95) { const g = new THREE.Group(); const n = Math.max(2, Math.round(len / 0.22)); for (let i = 0; i <= n; i++) g.add(cyl(0.055, h, M.bars, -len / 2 + (i / n) * len, h / 2, 0)); for (const ry of [h, h * 0.55, 0.18]) g.add(box(len, 0.1, 0.1, M.bars, 0, ry, 0)); return g; }
 function cot() { const g = new THREE.Group(); g.add(box(0.9, 0.22, 1.8, M.darkMetal, 0, 0.16, 0)); g.add(box(0.82, 0.12, 1.7, M.mattress, 0, 0.32, 0)); return g; }
 function shelf() { const g = new THREE.Group(); g.add(box(1.6, 1.6, 0.5, M.metal, 0, 0.8, 0)); for (let i = 0; i < 3; i++) g.add(box(1.5, 0.05, 0.46, M.darkMetal, 0, 0.4 + i * 0.5, 0)); for (let i = 0; i < 4; i++) g.add(box(0.4, 0.3, 0.4, M.wood, -0.5 + (i % 2), 0.55 + Math.floor(i / 2) * 0.5, 0)); return g; }
 function scanner() { const g = new THREE.Group(); for (const x of [-0.6, 0.6]) g.add(box(0.18, 2.0, 0.4, M.steel, x, 1.0, 0)); g.add(box(1.4, 0.2, 0.4, M.steel, 0, 2.0, 0)); g.add(box(1.2, 0.05, 0.4, new THREE.MeshStandardMaterial({ color: 0x113, emissive: 0x2255aa, emissiveIntensity: 0.8 }), 0, 1.9, 0)); return g; }
@@ -63,12 +65,28 @@ function ceilingLamp() { return box(1.4, 0.12, 0.4, M.lamp, 0, 3.4, 0); }
 function pipe(len: number) { const m = cyl(0.12, len, M.metal); m.rotation.z = Math.PI / 2; m.position.y = 3.0; return m; }
 function sign(color: number) { return box(0.06, 0.5, 0.7, new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.3 }), 0, 2.2, 0); }
 function dirtPatch() { const m = new THREE.Mesh(new THREE.CircleGeometry(1.0, 10), new THREE.MeshStandardMaterial({ color: 0x3a3322, roughness: 1, transparent: true, opacity: 0.6 })); m.rotation.x = -Math.PI / 2; m.position.y = 0.045; return m; }
+// small stencilled cell-number plate so each cell reads as its own cell
+function cellPlate(n: number): THREE.Mesh {
+  const cv = document.createElement('canvas'); cv.width = 64; cv.height = 40; const x = cv.getContext('2d')!;
+  x.fillStyle = '#161a21'; x.fillRect(0, 0, 64, 40);
+  x.strokeStyle = '#5a8fd0'; x.lineWidth = 3; x.strokeRect(3, 3, 58, 34);
+  x.fillStyle = '#d6e4ff'; x.font = 'bold 24px Arial'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(String(n), 32, 22);
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.29), new THREE.MeshStandardMaterial({ map: t, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0.22, side: THREE.DoubleSide }));
+  m.position.y = 1.62; return m;
+}
 
 export function dressRooms(scene: THREE.Scene, map: TileMap, rooms: Room[], cells: Cell[]) {
   const root = new THREE.Group();
   const W = map.width, H = map.height;
   const place = (g: THREE.Object3D, x: number, z: number, rotY = 0) => { g.position.x = x; g.position.z = z; g.rotation.y = rotY; root.add(g); };
   const tw = (tx: number, ty: number) => map.toWorld(tx, ty);
+  // give the shared metal materials a brushed/scuffed map once (richer steel, bars, lockers)
+  if (!(M.metal as any)._mapped) {
+    const mt = createMetalTexture('#9aa0a8', 1);
+    M.metal.map = mt; M.steel.map = mt; M.darkMetal.map = createMetalTexture('#3c4047', 1); M.bars.map = createMetalTexture('#2a2f38', 1);
+    [M.metal, M.steel, M.darkMetal, M.bars].forEach((m) => (m.needsUpdate = true)); (M.metal as any)._mapped = true;
+  }
 
   // interactable registration: builds a def + an invisible, finger-friendly hitbox. Blocking props
   // pass a tile footprint; the interaction tile is chosen on an adjacent pathable, non-footprint tile.
@@ -102,7 +120,7 @@ export function dressRooms(scene: THREE.Scene, map: TileMap, rooms: Room[], cell
   const footAt = (tx: number, ty: number) => (map.inBounds(tx, ty) ? [map.idx(tx, ty)] : []);
 
   // ---- cells (individual): bunk + toilet + sink, with bars across each barred front ----
-  for (const c of cells) {
+  cells.forEach((c, ci) => {
     const bunkW = tw(c.bunk.x, c.bunk.y), toiletW = tw(c.toilet.x, c.toilet.y), sinkW = tw(c.sink.x, c.sink.y), standW = map.toWorld(c.stand % W, Math.floor(c.stand / W));
     const room = rooms.find((r) => r.id === c.room)!;
     place(bunk(), bunkW.x, bunkW.z, c.facing); reg('bed', 'Bunk', bunkW.x, bunkW.z, room, { foot: footAt(c.bunk.x, c.bunk.y), stand: standW });
@@ -110,7 +128,10 @@ export function dressRooms(scene: THREE.Scene, map: TileMap, rooms: Room[], cell
     place(sink(), sinkW.x, sinkW.z, c.facing + Math.PI / 2); reg('sink', 'Sink', sinkW.x, sinkW.z, room, { foot: footAt(c.sink.x, c.sink.y), stand: standW });
     // static bars across the barred front (the openable gate leaf is owned by Game.buildDoorObjects)
     for (const k of c.gateTiles) { const t = map.tileXY(k); const w = tw(t.x, t.y); place(barRun(1.0), w.x, w.z, 0); }
-  }
+    // stencilled cell-number plate above the door gap so each cell reads as an individual cell
+    const dt = map.tileXY(c.doorTile); const dw = tw(dt.x, dt.y); const off = c.facing === 0 ? 0.5 : -0.5;
+    place(cellPlate(ci + 1), dw.x, dw.z + off, c.facing === 0 ? 0 : Math.PI);
+  });
 
   for (const r of rooms) {
     const minX = r.x - W / 2, maxX = r.x + r.w - W / 2;

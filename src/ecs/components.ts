@@ -57,6 +57,8 @@ export interface Brain {
   cTimer?: number;         // time left in the current combat phase
   cResult?: string;        // last combat result text (panel/feedback)
   blockT?: number;         // active block window (player Block)
+  dodgeT?: number;         // active dodge i-frame window (player Dodge/Backstep)
+  farT?: number;           // time the foe has been out of range (player combat auto-disengage)
   pendingAtk?: string;     // player-queued attack type (strike/heavy/shove)
   lastAttacker?: Entity;   // who last struck this character
 }

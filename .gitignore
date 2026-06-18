@@ -21,3 +21,4 @@ probe.mjs
 probe_pan.mjs
 probe*.mjs
 fit_*.png
+verify*.mjs

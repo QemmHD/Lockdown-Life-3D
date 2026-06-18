@@ -185,3 +185,56 @@ button { font-family: inherit; cursor: pointer; }
 .su-dot, .m-chips2 .su-chip { display: inline-block; } .su-dot { width: 12px; height: 12px; border-radius: 50%; vertical-align: middle; margin-left: 4px; }
 
 @media (max-width: 560px) { #panel { width: 200px; } #alert-feed { width: 55%; } .hud-btn { width: 60px; height: 56px; } }
+
+/* ---- combat HUD cluster (Stage 3.9) ---- */
+#combat-hud { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(84px + env(safe-area-inset-bottom)); width: min(94%, 540px); display: flex; flex-direction: column; gap: 8px; z-index: 13; }
+#combat-hud.hidden { display: none; }
+.ch-top { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid rgba(255,255,255,0.16); border-radius: 12px; padding: 8px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+.ch-side { flex: 1; min-width: 0; }
+.ch-side.right { text-align: right; }
+.ch-name { font-size: 11px; font-weight: 800; letter-spacing: 0.5px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-bar { height: 7px; background: rgba(0,0,0,0.5); border-radius: 4px; overflow: hidden; margin-top: 3px; }
+.ch-bar i { display: block; height: 100%; width: 50%; border-radius: 4px; transition: width 0.15s; }
+.ch-side.right .ch-bar i { margin-left: auto; }
+.ch-bar i.hp { background: linear-gradient(90deg, #e24a2f, #ef7a22); }
+.ch-bar i.en { background: #3a7fd8; }
+.ch-mid { flex: 0 0 auto; }
+.ch-state { font-size: 12px; font-weight: 800; padding: 5px 10px; border-radius: 8px; background: rgba(0,0,0,0.45); white-space: nowrap; }
+.ch-state.good { color: #9fe0a0; } .ch-state.far { color: #ffb74a; } .ch-state.warn { color: #ff9a3c; } .ch-state.bad { color: #ff7a6a; } .ch-state.act { color: #bcccea; }
+.ch-btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; }
+.cbtn { min-height: 52px; border-radius: 11px; border: 1px solid #4b515c; background: linear-gradient(180deg, #3a3f49, #1c1f26); color: var(--ink); font-size: 13px; font-weight: 700; box-shadow: 0 3px 10px rgba(0,0,0,0.45); }
+.cbtn.atk { border-color: #7a4a2a; background: linear-gradient(180deg, #7a3f28, #3a1f12); }
+.cbtn.atk.heavy { border-color: #b8472a; }
+.cbtn.def { border-color: #2a5a7a; }
+.cbtn.def.on { box-shadow: 0 0 0 2px #6dff9e, 0 3px 10px rgba(0,0,0,0.45); }
+.cbtn.back { border-color: #6a6a3a; } .cbtn.off { border-color: #8a2f2f; }
+.cbtn.cool { opacity: 0.4; }
+.cbtn:active { transform: translateY(1px); }
+
+/* ---- mobile landscape: keep controls reachable without eating vertical space (Stage 3.9 opt) ---- */
+@media (orientation: landscape) and (max-height: 560px) {
+  #combat-hud { width: min(96%, 760px); bottom: calc(8px + env(safe-area-inset-bottom)); gap: 6px; }
+  .ch-btns { grid-template-columns: repeat(7, 1fr); }
+  .cbtn { min-height: 46px; font-size: 12px; }
+  #bottombar { bottom: calc(8px + env(safe-area-inset-bottom)); gap: 8px; }
+  .hud-btn { width: 58px; height: 48px; }
+  .hud-btn .b-lbl { font-size: 9px; }
+  #panel { top: 54px; max-height: calc(100% - 76px); width: 220px; }
+  #alert-feed { top: 54px; width: min(42%, 280px); }
+}
+
+/* ---- HUD visual polish (Stage 3.9 art pass): more premium cards/buttons, less debug look ---- */
+:root { --panel-edge: rgba(255,255,255,0.10); }
+#panel { background: linear-gradient(180deg, rgba(28,32,40,0.96), rgba(18,21,27,0.96)); border: 1px solid var(--panel-edge); border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.06); backdrop-filter: blur(6px); }
+.panel-head b { letter-spacing: 0.2px; }
+.chip { background: rgba(255,255,255,0.06); border: 1px solid var(--panel-edge); border-radius: 999px; }
+.hud-btn { background: linear-gradient(180deg, #424855, #20242c); border: 1px solid #545b68; border-top-color: #6b7280; border-radius: 14px; box-shadow: 0 5px 14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.14); }
+.hud-btn:active { transform: translateY(1px); box-shadow: 0 2px 6px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1); }
+.hud-btn .b-lbl { opacity: 0.82; letter-spacing: 0.3px; }
+.tb-block { background: linear-gradient(180deg, rgba(20,24,31,0.82), rgba(14,17,22,0.82)); border: 1px solid var(--panel-edge); border-radius: 12px; padding: 7px 11px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+.tb-chip { background: rgba(255,255,255,0.05); border: 1px solid var(--panel-edge); border-radius: 9px; }
+.tb-chip.sev-mid { border-color: rgba(255,180,60,0.5); } .tb-chip.sev-high { border-color: rgba(230,70,60,0.6); }
+#alert-feed .alert { border-radius: 10px; border: 1px solid var(--panel-edge); box-shadow: 0 3px 10px rgba(0,0,0,0.4); backdrop-filter: blur(4px); }
+#obj-tracker { border-radius: 11px; box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+.ch-top { background: linear-gradient(180deg, rgba(28,32,40,0.96), rgba(18,21,27,0.96)); box-shadow: 0 8px 24px rgba(0,0,0,0.55); }
+.cbtn { box-shadow: 0 4px 12px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1); }
