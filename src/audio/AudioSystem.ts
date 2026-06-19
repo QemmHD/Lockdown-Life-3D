@@ -15,6 +15,7 @@ export class AudioSystem {
   private master!: GainNode;          // volume * !muted
   private busGain!: GainNode;         // one-shots
   private ambGain!: GainNode;         // ambient bed
+  private alarmGain!: GainNode;       // smooth siren bus
   private started = false;            // persistent nodes built
   private muted = false;
   private volume = 0.7;
@@ -37,6 +38,7 @@ export class AudioSystem {
     this.master = ctx.createGain(); this.master.gain.value = this.muted ? 0 : this.volume; this.master.connect(ctx.destination);
     this.busGain = ctx.createGain(); this.busGain.gain.value = 0.9; this.busGain.connect(this.master);
     this.ambGain = ctx.createGain(); this.ambGain.gain.value = 0; this.ambGain.connect(this.master);
+    this.alarmGain = ctx.createGain(); this.alarmGain.gain.value = 0; this.alarmGain.connect(this.master);
     return ctx;
   }
   unlock() {
@@ -131,38 +133,24 @@ export class AudioSystem {
     const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 340; lp.Q.value = 0.4; lp.connect(this.ambGain);
     for (const [f, gain] of [[60, 0.5], [90, 0.3], [150, 0.14]] as [number, number][]) { const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = f; const g = ctx.createGain(); g.gain.value = gain; o.connect(g).connect(lp); o.start(); }
     this.ambLp = lp;
+    // smooth two-tone SIREN (triangle, slow hi-lo sweep + gentle tremolo) — a sustained but soft
+    // alarm voice that runs while alarm/lockdown is active (replaces the harsh square klaxon).
+    const sir = ctx.createGain(); sir.gain.value = 0.55; sir.connect(this.alarmGain);
+    const so = ctx.createOscillator(); so.type = 'triangle'; so.frequency.value = 480; so.connect(sir); so.start();
+    const sweep = ctx.createOscillator(); sweep.type = 'sine'; sweep.frequency.value = 0.7; const sweepG = ctx.createGain(); sweepG.gain.value = 90; sweep.connect(sweepG).connect(so.frequency); sweep.start();
+    const trem = ctx.createOscillator(); trem.type = 'sine'; trem.frequency.value = 0.7; const tremG = ctx.createGain(); tremG.gain.value = 0.18; trem.connect(tremG).connect(sir.gain); trem.start();
   }
   private ambLp: BiquadFilterNode | null = null;
-  private lastAlarm = false;
-
-  // a brief alarm warble (3 descending triangle pulses, ~0.8s) — plays ONCE on the rising edge of an
-  // alarm/lockdown, NOT a continuous klaxon (which was annoying + repetitive over a long lockdown).
-  private alarmSting() {
-    if (!this.ctx || this.throttled('alarm', 1.5)) return;
-    const ctx = this.ctx, t0 = ctx.currentTime;
-    for (let i = 0; i < 3; i++) {
-      const start = t0 + i * 0.24;
-      const o = ctx.createOscillator(); const g = ctx.createGain();
-      o.type = 'triangle';
-      o.frequency.setValueAtTime(560, start); o.frequency.exponentialRampToValueAtTime(360, start + 0.2);
-      g.gain.setValueAtTime(0.0001, start); g.gain.exponentialRampToValueAtTime(0.14, start + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, start + 0.21);
-      o.connect(g).connect(this.busGain); o.start(start); o.stop(start + 0.24);
-      o.onended = () => g.disconnect();
-    }
-  }
 
   // called every frame from the game loop with a snapshot of game tension
   updateAmbient(playing: boolean, riot: number, alarm: boolean, hour: number) {
     if (!this.ctx || !this.started) return;
     const t = this.ctx.currentTime;
     const night = (hour >= 22 || hour < 6) ? 0.5 : 1;                  // quieter overnight
-    // a lockdown/alarm adds a little background tension to the hum (not a constant klaxon)
-    const tension = Math.min(1, Math.max(riot, alarm ? 0.45 : 0));
-    const bed = playing ? (0.012 + tension * 0.09) * night : 0.0;     // near-silent when calm
+    const bed = playing ? (0.012 + Math.min(1, riot) * 0.09) * night : 0.0;   // near-silent when calm
     this.ambGain.gain.setTargetAtTime(bed, t, 0.8);
-    if (this.ambLp) this.ambLp.frequency.setTargetAtTime(300 + tension * 260, t, 0.8);
-    // brief warble on the rising edge of an alarm only — no endless repeating klaxon
-    if (alarm && !this.lastAlarm && playing) this.alarmSting();
-    this.lastAlarm = alarm;
+    if (this.ambLp) this.ambLp.frequency.setTargetAtTime(300 + Math.min(1, riot) * 260, t, 0.8);
+    // sustained but SMOOTH siren while an alarm/lockdown is active; gentle fade in / out
+    this.alarmGain.gain.setTargetAtTime(alarm && playing ? 0.2 : 0.0, t, 0.4);
   }
 }
