@@ -8,10 +8,71 @@
 > a **believable floorplan with real individual cells + prop collision** (no walking through walls/
 > bars/counters/beds), interactable props, doors/gates with schedule-driven locking + NPC schedule
 > anchors, object reservations, character creation, save/load (v12), and a **chaos layer** (lockdowns,
-> alarm, riot pressure, area tension, guard checkpoints, abstract escape attempts). **Not yet built:**
-> audio, Capacitor/IPA, deep riot warfare. The `v1.x` entries are **archived legacy history** for the original
+> alarm, riot pressure, area tension, guard checkpoints, abstract escape attempts), plus **procedural
+> audio** (synthesized SFX + ambient bed). **Not yet built:** music, Capacitor/IPA, deep riot warfare.
+> The `v1.x` entries are **archived legacy history** for the original
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
+
+## v4.0.0-sentence — Stage 4.0 The Sentence (Hard Time spine)
+Turns the open-ended day-loop into an actual **game with a goal and an ending** — the core of
+Mdickie's _Hard Time_. Sim-authoritative, save format v13, typecheck + build + smoke green (verdict
+card + sim-freeze verified in headless Chrome).
+- **Sentence**: you now serve a **term** (length scales with difficulty + backstory). The HUD shows
+  **"N days left"**. Each day served counts down; a clean + productive day (no solitary, objectives
+  met) can earn **time off for good behavior**.
+- **Misconduct adds time**: getting caught with **contraband** (+1 day) or thrown in **solitary**
+  (+2 days) extends your sentence, with an on-screen "+N days" warning.
+- **Endings / win-lose**: the run now actually ends with a **verdict card** — **RELEASED** (served
+  your time = win), **ESCAPED** (broke out = alt win, now wired from a real successful escape instead
+  of the old "prototype ending" stub), or **GAME OVER** (death — `endRun('dead')` is wired up, fully
+  triggered in 4.1). The sim **freezes** on the verdict; the card offers New Game / Main Menu.
+- **Save/load v13**: persists sentence + days served (older saves default to a fresh 30-day term).
+- **Design**: added `docs/HARDTIME-DESIGN.md` — a research-derived design bible for the full Hard
+  Time remake that the 4.x roadmap follows.
+- Version → `v4.0.0-sentence`.
+
+## v3.9.0-audio — Stage 3.9 Audio
+The game's first **sound**. 100% **procedural** WebAudio (no asset files, in keeping with the
+procedural art), and pure **presentation** — `AudioSystem` only listens to the `EventBus` and reads a
+per-frame tension snapshot; it never touches the simulation. Typecheck + build pass, smoke test green
+(0 console/page errors), save format unchanged (v12).
+- **New `src/audio/AudioSystem.ts`**: a lazily-created `AudioContext` (resumed on the first user
+  gesture for mobile autoplay policy), a master gain driven by mute/volume, and synthesized cues
+  (enveloped oscillators + filtered noise bursts). One-shots stop + disconnect on `ended` so nothing
+  leaks over a long session; every cue is throttled so bursts collapse instead of crackling.
+- **Event cues** (wired in `core/Game.ts` off the existing bus): combat **thud** on `impact`, a typed
+  cue per `alert` (`fight`→hit, `lockdown`→tone+clang, `critical`/`search`/`guard`/`warning` stings,
+  `player`/`trade`→positive two-note), and a UI **confirm** on `actionResult`. `info`/`system`/`phase`
+  stay silent.
+- **Door audio**: `updateDoors` now detects open/close transitions per room door and plays a sliding
+  rattle (open) or metal clang (close) — primed on the first frame so there's no startup burst, and
+  silent while paused / at the title.
+- **Ambient bed + alarm**: a quiet institutional **drone** (detuned low saws through a lowpass) whose
+  gain + filter cutoff rise with **riot pressure**, ducked overnight and when paused/in menus; a
+  pulsing **klaxon** kicks in during alarm/lockdown. Driven each frame from the game loop.
+- **Mute toggle** (`ui/HUD.ts` topbar 🔊/🔇 button + `style.css`): mutes everything incl. ambient;
+  mute + volume **persist to `localStorage`** and restore on boot. Kept in the topbar so the 5-button
+  bottom action bar stays uncrowded on mobile.
+- Version → `v3.9.0-audio`.
+
+## v3.8.1-atmosphere — Stage 3.8B Atmosphere & Bloom
+A small **presentation** follow-up to the 3.8 / 3.8A overhaul — adds depth and "juice" on top of the
+brighter palette without touching the simulation. Render-only (`RenderSync` stays read-only), art
+stays 100% procedural (no asset files), typecheck + build pass, 0 runtime errors, save format
+unchanged (v12).
+- **Cinematic atmosphere** (`index.html` + `style.css`, new `#atmosphere` layer): a zero-cost CSS
+  overlay above the canvas / below the HUD — edge **vignette**, gentle cool-top/warm-bottom **colour
+  grade** (`soft-light`), and a faint static **film grain** from an inline SVG `feTurbulence` data-URI
+  (`overlay`). No WebGL post-processing pass. Kept deliberately gentle so it **complements** 3.8A's
+  brighter, more-readable palette rather than darkening it. `#atmosphere` is intentionally outside its
+  own stacking context so the blend layers grade against the canvas.
+- **Fake bloom** (new `render/Glow.ts`): additive, camera-facing **glow sprites** on emissive props
+  (ceiling lamps, security light, doorway/hallway signs, intake scanner) — bloom without a post
+  pipeline, off a single shared cached soft-disc texture.
+- **Selection / player ground glow** (`CharacterFactory.ts` / `RenderSync.ts`): a soft additive pool
+  of light under the selected/player inmate (gold for *you*, green for a selected NPC), pulsing with
+  the selection ring — improves at-a-glance "who am I" readability.
 
 ## v3.8.0-world — Stage World / Visual / Layout Overhaul 3.8
 A pass over the **world/render/collision** layer (no new sim systems): a believable floorplan with

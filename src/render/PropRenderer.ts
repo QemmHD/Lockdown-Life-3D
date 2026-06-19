@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { TileMap } from '../world/TileMap';
 import { Room, Cell } from '../world/WorldGen';
 import { InteractableDef, ObjType } from '../world/Interactable';
+import { glowSprite } from './Glow';
 
 // Dresses rooms with simple-but-readable prison furniture. Blocking props (bunks, counter,
 // desks, shelves, lockers, gym gear) register a tile footprint so the sim's pathfinding treats
@@ -44,13 +45,13 @@ function tray(x = 0, y = 0, z = 0) { return box(0.4, 0.06, 0.3, M.steel, x, y, z
 function puddle() { const m = new THREE.Mesh(new THREE.CircleGeometry(0.5, 14), new THREE.MeshStandardMaterial({ color: 0x9fcad8, roughness: 0.2, metalness: 0.4, transparent: true, opacity: 0.5 })); m.rotation.x = -Math.PI / 2; m.position.y = 0.045; return m; }
 function chair() { const g = new THREE.Group(); g.add(box(0.45, 0.1, 0.45, M.black, 0, 0.45, 0)); g.add(box(0.45, 0.5, 0.1, M.black, 0, 0.7, -0.18)); return g; }
 function vent() { return box(0.7, 0.4, 0.08, M.darkMetal, 0, 0, 0); }
-function securityLight() { return box(0.18, 0.18, 0.18, new THREE.MeshStandardMaterial({ color: 0x300, emissive: 0xff3322, emissiveIntensity: 1.6 }), 0, 0, 0); }
+function securityLight() { const g = new THREE.Group(); g.add(box(0.18, 0.18, 0.18, new THREE.MeshStandardMaterial({ color: 0x300, emissive: 0xff3322, emissiveIntensity: 1.6 }), 0, 0, 0)); g.add(glowSprite(0xff3322, 1.1, 0.85)); return g; }
 function fencePost() { return cyl(0.07, 2.6, M.metal, 0, 1.3, 0); }
 // a run of vertical bars spanning `len` world units along X (cell fronts / partitions)
 function barRun(len: number, h = 1.95) { const g = new THREE.Group(); const n = Math.max(2, Math.round(len / 0.26)); for (let i = 0; i <= n; i++) g.add(cyl(0.04, h, M.bars, -len / 2 + (i / n) * len, h / 2, 0)); g.add(box(len, 0.08, 0.08, M.bars, 0, h, 0)); g.add(box(len, 0.08, 0.08, M.bars, 0, 0.2, 0)); return g; }
 function cot() { const g = new THREE.Group(); g.add(box(0.9, 0.22, 1.8, M.darkMetal, 0, 0.16, 0)); g.add(box(0.82, 0.12, 1.7, M.mattress, 0, 0.32, 0)); return g; }
 function shelf() { const g = new THREE.Group(); g.add(box(1.6, 1.6, 0.5, M.metal, 0, 0.8, 0)); for (let i = 0; i < 3; i++) g.add(box(1.5, 0.05, 0.46, M.darkMetal, 0, 0.4 + i * 0.5, 0)); for (let i = 0; i < 4; i++) g.add(box(0.4, 0.3, 0.4, M.wood, -0.5 + (i % 2), 0.55 + Math.floor(i / 2) * 0.5, 0)); return g; }
-function scanner() { const g = new THREE.Group(); for (const x of [-0.6, 0.6]) g.add(box(0.18, 2.0, 0.4, M.steel, x, 1.0, 0)); g.add(box(1.4, 0.2, 0.4, M.steel, 0, 2.0, 0)); g.add(box(1.2, 0.05, 0.4, new THREE.MeshStandardMaterial({ color: 0x113, emissive: 0x2255aa, emissiveIntensity: 0.8 }), 0, 1.9, 0)); return g; }
+function scanner() { const g = new THREE.Group(); for (const x of [-0.6, 0.6]) g.add(box(0.18, 2.0, 0.4, M.steel, x, 1.0, 0)); g.add(box(1.4, 0.2, 0.4, M.steel, 0, 2.0, 0)); g.add(box(1.2, 0.05, 0.4, new THREE.MeshStandardMaterial({ color: 0x113, emissive: 0x2255aa, emissiveIntensity: 0.8 }), 0, 1.9, 0)); const h = glowSprite(0x2a6bd8, 1.0, 0.45); h.position.set(0, 1.9, 0); g.add(h); return g; }
 function trash() { const g = new THREE.Group(); g.add(cyl(0.32, 0.8, M.darkMetal, 0, 0.4, 0)); return g; }
 function bench() { return box(2.0, 0.18, 0.5, M.wood, 0, 0.42, 0); }
 function weights() { const g = new THREE.Group(); g.add(box(1.6, 0.2, 0.6, M.rubber, 0, 0.4, 0)); g.add(cyl(0.05, 2.0, M.steel, 0, 1.1, -0.5)); for (const x of [-0.85, 0.85]) g.add(cyl(0.35, 0.16, M.black, x, 1.1, -0.5)); return g; }
@@ -59,9 +60,9 @@ function showerHead() { const g = new THREE.Group(); g.add(box(0.16, 0.6, 0.16, 
 function drain() { const m = new THREE.Mesh(new THREE.CircleGeometry(0.28, 12), M.darkMetal); m.rotation.x = -Math.PI / 2; m.position.y = 0.04; return m; }
 function desk() { const g = new THREE.Group(); g.add(box(2.2, 0.9, 1.0, M.wood, 0, 0.45, 0)); g.add(box(0.7, 0.5, 0.1, M.screen, -0.5, 1.2, -0.3)); g.add(box(0.7, 0.5, 0.1, M.screen, 0.4, 1.2, -0.3)); return g; }
 function cabinet() { return box(0.7, 1.6, 0.6, M.metal, 0, 0.8, 0); }
-function ceilingLamp() { return box(1.4, 0.12, 0.4, M.lamp, 0, 3.4, 0); }
+function ceilingLamp() { const g = new THREE.Group(); g.add(box(1.4, 0.12, 0.4, M.lamp, 0, 3.4, 0)); const h = glowSprite(0xffe8b0, 2.6, 0.5); h.position.set(0, 3.05, 0); g.add(h); return g; }
 function pipe(len: number) { const m = cyl(0.12, len, M.metal); m.rotation.z = Math.PI / 2; m.position.y = 3.0; return m; }
-function sign(color: number) { return box(0.06, 0.5, 0.7, new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.3 }), 0, 2.2, 0); }
+function sign(color: number) { const g = new THREE.Group(); g.add(box(0.06, 0.5, 0.7, new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.3 }), 0, 2.2, 0)); const h = glowSprite(color, 1.1, 0.45); h.position.set(0, 2.2, 0.15); g.add(h); return g; }
 function dirtPatch() { const m = new THREE.Mesh(new THREE.CircleGeometry(1.0, 10), new THREE.MeshStandardMaterial({ color: 0x3a3322, roughness: 1, transparent: true, opacity: 0.6 })); m.rotation.x = -Math.PI / 2; m.position.y = 0.045; return m; }
 
 export function dressRooms(scene: THREE.Scene, map: TileMap, rooms: Room[], cells: Cell[]) {

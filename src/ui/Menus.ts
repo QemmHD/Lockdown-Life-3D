@@ -27,7 +27,7 @@ export interface MenuHooks {
   version: string;
 }
 
-type Mode = 'hidden' | 'title' | 'pause' | 'summary' | 'setup' | 'trade';
+type Mode = 'hidden' | 'title' | 'pause' | 'summary' | 'setup' | 'trade' | 'ending';
 const GANG_NAMES: Record<string, string> = { none: 'Unaffiliated', iron_block: 'Iron Block', yard_kings: 'Yard Kings', blue_chain: 'Blue Chain', redline_crew: 'Redline Crew', north_hall: 'North Hall', cell_rats: 'Cell Rats' };
 
 export class Menus {
@@ -35,6 +35,7 @@ export class Menus {
   private mode: Mode = 'hidden';
   private tab = 'objectives';
   private summary: any = null;
+  private ending: any = null;
   private setup: NewGameSetup = defaultSetup();
   private step = 0;
   private tradeSeller = 0;
@@ -53,6 +54,7 @@ export class Menus {
   showTitle() { this.mode = 'title'; this.render(); }
   showPause() { this.mode = 'pause'; this.render(); }
   showSummary(data: any) { this.summary = data; this.mode = 'summary'; this.render(); }
+  showEnding(data: any) { this.ending = data; this.mode = 'ending'; this.render(); }
   hide() { this.mode = 'hidden'; this.root.className = 'hidden'; }
 
   private onClick(e: Event) {
@@ -123,6 +125,7 @@ export class Menus {
     this.root.className = '';
     if (this.mode === 'title') { this.root.innerHTML = this.title(); return; }
     if (this.mode === 'summary') { this.root.innerHTML = this.summaryCard(this.summary); return; }
+    if (this.mode === 'ending') { this.root.innerHTML = this.endingCard(this.ending); return; }
     if (this.mode === 'setup') { this.root.innerHTML = this.setupCard(); return; }
     if (this.mode === 'trade') { this.root.innerHTML = this.tradeCard(); return; }
     this.root.innerHTML = this.pause();
@@ -396,6 +399,24 @@ export class Menus {
         <div class="m-kv"><span>Standing</span><b>${d.tier}</b></div>
         <div class="m-kv"><span>Days survived</span><b>${d.daysSurvived}</b></div>
         <button class="m-btn primary" data-m="dismiss">Start Day ${d.day + 1}</button>
+      </div>
+    </div></div>`;
+  }
+
+  // run-end verdict card: release (win), escape (alt win), or death (loss)
+  private endingCard(d: any): string {
+    if (!d) return '';
+    const cls = d.kind === 'dead' ? 'end-dead' : d.kind === 'escaped' ? 'end-escape' : 'end-win';
+    const lead = (d.lines && d.lines[0]) || '';
+    const rows = (d.lines || []).slice(1).map((l: string) => `<div class="m-note" style="padding:3px 0">${l}</div>`).join('');
+    return `<div class="m-overlay"><div class="m-card narrow ${cls}">
+      <div class="m-head"><b>${d.title}</b></div>
+      <div class="m-body col">
+        <div class="m-sub" style="margin:4px 0 10px">${lead}</div>
+        ${rows}
+        <div class="m-hr"></div>
+        <button class="m-btn primary" data-m="newgame">▶ New Game</button>
+        <button class="m-btn" data-m="mainmenu">Main Menu</button>
       </div>
     </div></div>`;
   }

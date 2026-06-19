@@ -25,11 +25,14 @@ low-poly geometry** — no external art/audio assets.
 - **Three.js** for rendering (orthographic isometric camera)
 - **DOM / CSS** overlay HUD (no UI framework)
 - **`localStorage`** saves (versioned, currently v12)
-- **Procedural low-poly geometry** built at runtime (no model/texture/audio files)
+- **Procedural low-poly geometry** built at runtime (no model/texture files)
+- **Procedural audio** — synthesized at runtime via WebAudio (no sound files, Stage 3.9)
 - A small **ECS-lite** simulation (`src/ecs` + `src/sim`)
 
-There is **no** audio and no WebGL post-processing pipeline in the current build; controls are
-touch/mouse only (no keyboard/gamepad).
+There is no *WebGL* post-processing pipeline in the current build. The cinematic look (edge vignette,
+cool/warm colour grade, faint film grain — Stage 3.8B) is a **zero-cost CSS overlay** layered over the
+canvas, not a render pass, so it stays mobile-cheap. Audio is fully **synthesized** (no asset files)
+and mutes/persists from a topbar toggle. Controls are touch/mouse only (no keyboard/gamepad).
 
 ---
 
@@ -141,6 +144,8 @@ Gangs are purely fictional game data. You can build standing with a crew, get in
 - **Character creation**: new-game setup (name/appearance/traits/backstory/gang-lean/difficulty), randomize, run identity applied to the player
 - **Faction progression**: build standing → NPC gang invite → join, ranks (Associate→Shot Caller), crew goals, small perks, rival consequences, Gangs menu
 - **Economy / contraband depth**: item categories + dynamic prices (demand/supply/heat/relationship/gang), trade panel (buy/sell), item use, stash capacity/risk, job payouts + streak, daily market restock, gang/crew supply, economy objectives & daily summary
+- **Cinematic atmosphere (3.8B)**: zero-cost CSS overlay (edge vignette + cool/warm colour grade + film grain) over the canvas, **fake-bloom glow halos** on emissive props (ceiling lamps, security light, signs, scanner) via additive sprites — no post-processing pass — and a soft additive **ground-glow pool** under the selected/player inmate (gold for *you*, green for a selected NPC)
+- **Procedural audio (3.9)**: synthesized WebAudio (no sound files) — combat thud, door slide/clang, typed event cues (fight / lockdown / search / alarm / trade…), UI confirm, an **ambient bed** that rises with riot pressure + an **alarm klaxon**, all ducked when paused. Topbar mute toggle, persisted to `localStorage`; AudioContext unlocks on first tap (mobile autoplay-safe)
 
 **Partial**
 - Guard AI (roles + routes + checkpoints, but no formal squad tactics / dynamic routes)
@@ -154,9 +159,9 @@ Gangs are purely fictional game data. You can build standing with a crew, get in
 
 **Planned / Future**
 - Deeper riot warfare, event director, deeper gang hierarchy/squad commands
-- Economy/contraband depth, settings menu, audio
-- World expansion / more areas, deeper appearance / cosmetics
-- Real audio / SFX
+- Settings menu (volume slider, difficulty), deeper appearance / cosmetics
+- World expansion / more areas
+- Audio depth: music / stingers, positional per-area mix
 - More animation
 - Capacitor / iOS `.ipa` packaging
 - Performance profiling
@@ -193,8 +198,11 @@ src/
     CharacterFactory.ts   # procedural low-poly humanoids
     RenderSync.ts         # reads sim, animates characters — NEVER writes to sim
     Feedback.ts           # world-anchored floating text + speech bubbles (DOM)
+    Glow.ts               # additive fake-bloom sprites + ground-glow (no post pipeline)
     VisualTheme.ts        # colours / lighting / camera constants
     textures/             # procedural CanvasTextures
+  audio/
+    AudioSystem.ts        # procedural WebAudio: event cues + ambient bed (presentation; bus-only)
   ui/
     HUD.ts                # DOM overlay HUD (topbar, alerts, panel, action bar, bottom bar)
   data/
@@ -226,7 +234,7 @@ versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARC
 - Single hand-authored prison (no procedural prison generation).
 - Guard/NPC AI is intentionally light; deeper planning is a future stage.
 - The chaos layer is a first vertical slice — riot *events* are small and controlled, not full riot warfare.
-- No audio yet. Character creation, menus, objectives, reputation tiers, and gang lean exist; gang joining is added in Stage 3.6.
+- Audio is procedural (synthesized SFX + ambient bed) — no music yet. Character creation, menus, objectives, reputation tiers, and gang lean exist; gang joining is added in Stage 3.6.
 - Balance is rough and subject to change.
 - The follow camera reframes the subject slightly left of centre so the right-side panel doesn't cover it.
 
@@ -239,8 +247,16 @@ versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARC
 - **Player chaos actions**: Comply, Return to Cell, Hide, Calm Down, Help Guard.
 - **Tuning (3.1)**: eased Heat that decays when calm, smoothed riot pressure with hysteresis + cooldowns, lockdown re-entry cooldown, deduped alerts, contextual player panel, and `?debug` playtest telemetry (`sim.metrics`).
 
-## Planned next
-Economy/contraband depth, audio/polish, or world expansion — then iOS (Capacitor) packaging prep.
+## Planned next — the Hard Time 4.x remake
+The game is being built toward a **modern remake of Mdickie's _Hard Time_**. The full design is in
+[`docs/HARDTIME-DESIGN.md`](./docs/HARDTIME-DESIGN.md); the staged roadmap:
+- **4.0 — The Sentence** ✅ (shipped): serve a term, time-off / added-time, **release / escape / death** endings.
+- **4.1 — Death & stakes**: remove the revive floor, wire fatal beatings to `GAME OVER`, persistent injuries.
+- **4.2 — Gear power ladder**: weapon tiers (shiv / blunt) + armor + tool-driven doors/escape.
+- **4.3 — Escape as a project**: acquire a tool → dig/cut over days → hide from searches → break for the wall.
+- **4.4 — Stats & training**: two-bar survival (energy/morale) + attributes (STR/AGI/SKILL…) with the "25% rule".
+- **4.5 — Allies & vendettas**: recruit a crew that fights for you; NPC-vs-NPC feuds; notoriety that NPCs react to.
+- Plus a graphics/animation pass, a settings menu, and iOS (Capacitor) packaging.
 
 ---
 

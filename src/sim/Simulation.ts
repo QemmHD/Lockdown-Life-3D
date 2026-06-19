@@ -102,6 +102,10 @@ export class Simulation {
   daily: DailyStats = newDaily(0, 8, 0);
   lastSummaryDay = 0;
   pendingSummary: any = null;          // built at a day rollover; the UI shows + clears it
+  // ---------- sentence / run end (the Hard Time spine: do your time → release / escape / death) ----------
+  sentence = 30;                       // total days to serve
+  served = 0;                          // days served so far
+  runEnd: { kind: 'released' | 'escaped' | 'dead'; title: string; lines: string[] } | null = null;
   setup: NewGameSetup = defaultSetup();
   diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1, moneyScale: 1 };
   gang: PlayerGangState = newGangState();
@@ -128,6 +132,7 @@ export class Simulation {
     this.lockdown = newLockdown(); this.alarm = { active: false, timer: 0, reason: '' };
     this.heat = 0; this.riotPressure = 0; this.riotLevel = 'calm'; this.riotEventTimer = 0; this.escape = newEscape();
     this.tension = {}; this.progression = newProgression(); this.objectives = []; this.pendingSummary = null; this.lastSummaryDay = 0;
+    this.sentence = 30; this.served = 0; this.runEnd = null;
     this.fightCd = 6; this.suspTimer = 0; this.jobStreak = 0; this.diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1, moneyScale: 1 };
     this.gang = newGangState();
     this.economy = newEconomy();
@@ -172,6 +177,9 @@ export class Simulation {
     // difficulty + chaos intensity
     this.diff = { heatMul: dd.heatMul, searchAt: dd.searchAt, riotMul: dd.riotMul, rewardMul: dd.rewardMul, decayMul: dd.decayMul, moneyScale: dd.moneyMul };
     if (s.chaosIntensity === 'low') this.diff.riotMul *= 0.8; else if (s.chaosIntensity === 'high') this.diff.riotMul *= 1.25;
+    // sentence length scales with difficulty (harder = more time); good behavior shortens it in-game
+    this.sentence = Math.max(14, Math.round(28 * (dd.heatMul || 1)) + Math.round(Math.max(0, back.suspicion) / 4));
+    this.served = 0; this.runEnd = null;
     // gang lean (standing only — joining is planned): warm to chosen gang, cool to its rivals
     let lean = s.gangLean;
     if (back.gangBias === 'auto' && lean === 'none') lean = this.rng.pick(GANGS).id;
@@ -284,6 +292,7 @@ export class Simulation {
 
   // ---------- main step ----------
   step(dt: number) {
+    if (this.runEnd) return;   // run is over (released / escaped / dead) — freeze the world on the verdict
     // clock + schedule
     this.hour += dt / SECONDS_PER_HOUR;
     if (this.hour >= 24) { this.hour -= 24; this.day++; this.onDayRollover(); }
@@ -610,7 +619,7 @@ export class Simulation {
     const inRestricted = pp ? RESTRICTED.includes(this.roomTypeAt(pp)) : false;
     if (pb.state === 'solitary') this.playerObjective = 'In solitary — wait it out.';
     else if (this.escape.active && this.escape.by === this.playerId) this.playerObjective = 'Escape attempt in progress…';
-    else if (pb.action === 'ESCAPED') this.playerObjective = 'You escaped. (Prototype ending)';
+    else if (pb.action === 'ESCAPED') this.playerObjective = 'You escaped — free at last.';
     else if (this.lockdown.active) this.playerObjective = inRestricted ? 'Leave the restricted area!' : 'Lockdown — return to your cell.';
     else if (this.riotLevel === 'event') this.playerObjective = 'Riot! Comply or take cover.';
     else if (this.alarm.active) this.playerObjective = 'Alarm active — guards are responding.';
@@ -650,8 +659,8 @@ export class Simulation {
       case 'fightWin': P.fights++; P.wins++; D.fights++; D.wins++; break;
       case 'fightLoss': P.fights++; P.losses++; D.fights++; break;
       case 'search': P.searches++; D.searches++; break;
-      case 'contraband': P.contrabandIncidents++; D.contraband++; break;
-      case 'solitary': P.solitary++; D.solitary++; break;
+      case 'contraband': P.contrabandIncidents++; D.contraband++; this.addTime(1, 'caught with contraband'); break;
+      case 'solitary': P.solitary++; D.solitary++; this.addTime(2, 'a stint in solitary'); break;
       case 'lockdown': P.lockdowns++; D.lockdowns++; break;
       case 'escape': P.escapes++; break;
       case 'relUp': P.relImproved++; D.relImproved++; break;
@@ -662,6 +671,10 @@ export class Simulation {
     // resolve passive "survive the day" objectives, then summarise + roll a fresh set
     for (const o of this.objectives) if (!o.done && o.kind === 'surviveNoSolitary' && this.daily.solitary === 0) this.completeObjective(o);
     this.progression.daysSurvived++;
+    // serve another day; a clean + productive day earns a little time off for good behavior
+    this.served++;
+    if (this.daily.solitary === 0 && this.daily.objectivesDone >= 2 && this.rng.float() < 0.34) this.served++;
+    if (this.served >= this.sentence) { this.served = this.sentence; this.endRun('released'); }
     const ps = this.social(this.playerId)!; const pinv = this.inv(this.playerId)!;
     this.progression.bestTier = Math.max(this.progression.bestTier, repTier(ps.reputation, ps.respect).index);
     this.pendingSummary = this.buildSummary(ps.reputation, ps.respect, pinv.money);
@@ -686,6 +699,29 @@ export class Simulation {
   }
   takeSummary() { const s = this.pendingSummary; this.pendingSummary = null; return s; }
   tier() { const ps = this.social(this.playerId)!; return repTier(ps.reputation, ps.respect); }
+
+  // add days to the sentence (misconduct caught: contraband, solitary, escape attempt)
+  private addTime(days: number, reason: string) {
+    if (this.runEnd || days <= 0) return;
+    this.sentence += days;
+    this.bus.emit('alert', { type: 'critical', text: `+${days} day${days > 1 ? 's' : ''} on your sentence — ${reason}.` });
+  }
+  // end the run with a verdict (release = win, escape = alt win, death = loss). The UI shows the card.
+  endRun(kind: 'released' | 'escaped' | 'dead') {
+    if (this.runEnd) return;
+    const P = this.progression, tier = this.tier().name;
+    const head = { released: 'RELEASED', escaped: 'ESCAPED', dead: 'GAME OVER' }[kind];
+    const lead = {
+      released: `You served your ${this.sentence} days and walked out the gate a free man.`,
+      escaped: `You broke out — a fugitive, but free.`,
+      dead: `You didn't make it out of your sentence alive.`
+    }[kind];
+    this.runEnd = {
+      kind, title: head,
+      lines: [lead, `Days survived: ${P.daysSurvived}`, `Final reputation: ${tier}`, `Fights: ${P.wins}W / ${P.losses}L`, `Money earned: $${P.moneyEarned}`, `Times in solitary: ${P.solitary}`]
+    };
+    this.bus.emit('alert', { type: 'player', text: kind === 'released' ? 'Your time is up — you walk free.' : kind === 'escaped' ? 'You made it out!' : 'You died inside.' });
+  }
 
   // ---------- faction / gang membership (Stage 3.6) ----------
   private factionSystem(dt: number) {
@@ -891,6 +927,7 @@ export class Simulation {
       money: inv.money, suspicion: Math.round(ps.suspicion), respect: Math.round(ps.respect), reputation: Math.round(ps.reputation),
       discipline: pb.discipline ?? 'none', solitaryTimer: pb.state === 'solitary' ? Math.ceil(pb.discTimer ?? 0) : 0,
       gang: pb.gang ? GANG_MAP[pb.gang].name : 'Unaffiliated', tier: tier.name, heat: Math.round(this.heat),
+      sentence: this.sentence, served: this.served, daysLeft: Math.max(0, this.sentence - this.served),
       backstory: backstoryDef(this.setup.backstory).name, difficulty: diffDef(this.setup.difficulty).name,
       traits: pb.traits.slice(0, 4), gangLean: this.setup.gangLean === 'none' ? 'Unaffiliated' : (GANG_MAP[this.setup.gangLean]?.name ?? this.setup.gangLean)
     };
@@ -1705,8 +1742,8 @@ export class Simulation {
     const outcome = rollEscapeOutcome(this.rng.float(), guardsNear);
     this.escape = newEscape();
     if (outcome === 'success') {
-      pb.action = 'ESCAPED'; this.bus.emit('alert', { type: 'rep', text: '🚨 You slipped out — ESCAPED! (prototype ending)' });
-      this.bus.emit('actionResult', { text: 'You escaped. (Prototype ending — reload to play again.)' });
+      pb.action = 'ESCAPED'; this.bus.emit('alert', { type: 'player', text: '🚨 You slipped out — ESCAPED!' });
+      this.endRun('escaped');
       return;
     }
     this.triggerAlarm('escape', 2);
@@ -2265,8 +2302,8 @@ export class Simulation {
       riotPressure: this.riotPressure,
       tension: this.tension
     };
-    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang, economy: this.economy, jobStreak: this.jobStreak };
-    return { version: 12, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
+    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang, economy: this.economy, jobStreak: this.jobStreak, sentence: this.sentence, served: this.served };
+    return { version: 13, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -2321,6 +2358,10 @@ export class Simulation {
     this.daily = (data.daily && typeof data.daily === 'object') ? data.daily : newDaily(ps2?.reputation ?? 0, ps2?.respect ?? 8, pinv2?.money ?? 0);
     this.lastSummaryDay = typeof data.lastSummaryDay === 'number' ? data.lastSummaryDay : 0;
     this.pendingSummary = null;
+    // sentence (older saves: default to a fresh 30-day term)
+    this.sentence = (typeof data.sentence === 'number' && data.sentence > 0) ? Math.round(data.sentence) : 30;
+    this.served = (typeof data.served === 'number' && data.served >= 0) ? Math.min(Math.round(data.served), this.sentence) : 0;
+    this.runEnd = null;
     // character setup + derived difficulty (old saves get a sensible default)
     this.setup = sanitizeSetup(data.setup);
     // faction / gang state (old saves: default; derive a little standing from the lean)

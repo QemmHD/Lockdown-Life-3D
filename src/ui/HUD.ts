@@ -15,6 +15,7 @@ export interface HUDHooks {
   onAction: (key: string) => void;       // interaction / self-action / job button
   onItem: (key: string) => void;         // tap an inventory item (drop)
   onToggleCam?: () => void;              // Stage 3.8A: toggle iso / character camera
+  onToggleSound?: () => void;            // Stage 3.9: mute / unmute audio
 }
 
 export class HUD {
@@ -30,9 +31,10 @@ export class HUD {
         <div class="tb-block">
           <div class="tb-label">SCHEDULE</div>
           <div class="tb-big" id="tb-phase">Wake-Up</div>
-          <div class="tb-sub"><span id="tb-day">Day 1</span> · <span id="tb-time">6:00</span></div>
+          <div class="tb-sub"><span id="tb-day">Day 1</span> · <span id="tb-time">6:00</span> · <b id="tb-left" class="tb-left">30d left</b></div>
         </div>
         <div class="tb-block right">
+          <button id="snd-toggle" class="snd-btn" title="Sound on/off">🔊</button>
           <div class="tb-chip" id="chip-heat"><span>HEAT</span><b id="tb-heat">0</b></div>
           <div class="tb-chip" id="chip-riot"><span>RIOT</span><b id="tb-riot">0%</b></div>
           <div class="tb-chip" id="chip-lock" style="display:none"><span>LOCK</span><b id="tb-lock">0s</b></div>
@@ -51,7 +53,7 @@ export class HUD {
         <button data-b="cam" class="hud-btn cam-toggle"><span class="b-ico" id="cam-ico">🎥</span><span class="b-lbl">Camera</span></button>
       </div>`;
     document.getElementById('ui-root')!.appendChild(this.root);
-    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'chip-lock', 'tb-lock', 'chaos-banner', 'alert-feed', 'obj-tracker', 'panel', 'speed-x', 'alarm', 'cam-ico'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
+    ['tb-phase', 'tb-day', 'tb-time', 'tb-left', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'chip-lock', 'tb-lock', 'chaos-banner', 'alert-feed', 'obj-tracker', 'panel', 'speed-x', 'alarm', 'cam-ico', 'snd-toggle'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
     this.root.querySelectorAll('#bottombar button').forEach((b) => {
       const k = (b as HTMLElement).dataset.b!;
       b.addEventListener('click', () => {
@@ -60,16 +62,18 @@ export class HUD {
         else if (k === 'cam' && hooks.onToggleCam) hooks.onToggleCam();
       });
     });
+    this.els['snd-toggle']?.addEventListener('click', () => hooks.onToggleSound?.());
     this.hooks = hooks;
   }
   private hooks!: HUDHooks;
 
-  setTop(day: number, hour: number, phase: string, heat = 0, riot = 0) {
+  setTop(day: number, hour: number, phase: string, heat = 0, riot = 0, daysLeft = 0) {
     this.els['tb-phase'].textContent = phase;
     this.els['tb-day'].textContent = 'Day ' + day;
     const h = Math.floor(hour), m = Math.floor((hour - h) * 60);
     const ampm = h >= 12 ? 'PM' : 'AM'; let hh = h % 12; if (hh === 0) hh = 12;
     this.els['tb-time'].textContent = `${hh}:${m.toString().padStart(2, '0')} ${ampm}`;
+    if (this.els['tb-left']) this.els['tb-left'].textContent = daysLeft + 'd left';
     this.els['tb-heat'].textContent = String(Math.round(heat));
     this.els['tb-riot'].textContent = Math.round(riot * 100) + '%';
     this.els['chip-riot'].className = 'tb-chip ' + (riot > 0.66 ? 'sev-high' : riot > 0.33 ? 'sev-mid' : '');
@@ -77,6 +81,7 @@ export class HUD {
   }
   setSpeed(label: string) { this.els['speed-x'].textContent = label; }
   setCamMode(isChar: boolean) { this.els['cam-ico'].textContent = isChar ? '🏠' : '🎥'; }
+  setMuted(muted: boolean) { const b = this.els['snd-toggle']; if (b) { b.textContent = muted ? '🔇' : '🔊'; b.classList.toggle('muted', muted); } }
   setAlarm(level: number) { this.els['alarm'].style.opacity = level > 0.6 ? String(Math.min(0.42, (level - 0.6) * 1.05)) : '0'; }
   // chaos banner + lockdown chip. info.level: 'calm' | 'warning' | 'event'
   setChaos(info: { lockdown: boolean; lockdownTimer: number; lockdownReason: string; alarm: boolean; level: string; objective: string }) {
