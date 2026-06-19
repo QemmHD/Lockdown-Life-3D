@@ -871,7 +871,7 @@ export class Simulation {
       case 'food': n.hunger = clamp01(n.hunger - it.useAmt); this.floatBy(this.playerId, 'Fed', '#e8b52e'); break;
       case 'hygiene': n.hygiene = clamp01(n.hygiene - it.useAmt); this.floatBy(this.playerId, '+Hygiene', '#9fcad8'); break;
       case 'comfort': n.fear = clamp01(n.fear - it.useAmt); n.anger = clamp01(n.anger - it.useAmt * 0.6); this.floatBy(this.playerId, '+Calm', '#9fe0a0'); break;
-      case 'medical': n.health = clamp01(n.health + it.useAmt); this.floatBy(this.playerId, '+Health', '#6dff9e'); break;
+      case 'medical': n.health = clamp01(n.health + it.useAmt); { const pbb = this.brain(this.playerId); if (pbb) pbb.injuredT = 0; } this.floatBy(this.playerId, '+Health', '#6dff9e'); break;
     }
     this.bus.emit('actionResult', { text: `You use the ${it.name}.` });
     return `Used ${it.name}.`;
@@ -925,7 +925,7 @@ export class Simulation {
       name: pb.name, day: this.day, hour: this.hour, room: this.currentRoomName(pl), action: pb.action ?? pb.state,
       health: n.health, hunger: n.hunger, energy: n.energy, hygiene: n.hygiene, anger: n.anger, fear: n.fear,
       money: inv.money, suspicion: Math.round(ps.suspicion), respect: Math.round(ps.respect), reputation: Math.round(ps.reputation),
-      discipline: pb.discipline ?? 'none', solitaryTimer: pb.state === 'solitary' ? Math.ceil(pb.discTimer ?? 0) : 0,
+      discipline: pb.discipline ?? 'none', solitaryTimer: pb.state === 'solitary' ? Math.ceil(pb.discTimer ?? 0) : 0, injured: !!pb.injuredT,
       gang: pb.gang ? GANG_MAP[pb.gang].name : 'Unaffiliated', tier: tier.name, heat: Math.round(this.heat),
       sentence: this.sentence, served: this.served, daysLeft: Math.max(0, this.sentence - this.served),
       backstory: backstoryDef(this.setup.backstory).name, difficulty: diffDef(this.setup.difficulty).name,
@@ -1304,9 +1304,10 @@ export class Simulation {
 
     for (const e of this.ecs.query('Brain', 'Position', 'Needs')) {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
-      if (b.state === 'down') {   // knocked down — hold the pose, then get up
+      if (b.injuredT) b.injuredT = Math.max(0, b.injuredT - dt);
+      if (b.state === 'down') {   // knocked down — hold the pose, then get up (still hurt)
         b.cphase = 'down'; b.timer -= dt;
-        if (b.timer <= 0) { b.state = 'idle'; b.cphase = undefined; this.ecs.get<Needs>(e, 'Needs')!.health = Math.max(0.45, this.ecs.get<Needs>(e, 'Needs')!.health); }
+        if (b.timer <= 0) { b.state = 'idle'; b.cphase = undefined; const nn = this.ecs.get<Needs>(e, 'Needs')!; nn.health = Math.max(0.2, nn.health); }
         continue;
       }
       if (b.blockT) b.blockT = Math.max(0, b.blockT - dt);
@@ -1380,6 +1381,7 @@ export class Simulation {
     const weapon = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.combat ?? 0).reduce((a, c) => Math.max(a, c), 0);
     let dmg = this.rng.range(ATTACKS[atk].dmgMin, ATTACKS[atk].dmgMax) * (b.traits.includes('tough') ? 1.2 : 1) * (b.traits.includes('weak') ? 0.7 : 1);
     dmg += weapon * 0.02; if (outcome === 'glancing') dmg *= 0.45;
+    if (b.injuredT) dmg *= 0.7;   // an injured attacker hits softer
     fn.health = clamp01(fn.health - dmg);
     fb.lastAttacker = e;
     this.bus.emit('impact', { x: fp.x, z: fp.z });
@@ -1394,13 +1396,38 @@ export class Simulation {
     this.crowdReact(fp.x, fp.z);
   }
   private knockDown(loser: Entity, lb: Brain, winner: Entity, wb: Brain) {
+    // the player can be beaten to DEATH in a brutal takedown (weapon / near-zero health / chaos pile-on)
+    if (lb.isPlayer && this.lethalKnockdown(loser, winner)) {
+      lb.state = 'down'; lb.foe = undefined; lb.cphase = 'down'; lb.timer = DOWN_TIME;
+      this.ecs.get<Agent>(loser, 'Agent')!.path = null;
+      this.endRun('dead');
+      return;
+    }
     lb.state = 'down'; lb.timer = DOWN_TIME; lb.foe = undefined; lb.cphase = 'down'; lb.cTimer = DOWN_TIME;
     this.ecs.get<Agent>(loser, 'Agent')!.path = null;
+    this.injure(loser, lb);
     wb.state = 'idle'; wb.foe = undefined; wb.cphase = undefined;
     const wn = this.ecs.get<Needs>(winner, 'Needs')!; wn.anger = clamp01(wn.anger - 0.3);
     this.metrics.knockdowns++; this.metrics.fightsEnded++;
     this.bus.emit('alert', { type: 'fight', text: `${wb.name} knocked down ${lb.name}` });
     this.onFightWin(winner, loser, wb, lb);
+  }
+  // chance a knockdown KILLS the player — scaled by weapon, near-zero health, a pile-on, and chaos
+  private lethalKnockdown(loser: Entity, winner: Entity): boolean {
+    const ln = this.ecs.get<Needs>(loser, 'Needs')!;
+    const weapon = (this.inv(winner)?.items ?? []).some((id) => (ITEMS[id]?.combat ?? 0) >= 3);
+    const lp = this.pos(loser)!;
+    let hostiles = 0;
+    for (const g of this.ecs.query('Brain', 'Position')) { const gb = this.brain(g)!; if (gb.role !== 'prisoner' || gb.isPlayer || gb.state !== 'fight') continue; const gp = this.pos(g)!; if (Math.hypot(gp.x - lp.x, gp.z - lp.z) < 4) hostiles++; }
+    const chaos = this.lockdown.active || this.riotLevel === 'event' || this.alarm.active;
+    let risk = 0.03 + (ln.health <= 0.02 ? 0.16 : 0) + (weapon ? 0.34 : 0) + (hostiles >= 2 ? 0.2 : 0) + (chaos ? 0.1 : 0);
+    if (this.brain(loser)!.traits.includes('tough')) risk *= 0.55;
+    return this.rng.float() < risk;
+  }
+  // lingering injury after a beating: softer hits until healed (medical item / time)
+  private injure(_e: Entity, b: Brain) {
+    b.injuredT = Math.max(b.injuredT ?? 0, this.rng.range(22, 40));
+    if (b.isPlayer) this.bus.emit('alert', { type: 'critical', text: "You're hurt — get to the infirmary or use a medical item." });
   }
   // disengage a fighter whose foe is gone/downed
   private endFighter(e: Entity, b: Brain) { b.state = 'idle'; b.foe = undefined; b.cphase = undefined; b.cTimer = 0; }
