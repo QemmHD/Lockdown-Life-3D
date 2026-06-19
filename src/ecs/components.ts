@@ -60,6 +60,8 @@ export interface Brain {
   pendingAtk?: string;     // player-queued attack type (strike/heavy/shove)
   lastAttacker?: Entity;   // who last struck this character
   injuredT?: number;       // ---- Stage 4.1 ---- seconds of lingering injury (weaker hits) after a beating
+  bleedT?: number;         // ---- Stage 4.7 ---- seconds left bleeding from a sharp-weapon wound
+  bleedRate?: number;      // health drained per second while bleeding
 }
 
 // ---- Stage 4.4 ---- persistent attributes (0..99, floor 30). "25% rule": effective = base*(0.75+0.25*energy).

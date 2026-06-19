@@ -14,6 +14,15 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.7.0-bleed — Stage 4.7 Bleeding blades
+Sharp weapons now **cut** — a Hard Time staple. Build + smoke green; item data + transient state only.
+- **Bleed DoT**: a hit with a **Sharp Object** or **Shiv** opens a wound — the victim bleeds
+  (~1.3% / 0.9% health per second for ~6s, refreshing on each cut). A blade can **finish a wounded
+  foe** even after you disengage, and bleeding *you* out to 0 is a **GAME OVER**.
+- A 🩸 pops on the wound; a **medical item** stops the bleeding (and clears injuries).
+- Blunt weapons knock down, sharp weapons bleed — weapon choice now has real identity.
+- Version → `v4.7.0-bleed`.
+
 ## v4.6.0-allies — Stage 4.6 Allies rush in
 Who you're connected to now decides a fight — straight out of Hard Time. Build + smoke green.
 - **Allies jump in**: start a brawl and nearby inmates who can **see** it (line-of-sight) take sides —

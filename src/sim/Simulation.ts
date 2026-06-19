@@ -883,7 +883,7 @@ export class Simulation {
       case 'food': n.hunger = clamp01(n.hunger - it.useAmt); this.floatBy(this.playerId, 'Fed', '#e8b52e'); break;
       case 'hygiene': n.hygiene = clamp01(n.hygiene - it.useAmt); this.floatBy(this.playerId, '+Hygiene', '#9fcad8'); break;
       case 'comfort': n.fear = clamp01(n.fear - it.useAmt); n.anger = clamp01(n.anger - it.useAmt * 0.6); this.floatBy(this.playerId, '+Calm', '#9fe0a0'); break;
-      case 'medical': n.health = clamp01(n.health + it.useAmt); { const pbb = this.brain(this.playerId); if (pbb) pbb.injuredT = 0; } this.floatBy(this.playerId, '+Health', '#6dff9e'); break;
+      case 'medical': n.health = clamp01(n.health + it.useAmt); { const pbb = this.brain(this.playerId); if (pbb) { pbb.injuredT = 0; pbb.bleedT = 0; } } this.floatBy(this.playerId, '+Health', '#6dff9e'); break;
     }
     this.bus.emit('actionResult', { text: `You use the ${it.name}.` });
     return `Used ${it.name}.`;
@@ -1326,6 +1326,12 @@ export class Simulation {
     for (const e of this.ecs.query('Brain', 'Position', 'Needs')) {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
       if (b.injuredT) b.injuredT = Math.max(0, b.injuredT - dt);
+      if (b.bleedT && b.bleedT > 0) {   // Stage 4.7: sharp-weapon bleed drains health over time
+        b.bleedT = Math.max(0, b.bleedT - dt);
+        const bn = this.ecs.get<Needs>(e, 'Needs')!; bn.health = clamp01(bn.health - (b.bleedRate ?? 0.01) * dt);
+        if (b.isPlayer && bn.health <= 0.001 && !this.runEnd) { this.bus.emit('alert', { type: 'critical', text: 'You bleed out…' }); this.endRun('dead'); }
+        if (b.bleedT <= 0) b.bleedRate = undefined;
+      }
       if (b.state === 'down') {   // knocked down — hold the pose, then get up (still hurt)
         b.cphase = 'down'; b.timer -= dt;
         if (b.timer <= 0) { b.state = 'idle'; b.cphase = undefined; const nn = this.ecs.get<Needs>(e, 'Needs')!; nn.health = Math.max(0.2, nn.health); }
@@ -1409,6 +1415,8 @@ export class Simulation {
     dmg *= (1 - armor * 0.8);     // the defender's armor soaks part of the blow
     fn.health = clamp01(fn.health - dmg);
     if (weapon >= 3 && b.isPlayer) this.addHeat(2);   // brandishing a real weapon draws guard attention
+    const bleed = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.bleed ?? 0).reduce((a, c) => Math.max(a, c), 0);
+    if (bleed > 0) { fb.bleedT = Math.max(fb.bleedT ?? 0, 6); fb.bleedRate = bleed; this.floatBy(foe, '🩸', '#ff5a4d'); }   // a sharp weapon opens a wound
     fb.lastAttacker = e;
     this.bus.emit('impact', { x: fp.x, z: fp.z });
     if (dmg > 0.02) this.bus.emit('float', { x: fp.x, z: fp.z, text: `-${Math.round(dmg * 100)}`, color: '#ff7a6a' });
