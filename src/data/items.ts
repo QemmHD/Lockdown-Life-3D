@@ -19,7 +19,10 @@ export interface ItemDef {
   rarity: number;         // 0..1 (higher = rarer → pricier, scarcer)
   use: UseKind;           // what using it does (sim applies the effect)
   useAmt: number;         // magnitude of the use effect (0 = no use)
-  combat?: number;        // abstract fight bonus
+  combat?: number;        // abstract fight bonus (sharp weapon damage)
+  armor?: number;         // 0..1 incoming damage soaked when carried (Stage 4.2)
+  wKnock?: number;        // 0..1 blunt-weapon knockdown bias (Stage 4.2)
+  escapeAid?: number;     // 0..~0.3 boost to escape-attempt rolls (Stage 4.2)
 }
 
 function I(d: Partial<ItemDef> & Pick<ItemDef, 'id' | 'name' | 'icon' | 'type' | 'category' | 'value'>): ItemDef {
@@ -42,9 +45,12 @@ export const ITEMS: Record<string, ItemDef> = {
   medicine: I({ id: 'medicine', name: 'Medicine Bottle', icon: '💊', type: 'medicine', category: 'medical', contraband: true, value: 10, risk: 0.35, concealment: 0.5, suspicion: 0.2, demandWeight: 0.6, supplyWeight: 0.3, rarity: 0.6, use: 'medical', useAmt: 0.18 }),
   dice:     I({ id: 'dice', name: 'Handmade Dice', icon: '🎲', type: 'gambling', category: 'risky', contraband: true, value: 6, risk: 0.25, concealment: 0.7, suspicion: 0.15, demandWeight: 0.5, supplyWeight: 0.45, rarity: 0.45 }),
   phone:    I({ id: 'phone', name: 'Phone Device', icon: '📱', type: 'device', category: 'rare', contraband: true, value: 20, risk: 0.7, concealment: 0.45, suspicion: 0.4, demandWeight: 0.75, supplyWeight: 0.15, rarity: 0.85 }),
-  tool:     I({ id: 'tool', name: 'Improvised Tool', icon: '🔧', type: 'tool', category: 'risky', contraband: true, value: 12, risk: 0.55, concealment: 0.4, suspicion: 0.35, demandWeight: 0.5, supplyWeight: 0.25, rarity: 0.65 }),
+  tool:     I({ id: 'tool', name: 'Improvised Tool', icon: '🔧', type: 'tool', category: 'risky', contraband: true, value: 12, risk: 0.55, concealment: 0.4, suspicion: 0.35, demandWeight: 0.5, supplyWeight: 0.25, rarity: 0.65, combat: 2, escapeAid: 0.25 }),
   part:     I({ id: 'part', name: 'Repair Part', icon: '⚙️', type: 'tool', category: 'utility', contraband: true, value: 9, risk: 0.4, concealment: 0.45, suspicion: 0.25, demandWeight: 0.45, supplyWeight: 0.3, rarity: 0.6 }),
   blade:    I({ id: 'blade', name: 'Sharp Object', icon: '🔪', type: 'weapon', category: 'risky', contraband: true, value: 15, risk: 0.9, concealment: 0.35, suspicion: 0.5, demandWeight: 0.55, supplyWeight: 0.2, rarity: 0.7, combat: 6 }),
+  shiv:     I({ id: 'shiv', name: 'Makeshift Shiv', icon: '🗡️', type: 'weapon', category: 'risky', contraband: true, value: 9, risk: 0.7, concealment: 0.6, suspicion: 0.35, demandWeight: 0.5, supplyWeight: 0.3, rarity: 0.55, combat: 3 }),
+  club:     I({ id: 'club', name: 'Steel Pipe', icon: '🏏', type: 'weapon', category: 'risky', contraband: true, value: 11, risk: 0.75, concealment: 0.2, suspicion: 0.4, demandWeight: 0.5, supplyWeight: 0.25, rarity: 0.6, combat: 4, wKnock: 0.5 }),
+  vest:     I({ id: 'vest', name: 'Padded Vest', icon: '🦺', type: 'misc', category: 'utility', contraband: true, value: 13, risk: 0.4, concealment: 0.2, suspicion: 0.25, demandWeight: 0.55, supplyWeight: 0.2, rarity: 0.6, armor: 0.35 }),
   keycard:  I({ id: 'keycard', name: 'Stolen Keycard', icon: '🗝️', type: 'access', category: 'rare', contraband: true, value: 25, risk: 0.95, concealment: 0.4, suspicion: 0.5, demandWeight: 0.6, supplyWeight: 0.1, rarity: 0.9 }),
   crewmark: I({ id: 'crewmark', name: 'Crew Marker', icon: '🏴', type: 'misc', category: 'crew', contraband: true, value: 8, risk: 0.3, concealment: 0.5, suspicion: 0.2, demandWeight: 0.5, supplyWeight: 0.3, rarity: 0.55 }),
   cash:     I({ id: 'cash', name: 'Cigarettes (currency)', icon: '🚬', type: 'misc', category: 'barter', contraband: true, value: 8, risk: 0.2, concealment: 0.6, suspicion: 0.12, demandWeight: 0.7, supplyWeight: 0.4, rarity: 0.4, use: 'barter', useAmt: 0 })
