@@ -114,7 +114,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.10.0-warden'
+      version: 'v4.11.0-social'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -384,6 +384,8 @@ export class Game {
     const canTrade = !!tinv && tinv.items.length > 0;
     const a: PanelAction[] = [
       { key: 'talk', label: 'Talk', kind: 'social' },
+      { key: 'compliment', label: 'Compliment', kind: 'social' },
+      { key: 'recruit', label: 'Recruit', kind: 'social' },
       { key: 'trade', label: 'Trade', kind: 'social', disabled: !canTrade, reason: canTrade ? '' : 'they have nothing to trade' },
       { key: 'favor', label: 'Favor', kind: 'social' }
     ];

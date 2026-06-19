@@ -14,6 +14,17 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.11.0-social — Stage 4.11 Conversations & NPC grudges
+First slice of the smarter-AI + Hard Time conversations plan. Build + smoke green.
+- **Conversations that change relationships**: open any inmate and **Compliment** (build the bond —
+  better with your Skill stat) or **Recruit** (once they trust you, rel ≥ 35) to make them a **sworn
+  ally** who jumps into your fights (feeds the 4.6 allies-on-sight system).
+- **NPCs settle scores**: a brawl now prioritizes a **remembered foe** in the room over a random
+  target — grudges (from being beaten, insulted, or a prior fight) drive real NPC-vs-NPC drama.
+- Factored a shared `startNpcFight` (random brawls, gang standoffs, and grudges all route through it,
+  releasing object reservations cleanly).
+- Version → `v4.11.0-social`.
+
 ## v4.10.0-warden — Stage 4.10 Warden release conditions
 From the deep research — Hard Time's parole-style condition system. Build + smoke green; save v16.
 - The **warden sets you a timed condition** — e.g. "get your strength to 48 by day 9", "earn 60

@@ -50,7 +50,7 @@ const USE_STATE: Record<string, string> = {
   job: 'working', shelf: 'working', trash: 'working'
 };
 const USING_STATES = new Set(['resting', 'washing', 'eating', 'training', 'working']);
-export type InteractAction = 'talk' | 'insult' | 'threaten' | 'trade' | 'favor' | 'fight' | 'backoff' | 'comply' | 'argue' | 'rest' | 'wash' | 'eat' | 'train' | 'work' | 'pickup' | 'use' | 'inspect' | 'search' | 'hide' | 'take' | 'open' | 'close' | 'try' | 'escape';
+export type InteractAction = 'talk' | 'compliment' | 'recruit' | 'insult' | 'threaten' | 'trade' | 'favor' | 'fight' | 'backoff' | 'comply' | 'argue' | 'rest' | 'wash' | 'eat' | 'train' | 'work' | 'pickup' | 'use' | 'inspect' | 'search' | 'hide' | 'take' | 'open' | 'close' | 'try' | 'escape';
 const SELF_ACTIONS: InteractAction[] = ['rest', 'wash', 'eat', 'train', 'work'];
 const ACTION_DUR: Record<string, number> = { talk: 0.8, insult: 0.9, threaten: 1.0, trade: 1.1, favor: 1.0, comply: 0.6, argue: 0.8, rest: 1.4, wash: 1.4, eat: 1.5, train: 1.4, work: 1.8, escape: 3.0 };
 const ACTION_STATE: Record<string, string> = { talk: 'talking', comply: 'talking', argue: 'threatening', insult: 'threatening', threaten: 'threatening', trade: 'trading', favor: 'trading', rest: 'resting', wash: 'washing', eat: 'eating', train: 'training', work: 'working', escape: 'working' };
@@ -559,11 +559,7 @@ export class Simulation {
         const angry = (this.ecs.get<Needs>(e, 'Needs')!.anger + this.ecs.get<Needs>(rival, 'Needs')!.anger) / 2;
         if (!guardClose && angry > 0.55 && !b.traits.includes('cowardly') && !rb.traits.includes('cowardly') && this.rng.chance(0.4)) {
           this.metrics.standoffsEscalated++;
-          b.state = 'fight'; b.foe = rival; b.cphase = 'squareUp'; b.cTimer = 0.4; b.attackCd = 0.4;
-          rb.state = 'fight'; rb.foe = e; rb.cphase = 'squareUp'; rb.cTimer = 0.4; rb.attackCd = 0.6;
-          if (b.mem) rememberFoe(b.mem, rival); if (rb.mem) rememberFoe(rb.mem, e);
-          this.bus.emit('alert', { type: 'fight', text: `${b.name} and ${rb.name} square off!` });
-          this.dispatchGuard(e); this.registerFight(e);
+          this.startNpcFight(e, rival);
         } else { this.metrics.standoffsDefused++; }
         return;
       }
@@ -1527,20 +1523,27 @@ export class Simulation {
       if (list.length < 2) continue;
       const a = list[Math.floor(this.rng.float() * list.length)];
       const others = list.filter((x) => x !== a);
-      const bb = others[Math.floor(this.rng.float() * others.length)];
-      const ab = this.ecs.get<Brain>(a, 'Brain')!, bbr = this.ecs.get<Brain>(bb, 'Brain')!;
+      const ab = this.ecs.get<Brain>(a, 'Brain')!;
+      // a remembered GRUDGE in the room takes priority over a random neighbour (NPCs settle scores)
+      const grudge = ab.mem?.foe != null && others.includes(ab.mem.foe) ? ab.mem.foe : null;
+      const bb = grudge ?? others[Math.floor(this.rng.float() * others.length)];
+      const bbr = this.ecs.get<Brain>(bb, 'Brain')!;
       const an = this.ecs.get<Needs>(a, 'Needs')!;
       const rivals = ab.gang && bbr.gang && GANGS.find((g) => g.id === ab.gang)?.enemies.includes(bbr.gang);
-      const chance = 0.25 + an.anger * 0.5 + (rivals ? 0.4 : 0) + (ab.traits.includes('aggressive') ? 0.2 : 0);
-      if (this.rng.float() < chance) {
-        ab.state = 'fight'; ab.foe = bb; bbr.state = 'fight'; bbr.foe = a; ab.attackCd = 0.3; bbr.attackCd = 0.5;
-        if (ab.mem) rememberFoe(ab.mem, bb); if (bbr.mem) rememberFoe(bbr.mem, a);   // they remember the brawl
-        this.bus.emit('alert', { type: 'fight', text: `${ab.name} and ${bbr.name} are fighting!` });
-        this.dispatchGuard(a);
-        this.registerFight(a);
-      }
+      const chance = 0.2 + an.anger * 0.5 + (rivals ? 0.35 : 0) + (grudge ? 0.5 : 0) + (ab.traits.includes('aggressive') ? 0.2 : 0);
+      if (!ab.traits.includes('cowardly') && this.rng.float() < chance) this.startNpcFight(a, bb);
       return; // at most one new fight per check
     }
+  }
+  // start an NPC-vs-NPC fight (factored) — random brawls, rivalry standoffs, and remembered grudges
+  private startNpcFight(a: Entity, foe: Entity) {
+    const ab = this.brain(a)!, fb = this.brain(foe)!;
+    this.releaseFor(a); ab.objTarget = undefined; this.releaseFor(foe); fb.objTarget = undefined;
+    ab.state = 'fight'; ab.foe = foe; ab.cphase = 'squareUp'; ab.cTimer = 0.4; ab.attackCd = 0.3;
+    fb.state = 'fight'; fb.foe = a; fb.cphase = 'squareUp'; fb.cTimer = 0.4; fb.attackCd = 0.5;
+    if (ab.mem) rememberFoe(ab.mem, foe); if (fb.mem) rememberFoe(fb.mem, a);
+    this.bus.emit('alert', { type: 'fight', text: `${ab.name} and ${fb.name} are fighting!` });
+    this.dispatchGuard(a); this.registerFight(a);
   }
   private dispatchGuard(fighter: Entity) {
     const guards = this.ecs.query('Brain', 'Position').filter((e) => { const b = this.ecs.get<Brain>(e, 'Brain')!; return b.role === 'guard' && b.state !== 'respond'; });
@@ -2193,7 +2196,7 @@ export class Simulation {
     const tb = this.brain(target); if (!tb) return [];
     if (tb.role === 'guard') return ['talk', 'comply', 'argue'];
     if (tb.isPlayer) return [];
-    return ['talk', 'insult', 'threaten', 'trade', 'favor', 'fight', 'backoff'];
+    return ['talk', 'compliment', 'recruit', 'insult', 'threaten', 'trade', 'favor', 'fight', 'backoff'];
   }
 
   // applies an in-range interaction result (called by the action machine after walk+face+timer)
@@ -2208,6 +2211,21 @@ export class Simulation {
         if (ts) ts.rel = clamp(ts.rel + 6, -100, 100);
         this.prog('talk'); if (ts) this.prog('relUp'); if (tb.gang) this.gangStanding(tb.gang, 1.5);
         return tb.role === 'guard' ? `${tb.name}: "Keep moving, inmate."` : `${tb.name}: "${this.smalltalk(tb)}"`;
+      case 'compliment': {
+        if (!ts) return `${tb.name} ignores you.`;
+        const skill = this.effStat(this.attrs(pl)?.skill ?? 40, this.ecs.get<Needs>(pl, 'Needs')!.energy);
+        const gain = 7 + Math.round(skill / 18);   // ~9-12; better with Skill
+        ts.rel = clamp(ts.rel + gain, -100, 100); this.prog('relUp'); if (tb.gang) this.gangStanding(tb.gang, 2);
+        this.bubble(target, this.rng.pick(['Appreciate it.', "You're alright.", '🙂']), 'talk', 1.2);
+        return `You win ${tb.name} over a little (+${gain} bond).`;
+      }
+      case 'recruit': {
+        if (!ts) return `${tb.name} can't be recruited.`;
+        if (ts.rel < 35) return `${tb.name} doesn't trust you enough yet — build the bond first.`;
+        ts.rel = clamp(ts.rel + 30, -100, 100); ps.reputation = clamp(ps.reputation + 3, -100, 100);
+        this.bubble(target, this.rng.pick(["I've got your back.", "We're solid.", '🤝']), 'talk', 1.6);
+        return `${tb.name} is with you now — they'll jump in if you throw down.`;
+      }
       case 'comply':
         ps.suspicion = clamp(ps.suspicion - 15, 0, 100); return `${tb.name}: "Smart choice."`;
       case 'argue':
