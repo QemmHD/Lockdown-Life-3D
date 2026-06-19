@@ -157,6 +157,12 @@ button { font-family: inherit; cursor: pointer; }
 .m-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(4,6,10,0.7); backdrop-filter: blur(3px); padding: 16px; }
 .m-card { width: min(760px, 96vw); max-height: 92vh; display: flex; flex-direction: column; background: var(--panel2); border: 1px solid rgba(255,255,255,0.16); border-radius: 14px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
 .m-card.narrow { width: min(420px, 94vw); }
+/* 4.0 sentence HUD + run-end verdict cards */
+.tb-left { color: #ffd24a; }
+.m-card.end-win { border-color: #2ecc71; box-shadow: 0 10px 44px rgba(0,0,0,0.6), 0 0 0 1px rgba(46,204,113,0.45); }
+.m-card.end-escape { border-color: var(--accent); box-shadow: 0 10px 44px rgba(0,0,0,0.6), 0 0 0 1px rgba(224,160,48,0.45); }
+.m-card.end-dead { border-color: #e0413a; box-shadow: 0 10px 44px rgba(0,0,0,0.6), 0 0 0 1px rgba(224,65,58,0.45); }
+.m-card.end-win .m-head b { color: #6ad08a; } .m-card.end-escape .m-head b { color: var(--accent); } .m-card.end-dead .m-head b { color: #ff5a4d; }
 .m-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); }
 .m-head b { font-size: 18px; } .m-x { background: none; border: none; color: var(--ink); font-size: 18px; padding: 4px 8px; }
 .m-pill { background: var(--accent); color: #1a1206; border-radius: 20px; padding: 2px 10px; font-size: 12px; font-weight: 800; }

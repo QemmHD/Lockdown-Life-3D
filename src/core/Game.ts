@@ -45,6 +45,7 @@ export class Game {
   private interactableDefs: any[] = [];
   private panelDirty = true;     // request an immediate panel refresh
   private panelTimer = 0;        // throttle background refreshes to ~6.7/s (not every frame)
+  private endingShown = false;   // run-end card shown once per run (sentence served / escape / death)
 
   constructor(canvas: HTMLCanvasElement) {
     this.app = new ThreeApp(canvas);
@@ -113,7 +114,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v3.9.0-audio'
+      version: 'v4.0.0-sentence'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -433,6 +434,7 @@ export class Game {
     this.sim.startNewRun(setup, this.interactableDefs as any);
     this.sync.reset(); this.feedback.reset(); this.sync.setEcs(this.sim.ecs);
     for (const d of this.doorVisuals) d.lastOpen = undefined;   // re-prime door SFX (no stray clang on new run)
+    this.endingShown = false;
     this.playerEntity = this.sim.player();
     const sp = this.sim.ecs.get<Position>(this.playerEntity, 'Position'); if (sp) this.cam.focus(sp.x, sp.z);
     this.speedIdx = 0; this.paused = false; this.hud.setSpeed('1×');
@@ -449,6 +451,7 @@ export class Game {
     this.feedback.reset();
     this.sync.setEcs(this.sim.ecs);
     for (const d of this.doorVisuals) d.lastOpen = undefined;   // re-prime door SFX (no stray clang on load)
+    this.endingShown = false;
     this.playerEntity = this.sim.player();
     this.panelDirty = true;
     this.hud.clearAlerts();             // drop any stale alert lines from before the load
@@ -543,7 +546,7 @@ export class Game {
     }
     // chaos-driven HUD: eased heat + riot pressure, lockdown chip + chaos banner
     const riot = this.sim.riotPressure;
-    this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, this.sim.heat, riot);
+    this.hud.setTop(this.sim.day, this.sim.hour, phaseAt(this.sim.hour).name, this.sim.heat, riot, Math.max(0, this.sim.sentence - this.sim.served));
     this.hud.setAlarm(this.sim.alarm.active || this.sim.riotLevel === 'event' ? 1 : riot);
     this.hud.setChaos({
       lockdown: this.sim.lockdown.active, lockdownTimer: this.sim.lockdown.timer, lockdownReason: this.sim.lockdown.reason,
@@ -554,6 +557,8 @@ export class Game {
     // objective tracker (throttled with the panel) + once-a-day summary modal
     if (this.panelTimer >= 0.14) this.hud.setObjectives(this.sim.objectives, this.sim.tier());
     if (this.sim.pendingSummary && !this.menus.isOpen()) { this.menus.showSummary(this.sim.takeSummary()); this.paused = true; }
+    // run end: sentence served (release), escape, or death → show the verdict card once
+    if (this.sim.runEnd && !this.endingShown && !this.menus.isOpen()) { this.endingShown = true; this.menus.showEnding(this.sim.runEnd); this.paused = true; }
 
     this.app.renderer.render(this.app.scene, this.cam.activeCamera);
     requestAnimationFrame(this.loop);

@@ -14,6 +14,24 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.0.0-sentence — Stage 4.0 The Sentence (Hard Time spine)
+Turns the open-ended day-loop into an actual **game with a goal and an ending** — the core of
+Mdickie's _Hard Time_. Sim-authoritative, save format v13, typecheck + build + smoke green (verdict
+card + sim-freeze verified in headless Chrome).
+- **Sentence**: you now serve a **term** (length scales with difficulty + backstory). The HUD shows
+  **"N days left"**. Each day served counts down; a clean + productive day (no solitary, objectives
+  met) can earn **time off for good behavior**.
+- **Misconduct adds time**: getting caught with **contraband** (+1 day) or thrown in **solitary**
+  (+2 days) extends your sentence, with an on-screen "+N days" warning.
+- **Endings / win-lose**: the run now actually ends with a **verdict card** — **RELEASED** (served
+  your time = win), **ESCAPED** (broke out = alt win, now wired from a real successful escape instead
+  of the old "prototype ending" stub), or **GAME OVER** (death — `endRun('dead')` is wired up, fully
+  triggered in 4.1). The sim **freezes** on the verdict; the card offers New Game / Main Menu.
+- **Save/load v13**: persists sentence + days served (older saves default to a fresh 30-day term).
+- **Design**: added `docs/HARDTIME-DESIGN.md` — a research-derived design bible for the full Hard
+  Time remake that the 4.x roadmap follows.
+- Version → `v4.0.0-sentence`.
+
 ## v3.9.0-audio — Stage 3.9 Audio
 The game's first **sound**. 100% **procedural** WebAudio (no asset files, in keeping with the
 procedural art), and pure **presentation** — `AudioSystem` only listens to the `EventBus` and reads a
