@@ -2218,8 +2218,41 @@ export class Simulation {
     tb.state = 'fight'; tb.foe = pl; tb.attackCd = 0.5; tb.cphase = 'squareUp'; tb.cTimer = 0.4;
     if (tb.mem) rememberFoe(tb.mem, pl);
     this.bus.emit('alert', { type: 'fight', text: `Fight: You vs ${tb.name}!` });
+    this.rallyAllies(pl, target);
     this.dispatchGuard(pl);
     this.registerFight(pl);
+  }
+  // Stage 4.6: nearby inmates who can SEE the brawl take sides — your gang/friends jump in for you,
+  // the foe's crew / your enemies pile on against you. Who you're connected to now decides the fight.
+  private rallyAllies(player: Entity, foe: Entity) {
+    const pb = this.brain(player)!; const fb = this.brain(foe); const pp = this.pos(player)!; const pGang = pb.gang;
+    let forMe = 0, against = 0;
+    for (const e of this.ecs.query('Brain', 'Position', 'Social')) {
+      if (e === player || e === foe) continue;
+      const b = this.brain(e)!;
+      if (b.role !== 'prisoner' || b.isPlayer) continue;
+      if (['fight', 'down', 'solitary', 'escorted', 'beingSearched'].includes(b.state)) continue;
+      const p = this.pos(e)!; if (Math.hypot(p.x - pp.x, p.z - pp.z) > 8) continue;
+      if (!this.hasLOS(e, player)) continue;
+      const s = this.social(e)!;
+      const ally = (!!pGang && b.gang === pGang) || s.rel > 40;
+      const enemy = (!!fb?.gang && b.gang === fb.gang && fb.gang !== pGang) || s.rel < -45 || (!!pGang && areEnemies(b.gang, pGang));
+      if (ally && forMe < 2) { this.joinFight(e, b, foe); forMe++; this.bubble(e, 'I got you!', 'talk', 1.0); }
+      else if (enemy && against < 2) { this.joinFight(e, b, player); against++; this.bubble(e, 'Get him!', 'insult', 1.0); }
+    }
+    if (forMe) { this.metrics.allyHelp += forMe; this.bus.emit('alert', { type: 'player', text: `Your people jump in — ${forMe} backing you!` }); }
+    if (against) this.bus.emit('alert', { type: 'fight', text: `${against} pile on against you!` });
+  }
+  private joinFight(e: Entity, b: Brain, target: Entity) {
+    b.state = 'fight'; b.foe = target; b.cphase = 'squareUp'; b.cTimer = 0.5; b.attackCd = this.rng.range(0.4, 0.8);
+    this.ecs.get<Agent>(e, 'Agent')!.path = null;
+  }
+  // line-of-sight: clear if no structural wall sits between the two points
+  private hasLOS(a: Entity, b: Entity): boolean {
+    const pa = this.pos(a), pb = this.pos(b); if (!pa || !pb) return false;
+    const steps = Math.ceil(Math.hypot(pb.x - pa.x, pb.z - pa.z) * 2) + 1;
+    for (let i = 1; i < steps; i++) { const t = i / steps; const k = this.map.worldToIdx(pa.x + (pb.x - pa.x) * t, pa.z + (pb.z - pa.z) * t); if (k < 0 || this.map.walkable[k] === 0) return false; }
+    return true;
   }
 
   // ---------- player combat actions (Stage 3.3) ----------

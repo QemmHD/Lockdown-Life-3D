@@ -14,6 +14,17 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.6.0-allies — Stage 4.6 Allies rush in
+Who you're connected to now decides a fight — straight out of Hard Time. Build + smoke green.
+- **Allies jump in**: start a brawl and nearby inmates who can **see** it (line-of-sight) take sides —
+  your **gang mates** and **friends** (high relationship) pile in **for you** (up to 2).
+- **Enemies pile on**: the foe's crew, your **enemies**, and rival gangs jump in **against you** (up to
+  2) — and with 4.1's lethality, getting swarmed can get you killed. Pick your fights.
+- New **line-of-sight** check (structural walls block sight) gates who notices; `allyHelp` telemetry
+  tracks your backup.
+- Only fires on **player-initiated** fights, so a swarm is a consequence of a bad fight you chose.
+- Version → `v4.6.0-allies`.
+
 ## v4.5.0-survival — Stage 4.5 Survival stakes
 Needs finally have teeth — the survival loop matters. Build + smoke green; no save change.
 - **Death by neglect**: let **hunger or sleep** max out and it eats your **health** — for you that's a
