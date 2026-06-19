@@ -21,6 +21,18 @@ export function newEscape(): EscapeState {
   return { active: false, by: 0, timer: 0, spot: '', noticed: false };
 }
 
+// Stage 4.3 — a persistent escape PROJECT worked over several days (separate from the one-shot break-out).
+export interface EscapeSite { roomId: string; progress: number; daysWorked: number; }
+export function newEscapeSite(): EscapeSite { return { roomId: '', progress: 0, daysWorked: 0 }; }
+export function sanitizeEscapeSite(d: any): EscapeSite {
+  const s = newEscapeSite(); if (!d || typeof d !== 'object') return s;
+  if (typeof d.roomId === 'string') s.roomId = d.roomId;
+  if (typeof d.progress === 'number' && isFinite(d.progress)) s.progress = Math.max(0, Math.min(1, d.progress));
+  if (typeof d.daysWorked === 'number' && isFinite(d.daysWorked)) s.daysWorked = Math.max(0, Math.floor(d.daysWorked));
+  return s;
+}
+export const ESCAPE_WORK_GAIN = 0.2;   // progress per work session
+
 // Fictional outcome: attempts mostly fail. Success is rare and only when no guards are nearby.
 export function rollEscapeOutcome(roll: number, guardsNear: number, aid = 0): EscapeOutcome {
   const r = Math.min(0.999, roll + aid);   // escape tools (file / lockpick / improvised tool) improve the odds

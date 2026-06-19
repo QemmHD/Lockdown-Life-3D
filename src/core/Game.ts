@@ -114,7 +114,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.2.0-gear'
+      version: 'v4.3.0-escape'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -375,7 +375,7 @@ export class Game {
         { key: 'eat', label: 'Eat', kind: 'object' }, { key: 'train', label: 'Train', kind: 'object' }, { key: 'work', label: 'Work', kind: 'object' });
     }
     // chaos context actions (Comply / Return to Cell / Hide / Calm Down / Help Guard / Attempt Escape)
-    for (const c of chaos) a.push({ key: c.key, label: c.label, kind: c.key === 'escape' ? 'risky' : 'guard', disabled: c.disabled, reason: c.reason, danger: c.key === 'escape' });
+    for (const c of chaos) a.push({ key: c.key, label: c.label, kind: c.key.startsWith('esc') ? 'risky' : 'guard', disabled: c.disabled, reason: c.reason, danger: c.key === 'escape' || c.key === 'escbreak' });
     return a;
   }
   private npcActions(e: Entity, role: string): PanelAction[] {
@@ -417,11 +417,12 @@ export class Game {
     if (fighting && (Game.COMBAT_KEYS.includes(key) || key === 'backoff')) status = this.sim.requestCombatAction(key);
     else if (!isPlayerSel && Game.GANG_KEYS.includes(key)) status = this.sim.requestGangAction(sel, key);
     else if (isPlayerSel && key === 'escape') status = this.sim.requestEscape();
+    else if (isPlayerSel && (key === 'escstart' || key === 'escwork' || key === 'escbreak')) status = this.sim.requestChaosAction(key);
     else if (isPlayerSel && Game.CHAOS_KEYS.includes(key)) status = this.sim.requestChaosAction(key);
     // player "convenience" needs actions route to the nearest reachable real object (not room shortcuts)
     else if (isPlayerSel && Game.SELF_KEYS.includes(key)) status = this.sim.requestNearestObjectAction(key);
     else { status = this.sim.requestAction(sel, key as InteractAction); if (key === 'fight') this.select(this.playerEntity); }   // show combat panel
-    if (status) this.hud.alert(status, key === 'fight' || key === 'escape' ? 'fight' : 'info');
+    if (status) this.hud.alert(status, key === 'fight' || key === 'escape' || key === 'escbreak' ? 'fight' : 'info');
     this.refreshPanel();
   }
 

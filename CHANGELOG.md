@@ -14,6 +14,20 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.3.0-escape — Stage 4.3 Escape is a project
+Escape stops being a one-tap coin flip and becomes a multi-day plan — Hard Time's signature pillar.
+Build + smoke green; save format **v14** (persists the escape site).
+- **Start a Way Out**: at a perimeter opportunity (yard / intake / storage, or by a gate) **with an
+  escape tool** (Improvised Tool / keycard), you start a hidden escape **site**.
+- **Work the Way Out**: chip at it over several sessions — each adds ~20% progress (and suspicion).
+  A guard within range can **catch you mid-dig** and wreck the whole site (+heat, +2 days, alarm).
+- **Break Out** (only at 100%): runs the real escape resolution (your tool improves the odds) → the
+  **ESCAPED** ending, or caught → solitary.
+- The instant, desperate **Rush the Gate** option remains.
+- HUD objective shows live site progress; the site **persists in your save** (v14) so a half-dug
+  route survives a reload — a break-out consumes it.
+- Version → `v4.3.0-escape`.
+
 ## v4.2.0-gear — Stage 4.2 Gear power ladder
 Contraband stops being points-and-risk and becomes Hard Time's "buy gear that changes what you can
 **do**" ladder. Build + smoke green; save format unchanged (item data only).

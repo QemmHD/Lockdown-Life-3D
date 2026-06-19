@@ -12,7 +12,7 @@ import { Interactable, InteractableDef, OBJ_ACTIONS, OBJ_ACTION_LABEL, isExclusi
 import { LockdownState, newLockdown, LOCKDOWN_SECONDS, LOCKDOWN_COOLDOWN, lockdownLocks, sanitizeLockdown } from './LockdownSystem';
 import { RiotLevel, computeRiotTarget, riotLevelHyst, tensionLabel, RIOT_WARN_CD, RIOT_EVENT_CD } from './RiotSystem';
 import { Checkpoint, buildCheckpoints } from './GuardCheckpointSystem';
-import { EscapeState, newEscape, ESCAPE_OPPORTUNITY_ROOMS, ESCAPE_COOLDOWN, rollEscapeOutcome } from './EscapeSystem';
+import { EscapeState, newEscape, EscapeSite, newEscapeSite, sanitizeEscapeSite, ESCAPE_WORK_GAIN, ESCAPE_OPPORTUNITY_ROOMS, ESCAPE_COOLDOWN, rollEscapeOutcome } from './EscapeSystem';
 import { PrisonerIntent, GuardRole, INTENT_LABEL, ROLE_LABEL, GUARD_DWELL, INTENT_STICK, ROLE_STICK } from './AIIntent';
 import { choosePrisonerIntent } from './PrisonerAISystem';
 import { AIMemory, newMemory, decayMemory, rememberFoe, rememberThreat, rememberSearch, sanitizeMemory } from './AIMemorySystem';
@@ -86,6 +86,7 @@ export class Simulation {
   riotEventTimer = 0;
   tension: Record<string, number> = {};        // by room id, 0..100
   escape: EscapeState = newEscape();
+  escapeSite: EscapeSite = newEscapeSite();   // Stage 4.3: persistent escape project worked over days
   playerObjective = '';                         // chaos objective shown in the HUD
   private checkpoints: Checkpoint[] = [];
   private fightsRecent = 0;
@@ -130,7 +131,7 @@ export class Simulation {
     this.ecs = new ECS();
     this.day = 1; this.hour = 6; this.phaseId = 'wake'; this.act = null;
     this.lockdown = newLockdown(); this.alarm = { active: false, timer: 0, reason: '' };
-    this.heat = 0; this.riotPressure = 0; this.riotLevel = 'calm'; this.riotEventTimer = 0; this.escape = newEscape();
+    this.heat = 0; this.riotPressure = 0; this.riotLevel = 'calm'; this.riotEventTimer = 0; this.escape = newEscape(); this.escapeSite = newEscapeSite();
     this.tension = {}; this.progression = newProgression(); this.objectives = []; this.pendingSummary = null; this.lastSummaryDay = 0;
     this.sentence = 30; this.served = 0; this.runEnd = null;
     this.fightCd = 6; this.suspTimer = 0; this.jobStreak = 0; this.diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1, moneyScale: 1 };
@@ -625,6 +626,8 @@ export class Simulation {
     else if (this.alarm.active) this.playerObjective = 'Alarm active — guards are responding.';
     else if (this.riotLevel === 'warning') this.playerObjective = 'Tension rising — stay clear of crowds.';
     else if (inRestricted) this.playerObjective = 'Restricted area — you shouldn\'t be here.';
+    else if (this.escapeSite.roomId && this.escapeSite.progress >= 1) this.playerObjective = 'Your way out is ready — break for it.';
+    else if (this.escapeSite.roomId) this.playerObjective = `Escape site: ${Math.round(this.escapeSite.progress * 100)}% — keep working it.`;
     else this.playerObjective = '';
   }
 
@@ -1704,7 +1707,14 @@ export class Simulation {
       if (this.nearestGuard(this.playerId, 6) != null) out.push({ key: 'helpguard', label: 'Help Guard' });
     }
     // Attempt Escape only near a valid abstract opportunity (fictional, no real methods)
-    if (this.escapeOpportunity()) out.push({ key: 'escape', label: 'Attempt Escape' });
+    // escape PROJECT (Stage 4.3): start a site with a tool, work it over days, then break out
+    if (this.escapeOpportunity()) {
+      out.push({ key: 'escape', label: 'Rush the Gate' });   // instant, very risky
+      const here = this.escapeSiteHere();
+      if (here && this.escapeSite.progress >= 1) out.push({ key: 'escbreak', label: 'Break Out!' });
+      else if (here) out.push({ key: 'escwork', label: `Work the Way Out (${Math.round(this.escapeSite.progress * 100)}%)` });
+      else if (!this.escapeSite.roomId && this.playerHasEscapeTool()) out.push({ key: 'escstart', label: 'Start a Way Out' });
+    }
     return out;
   }
   // nearest abstract opportunity zone within reach (gate object, or being in a perimeter/service room)
@@ -1714,6 +1724,13 @@ export class Simulation {
     for (const o of this.objs.values()) if (o.type === 'gate' && Math.hypot(o.ix - pp.x, o.iz - pp.z) < 4) return o.room;
     const rt = this.roomTypeAt(pp); return ESCAPE_OPPORTUNITY_ROOMS.includes(rt) ? this.roomIdAt(pp) : null;
   }
+  // the active escape site, if the player is standing in it
+  escapeSiteHere(): string | null {
+    if (!this.escapeSite.roomId) return null;
+    const pp = this.pos(this.playerId); if (!pp) return null;
+    return this.roomIdAt(pp) === this.escapeSite.roomId ? this.escapeSite.roomId : null;
+  }
+  playerHasEscapeTool(): boolean { return (this.inv(this.playerId)?.items ?? []).some((id) => (ITEMS[id]?.escapeAid ?? 0) > 0); }
   // immediate (in-place) chaos responses; returns a status string for the HUD
   requestChaosAction(key: string): string {
     const pl = this.playerId; const pb = this.brain(pl); const ps = this.social(pl); if (!pb || !ps) return '';
@@ -1749,6 +1766,35 @@ export class Simulation {
         this.riotPressure = clamp01(this.riotPressure - 0.02); this.bubble(pl, 'On it.', 'talk', 1.0);
         this.floatBy(pl, 'Snitch -Rep', '#ff7a6a'); return 'You side with the guards (other inmates notice).';
       }
+      case 'escstart': {
+        if (!this.playerHasEscapeTool()) return 'You need a tool to start a way out.';
+        const room = this.escapeOpportunity(); if (!room) return 'No good spot here.';
+        this.escapeSite = newEscapeSite(); this.escapeSite.roomId = room;
+        ps.suspicion = clamp(ps.suspicion + 8, 0, 100);
+        this.bus.emit('alert', { type: 'warning', text: 'You start working a way out — come back and chip at it.' });
+        return 'You begin a way out here.';
+      }
+      case 'escwork': {
+        if (this.escapeSiteHere() == null) return 'Not at your escape site.';
+        if (this.escapeSite.progress >= 1) return 'The way out is ready — break for it.';
+        // working it leaves you exposed — a watching guard can wreck the whole project
+        const g = this.nearestGuard(pl, 7);
+        if (g != null && this.rng.chance(0.35)) {
+          this.escapeSite = newEscapeSite(); this.addHeat(16); this.addTime(2, 'a guard found your escape site');
+          ps.suspicion = clamp(ps.suspicion + 20, 0, 100); this.triggerAlarm('escape', 2);
+          this.bus.emit('alert', { type: 'critical', text: "A guard caught you working the site — it's wrecked!" });
+          return 'Caught working the site!';
+        }
+        this.escapeSite.progress = Math.min(1, this.escapeSite.progress + ESCAPE_WORK_GAIN); this.escapeSite.daysWorked++;
+        ps.suspicion = clamp(ps.suspicion + 6, 0, 100);
+        this.floatBy(pl, `Way out ${Math.round(this.escapeSite.progress * 100)}%`, '#9fe0a0');
+        if (this.escapeSite.progress >= 1) this.bus.emit('alert', { type: 'player', text: 'The way out is ready — break for it when it\'s clear.' });
+        return `You work the site — ${Math.round(this.escapeSite.progress * 100)}%.`;
+      }
+      case 'escbreak': {
+        if (this.escapeSiteHere() == null || this.escapeSite.progress < 1) return "The way out isn't ready.";
+        return this.requestEscape();   // break-out runs the existing attempt/resolution → endRun
+      }
     }
     return '';
   }
@@ -1773,6 +1819,7 @@ export class Simulation {
     const aid = (this.inv(pl)?.items ?? []).map((id) => ITEMS[id]?.escapeAid ?? 0).reduce((a, c) => Math.max(a, c), 0);
     const outcome = rollEscapeOutcome(this.rng.float(), guardsNear, aid);
     this.escape = newEscape();
+    this.escapeSite = newEscapeSite();   // a break-out consumes the prepared site
     if (outcome === 'success') {
       pb.action = 'ESCAPED'; this.bus.emit('alert', { type: 'player', text: '🚨 You slipped out — ESCAPED!' });
       this.endRun('escaped');
@@ -2332,10 +2379,11 @@ export class Simulation {
       alarm: this.alarm,
       heat: this.heat,
       riotPressure: this.riotPressure,
-      tension: this.tension
+      tension: this.tension,
+      escapeSite: this.escapeSite
     };
     const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang, economy: this.economy, jobStreak: this.jobStreak, sentence: this.sentence, served: this.served };
-    return { version: 13, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
+    return { version: 14, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -2375,7 +2423,7 @@ export class Simulation {
     this.heat = clamp(num(data.heat, 0), 0, 100);
     this.riotPressure = clamp01(num(data.riotPressure, 0));
     this.riotLevel = riotLevelHyst(this.riotPressure, 'calm');
-    this.riotEventTimer = 0; this.escape = newEscape();
+    this.riotEventTimer = 0; this.escape = newEscape(); this.escapeSite = sanitizeEscapeSite(data.escapeSite);
     this.fightsRecent = 0; this.searchesRecent = 0; this.blockedCount = 0;
     this.lockdownCd = 0; this.riotWarnCd = 0; this.riotEventCd = 0; this.escapeCd = 0; this.heatEventTimer = 0;
     this.tension = {}; for (const r of this.rooms) this.tension[r.id] = (data.tension && typeof data.tension[r.id] === 'number') ? clamp(data.tension[r.id], 0, 100) : 0;
