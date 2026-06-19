@@ -14,6 +14,17 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.10.0-warden — Stage 4.10 Warden release conditions
+From the deep research — Hard Time's parole-style condition system. Build + smoke green; save v16.
+- The **warden sets you a timed condition** — e.g. "get your strength to 48 by day 9", "earn 60
+  respect", "save up $20", or "keep your reputation below X". Meet it by the deadline → **3 days off**
+  your sentence + a rep bump; blow it → **+3 days** (no court — just the warden's word).
+- A new condition is issued whenever you don't have one and aren't near release; shown as a 📋 alert
+  and in your Stats. Persists in save (v16).
+- Makes the sentence an **active goal you steer toward**, not a passive countdown — and gives your
+  trained stats / money a concrete payoff.
+- Version → `v4.10.0-warden`.
+
 ## v4.9.0-realism — Stage 4.9 Realism lighting pass
 First step on the "less cartoony" graphics ask (research-driven). Build + smoke green; render-only.
 - **Killed the flat ambient wash** (ambient 1.35→0.5, hemi 0.85→0.42) — the #1 thing making it read

@@ -25,6 +25,7 @@ import { PlayerGangState, newGangState, sanitizeGangState, RANKS, standingLabel,
 import { EconomyState, MarketOffer, newEconomy, sanitizeEconomy, priceFor, refusesToTrade, searchRisk, jobPay, stashInfo, stashLabel, driftEconomy } from './EconomySystem';
 
 const SECONDS_PER_HOUR = 12;   // longer days — time to actually live the prison day (was 5)
+type WardenCondition = { kind: 'strength' | 'reputation' | 'respect' | 'money'; target: number; dueDay: number; text: string };
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
 const RESTRICTED = ['guardroom', 'intake', 'storage', 'solitary'];
 const DEBUG = typeof location !== 'undefined' && /[?&]debug/.test(location.search);
@@ -107,6 +108,7 @@ export class Simulation {
   sentence = 30;                       // total days to serve
   served = 0;                          // days served so far
   runEnd: { kind: 'released' | 'escaped' | 'dead'; title: string; lines: string[] } | null = null;
+  wardenCondition: WardenCondition | null = null;   // Stage 4.10: a timed warden release condition
   setup: NewGameSetup = defaultSetup();
   diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1, moneyScale: 1 };
   gang: PlayerGangState = newGangState();
@@ -133,7 +135,7 @@ export class Simulation {
     this.lockdown = newLockdown(); this.alarm = { active: false, timer: 0, reason: '' };
     this.heat = 0; this.riotPressure = 0; this.riotLevel = 'calm'; this.riotEventTimer = 0; this.escape = newEscape(); this.escapeSite = newEscapeSite();
     this.tension = {}; this.progression = newProgression(); this.objectives = []; this.pendingSummary = null; this.lastSummaryDay = 0;
-    this.sentence = 30; this.served = 0; this.runEnd = null;
+    this.sentence = 30; this.served = 0; this.runEnd = null; this.wardenCondition = null;
     this.fightCd = 6; this.suspTimer = 0; this.jobStreak = 0; this.diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1, moneyScale: 1 };
     this.gang = newGangState();
     this.economy = newEconomy();
@@ -685,6 +687,7 @@ export class Simulation {
     if (this.daily.solitary === 0 && this.daily.objectivesDone >= 2 && this.rng.float() < 0.34) this.served++;
     if (this.served >= this.sentence) { this.served = this.sentence; this.endRun('released'); }
     const ps = this.social(this.playerId)!; const pinv = this.inv(this.playerId)!;
+    this.evalWarden();
     this.progression.bestTier = Math.max(this.progression.bestTier, repTier(ps.reputation, ps.respect).index);
     this.pendingSummary = this.buildSummary(ps.reputation, ps.respect, pinv.money);
     this.progression.summariesShown++;
@@ -717,6 +720,33 @@ export class Simulation {
     if (this.runEnd || days <= 0) return;
     this.sentence += days;
     this.bus.emit('alert', { type: 'critical', text: `+${days} day${days > 1 ? 's' : ''} on your sentence — ${reason}.` });
+  }
+  // Stage 4.10 — the warden sets you a timed condition; meet it for days off, blow it for days added.
+  private evalWarden() {
+    if (this.runEnd) return;
+    const w = this.wardenCondition;
+    if (w && this.day > w.dueDay) {
+      if (this.wardenMet(w)) { this.served = Math.min(this.sentence, this.served + 3); this.social(this.playerId)!.reputation = clamp(this.social(this.playerId)!.reputation + 5, -100, 100); this.bus.emit('alert', { type: 'player', text: "The warden's satisfied — 3 days off your sentence." }); }
+      else this.addTime(3, "you blew off the warden's terms");
+      this.wardenCondition = null;
+    }
+    if (!this.wardenCondition && this.sentence - this.served > 4) { this.wardenCondition = this.rollWarden(); this.bus.emit('alert', { type: 'warning', text: '📋 ' + this.wardenCondition.text }); }
+  }
+  private wardenMet(w: WardenCondition): boolean {
+    const ps = this.social(this.playerId)!; const a = this.attrs(this.playerId); const inv = this.inv(this.playerId)!;
+    if (w.kind === 'strength') return (a?.strength ?? 0) >= w.target;
+    if (w.kind === 'respect') return ps.respect >= w.target;
+    if (w.kind === 'money') return inv.money >= w.target;
+    return ps.reputation <= w.target;   // 'reputation' = keep your head down (rep BELOW target)
+  }
+  private rollWarden(): WardenCondition {
+    const due = this.day + 3 + Math.floor(this.rng.float() * 2);
+    const a = this.attrs(this.playerId); const ps = this.social(this.playerId)!; const inv = this.inv(this.playerId)!;
+    const r = this.rng.float();
+    if (r < 0.3) { const target = Math.min(99, Math.round((a?.strength ?? 40) + 8)); return { kind: 'strength', target, dueDay: due, text: `Warden: get your strength to ${target} by day ${due}.` }; }
+    if (r < 0.55) { const target = Math.min(95, Math.round(ps.respect + 10)); return { kind: 'respect', target, dueDay: due, text: `Warden: earn ${target} respect by day ${due}.` }; }
+    if (r < 0.8) { const target = inv.money + 12; return { kind: 'money', target, dueDay: due, text: `Warden: save up $${target} by day ${due}.` }; }
+    const target = Math.max(-25, Math.round(ps.reputation - 8)); return { kind: 'reputation', target, dueDay: due, text: `Warden: keep your reputation below ${target} until day ${due}.` };
   }
   // end the run with a verdict (release = win, escape = alt win, death = loss). The UI shows the card.
   endRun(kind: 'released' | 'escaped' | 'dead') {
@@ -940,7 +970,7 @@ export class Simulation {
       discipline: pb.discipline ?? 'none', solitaryTimer: pb.state === 'solitary' ? Math.ceil(pb.discTimer ?? 0) : 0, injured: !!pb.injuredT,
       strength: Math.round(this.attrs(pl)?.strength ?? 0), agility: Math.round(this.attrs(pl)?.agility ?? 0), skill: Math.round(this.attrs(pl)?.skill ?? 0), stamina: Math.round(this.attrs(pl)?.stamina ?? 0),
       gang: pb.gang ? GANG_MAP[pb.gang].name : 'Unaffiliated', tier: tier.name, heat: Math.round(this.heat),
-      sentence: this.sentence, served: this.served, daysLeft: Math.max(0, this.sentence - this.served),
+      sentence: this.sentence, served: this.served, daysLeft: Math.max(0, this.sentence - this.served), warden: this.wardenCondition?.text ?? '',
       backstory: backstoryDef(this.setup.backstory).name, difficulty: diffDef(this.setup.difficulty).name,
       traits: pb.traits.slice(0, 4), gangLean: this.setup.gangLean === 'none' ? 'Unaffiliated' : (GANG_MAP[this.setup.gangLean]?.name ?? this.setup.gangLean)
     };
@@ -2460,8 +2490,8 @@ export class Simulation {
       tension: this.tension,
       escapeSite: this.escapeSite
     };
-    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang, economy: this.economy, jobStreak: this.jobStreak, sentence: this.sentence, served: this.served };
-    return { version: 15, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
+    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang, economy: this.economy, jobStreak: this.jobStreak, sentence: this.sentence, served: this.served, wardenCondition: this.wardenCondition };
+    return { version: 16, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -2521,6 +2551,7 @@ export class Simulation {
     this.sentence = (typeof data.sentence === 'number' && data.sentence > 0) ? Math.round(data.sentence) : 30;
     this.served = (typeof data.served === 'number' && data.served >= 0) ? Math.min(Math.round(data.served), this.sentence) : 0;
     this.runEnd = null;
+    this.wardenCondition = (data.wardenCondition && typeof data.wardenCondition === 'object' && typeof data.wardenCondition.text === 'string') ? data.wardenCondition : null;
     // character setup + derived difficulty (old saves get a sensible default)
     this.setup = sanitizeSetup(data.setup);
     // faction / gang state (old saves: default; derive a little standing from the lean)
