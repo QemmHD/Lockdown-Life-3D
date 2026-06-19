@@ -652,6 +652,7 @@ export class Simulation {
     if (ps && o.reward.rep) ps.reputation = clamp(ps.reputation + o.reward.rep, -100, 100);
     if (ps && o.reward.respect) ps.respect = clamp(ps.respect + o.reward.respect, 0, 100);
     if (pinv && o.reward.money) { const m = Math.max(1, Math.round(o.reward.money * this.diff.rewardMul)); pinv.money += m; this.progression.moneyEarned += m; }
+    const on = this.ecs.get<Needs>(this.playerId, 'Needs'); if (on) on.morale = clamp01((on.morale ?? 0.6) + 0.05);
     this.bus.emit('alert', { type: 'player', text: `✓ Objective: ${o.text}` });
   }
   // central progression hook (counters + objectives + daily stats). Called at event sites.
@@ -908,7 +909,7 @@ export class Simulation {
     switch (it.use) {
       case 'food': n.hunger = clamp01(n.hunger - it.useAmt); this.floatBy(this.playerId, 'Fed', '#e8b52e'); break;
       case 'hygiene': n.hygiene = clamp01(n.hygiene - it.useAmt); this.floatBy(this.playerId, '+Hygiene', '#9fcad8'); break;
-      case 'comfort': n.fear = clamp01(n.fear - it.useAmt); n.anger = clamp01(n.anger - it.useAmt * 0.6); this.floatBy(this.playerId, '+Calm', '#9fe0a0'); break;
+      case 'comfort': n.fear = clamp01(n.fear - it.useAmt); n.anger = clamp01(n.anger - it.useAmt * 0.6); n.morale = clamp01((n.morale ?? 0.6) + it.useAmt * 0.6); this.floatBy(this.playerId, '+Spirit', '#f1c40f'); break;
       case 'medical': n.health = clamp01(n.health + it.useAmt); { const pbb = this.brain(this.playerId); if (pbb) { pbb.injuredT = 0; pbb.bleedT = 0; } } this.floatBy(this.playerId, '+Health', '#6dff9e'); break;
     }
     this.bus.emit('actionResult', { text: `You use the ${it.name}.` });
@@ -2165,6 +2166,7 @@ export class Simulation {
     const so = this.pickRoomOfType('solitary'); const k = randomTileInRoom(this.map, this.rooms, so.id, () => this.rng.float());
     const t = this.map.tileXY(k); const w = this.map.toWorld(t.x, t.y); tp.x = w.x; tp.z = w.z;
     if (ps) { ps.suspicion = clamp(ps.suspicion - 40, 0, 100); ps.reputation = clamp(ps.reputation + 3, -100, 100); }
+    const sn = this.ecs.get<Needs>(target, 'Needs'); if (sn) sn.morale = clamp01((sn.morale ?? 0.6) - 0.22);   // the hole crushes your Spirit
     if (tb.isPlayer) this.prog('solitary');
     this.bus.emit('alert', { type: 'discipline', text: `${tb.name} sent to solitary — ${reason}` });
   }
@@ -2173,6 +2175,8 @@ export class Simulation {
   private onFightWin(winner: Entity, loser: Entity, wb: Brain, lb: Brain) {
     const ws = this.social(winner), ls = this.social(loser);
     if (ws) { ws.respect = clamp(ws.respect + 6, 0, 100); }
+    const wn = this.ecs.get<Needs>(winner, 'Needs'); if (wn) wn.morale = clamp01((wn.morale ?? 0.6) + 0.16);   // winning fills your Spirit (adrenaline)
+    const lnn = this.ecs.get<Needs>(loser, 'Needs'); if (lnn) lnn.morale = clamp01((lnn.morale ?? 0.6) - 0.18);  // a beating drains it
     if (wb.isPlayer && ws) { ws.reputation = clamp(ws.reputation + 7, -100, 100); this.bus.emit('alert', { type: 'rep', text: `You beat ${lb.name}! Respect rises.` }); }
     if (lb.isPlayer && ls) { ls.reputation = clamp(ls.reputation - 6, -100, 100); this.bus.emit('alert', { type: 'rep', text: `You were beaten by ${wb.name}.` }); this.escortLoserToInfirmaryOrSolitary(); }
     if (ls) ls.respect = clamp(ls.respect - 4, 0, 100);
