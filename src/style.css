@@ -32,7 +32,21 @@ button { font-family: inherit; cursor: pointer; }
 
 #topbar { position: absolute; top: 10px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: flex-start; }
 .tb-block { background: linear-gradient(180deg, rgba(30,34,42,0.95), rgba(16,18,24,0.95)); border: 1px solid rgba(255,255,255,0.14); border-top-color: rgba(255,255,255,0.22); border-radius: 10px; padding: 7px 14px; backdrop-filter: blur(5px); box-shadow: 0 3px 10px rgba(0,0,0,0.4); }
-.tb-block.right { display: flex; gap: 8px; background: transparent; border: none; padding: 0; box-shadow: none; }
+.tb-block.right { display: flex; gap: 8px; align-items: stretch; background: transparent; border: none; padding: 0; box-shadow: none; }
+/* 3.9 sound toggle (topbar) — compact icon button, doesn't crowd the bottom action bar */
+.snd-btn { display: flex; align-items: center; justify-content: center; min-width: 42px; font-size: 18px; line-height: 1; color: var(--ink);
+  background: linear-gradient(180deg, rgba(30,34,42,0.95), rgba(16,18,24,0.95)); border: 1px solid rgba(255,255,255,0.14); border-top-color: rgba(255,255,255,0.22); border-radius: 9px; box-shadow: 0 3px 10px rgba(0,0,0,0.4); }
+.snd-btn:active { transform: translateY(1px) scale(0.96); }
+.snd-btn.muted { opacity: 0.5; }
+/* small phones: let the topbar-right cluster shrink + wrap so snd-btn + HEAT/RIOT/LOCK never overflow */
+@media (max-width: 560px) {
+  #topbar { gap: 6px; }
+  .tb-block.right { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .tb-chip { min-width: 44px; padding: 4px 9px; }
+  .tb-chip span { font-size: 8px; letter-spacing: 1px; }
+  .tb-chip b { font-size: 14px; }
+  .snd-btn { min-width: 36px; font-size: 16px; }
+}
 .tb-label { font-size: 9px; letter-spacing: 2px; opacity: 0.5; }
 .tb-big { font-size: 17px; font-weight: 800; color: var(--accent); letter-spacing: 0.5px; }
 .tb-sub { font-size: 12px; opacity: 0.85; }
