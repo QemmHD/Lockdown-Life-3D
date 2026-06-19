@@ -1,5 +1,5 @@
 import { ECS, Entity } from '../ecs/world';
-import { Position, Render, Agent, Needs, Brain, Social, Inventory } from '../ecs/components';
+import { Position, Render, Agent, Needs, Brain, Social, Inventory, Attributes } from '../ecs/components';
 import { TileMap } from '../world/TileMap';
 import { generatePrison, randomTileInRoom, Room, Cell } from '../world/WorldGen';
 import { findPath } from '../world/Pathfinding';
@@ -236,6 +236,11 @@ export class Simulation {
     });
     const respect = 20 + (traits.includes('tough') ? 25 : 0) + (traits.includes('fighter') ? 20 : 0) - (traits.includes('weak') ? 15 : 0) + this.rng.int(0, 20);
     this.ecs.set<Social>(e, 'Social', { reputation: 0, respect: clamp(respect, 5, 95), suspicion: 0, rel: 0 });
+    const sb = (traits.includes('tough') ? 12 : 0) + (traits.includes('fighter') ? 10 : 0) - (traits.includes('weak') ? 10 : 0);
+    this.ecs.set<Attributes>(e, 'Attributes', {
+      strength: clamp(34 + sb + this.rng.int(0, 28), 30, 99), agility: clamp(34 + (traits.includes('fast') ? 14 : 0) + this.rng.int(0, 26), 30, 99),
+      skill: clamp(32 + this.rng.int(0, 28), 30, 99), stamina: clamp(34 + this.rng.int(0, 28), 30, 99)
+    });
     const items: string[] = [];
     if (this.rng.chance(0.5)) items.push(this.rng.pick(ITEM_IDS));
     if (this.rng.chance(0.2)) items.push(this.rng.pick(CONTRABAND_IDS));
@@ -254,6 +259,7 @@ export class Simulation {
     this.ecs.set<Render>(e, 'Render', { kind: 'guard', color: 0x2c3e50, meshId: e });
     this.ecs.set<Agent>(e, 'Agent', { speed: 2.4, path: null, step: 0, repathCd: 0 });
     this.ecs.set<Needs>(e, 'Needs', { hunger: 0, sleep: 0, hygiene: 1, energy: 1, anger: 0, fear: 0, health: 1 });
+    this.ecs.set<Attributes>(e, 'Attributes', { strength: 58 + this.rng.int(0, 20), agility: 48 + this.rng.int(0, 18), skill: 50 + this.rng.int(0, 18), stamina: 55 + this.rng.int(0, 20) });
     this.ecs.set<Brain>(e, 'Brain', {
       role: 'guard', state: 'idle', name: GUARD_NAMES[i % GUARD_NAMES.length], traits: [],
       timer: 0, targetRoom: PATROL_ROOMS[i % PATROL_ROOMS.length], attackCd: 0,
@@ -702,6 +708,9 @@ export class Simulation {
   }
   takeSummary() { const s = this.pendingSummary; this.pendingSummary = null; return s; }
   tier() { const ps = this.social(this.playerId)!; return repTier(ps.reputation, ps.respect); }
+  // Stage 4.4 "25% rule": an attribute is only as good as your energy (0.75..1.0 of base).
+  effStat(base: number, energy: number): number { return base * (0.75 + 0.25 * Math.max(0, Math.min(1, energy))); }
+  attrs(e: Entity): Attributes | undefined { return this.ecs.get<Attributes>(e, 'Attributes'); }
 
   // add days to the sentence (misconduct caught: contraband, solitary, escape attempt)
   private addTime(days: number, reason: string) {
@@ -929,6 +938,7 @@ export class Simulation {
       health: n.health, hunger: n.hunger, energy: n.energy, hygiene: n.hygiene, anger: n.anger, fear: n.fear,
       money: inv.money, suspicion: Math.round(ps.suspicion), respect: Math.round(ps.respect), reputation: Math.round(ps.reputation),
       discipline: pb.discipline ?? 'none', solitaryTimer: pb.state === 'solitary' ? Math.ceil(pb.discTimer ?? 0) : 0, injured: !!pb.injuredT,
+      strength: Math.round(this.attrs(pl)?.strength ?? 0), agility: Math.round(this.attrs(pl)?.agility ?? 0), skill: Math.round(this.attrs(pl)?.skill ?? 0), stamina: Math.round(this.attrs(pl)?.stamina ?? 0),
       gang: pb.gang ? GANG_MAP[pb.gang].name : 'Unaffiliated', tier: tier.name, heat: Math.round(this.heat),
       sentence: this.sentence, served: this.served, daysLeft: Math.max(0, this.sentence - this.served),
       backstory: backstoryDef(this.setup.backstory).name, difficulty: diffDef(this.setup.difficulty).name,
@@ -1383,7 +1393,9 @@ export class Simulation {
     this.metrics.hits++;
     const weapon = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.combat ?? 0).reduce((a, c) => Math.max(a, c), 0);
     const armor = (this.inv(foe)?.items ?? []).map((id) => ITEMS[id]?.armor ?? 0).reduce((a, c) => Math.max(a, c), 0);
-    let dmg = this.rng.range(ATTACKS[atk].dmgMin, ATTACKS[atk].dmgMax) * (b.traits.includes('tough') ? 1.2 : 1) * (b.traits.includes('weak') ? 0.7 : 1);
+    const aatt = this.attrs(e); const aen = this.ecs.get<Needs>(e, 'Needs')!;
+    const strMul = aatt ? (0.7 + this.effStat(aatt.strength, aen.energy) / 99 * 0.6) : 1;   // ~0.88x..1.3x by effective strength
+    let dmg = this.rng.range(ATTACKS[atk].dmgMin, ATTACKS[atk].dmgMax) * (b.traits.includes('tough') ? 1.2 : 1) * (b.traits.includes('weak') ? 0.7 : 1) * strMul;
     dmg += weapon * 0.025; if (outcome === 'glancing') dmg *= 0.45;
     if (b.injuredT) dmg *= 0.7;   // an injured attacker hits softer
     dmg *= (1 - armor * 0.8);     // the defender's armor soaks part of the blow
@@ -1945,7 +1957,7 @@ export class Simulation {
         break;
       }
       case 'eat': n.hunger = clamp01(n.hunger - 0.55); this.floatBy(pl, 'Fed', '#e8b52e'); this.prog('eat'); result = `You eat at the ${o.name}.`; break;
-      case 'train': n.energy = clamp01(n.energy - 0.15); ps.respect = clamp(ps.respect + 1, 0, 100); this.floatBy(pl, '+Respect', '#ffd24a'); this.prog('train'); this.prog('respect', 1); result = `You train on the ${o.name}.`; break;
+      case 'train': { n.energy = clamp01(n.energy - 0.15); ps.respect = clamp(ps.respect + 1, 0, 100); const a = this.attrs(pl); if (a) { a.strength = Math.min(99, a.strength + 1); a.stamina = Math.min(99, a.stamina + 0.6); } this.floatBy(pl, '+STR', '#ffd24a'); this.prog('train'); this.prog('respect', 1); result = `You train on the ${o.name}.`; break; }
       case 'work': { const before = pinv.money; result = this.doJob(o.jobRoom ?? this.roomType(o.room)); const dM = pinv.money - before; if (dM) this.floatBy(pl, `$+${dM}`, '#9fe0a0'); break; }
       case 'inspect': result = (o.type === 'door' || o.type === 'gate') ? `${o.name}: ${o.restricted ? 'restricted, staff only' : o.locked ? 'locked down' : o.open ? 'open' : 'closed (unlocked)'}.` : `You inspect the ${o.name}.`; break;
       case 'search': {
@@ -2238,7 +2250,7 @@ export class Simulation {
       case 'rest': n.sleep = clamp01(n.sleep - 0.4); n.energy = clamp01(n.energy + 0.3); pb.action = 'Resting'; this.prog('rest'); return 'You rest. Energy restored.';
       case 'wash': n.hygiene = clamp01(n.hygiene - 0.5); pb.action = 'Washing'; this.prog('wash'); return 'You clean up.';
       case 'eat': n.hunger = clamp01(n.hunger - 0.5); pb.action = 'Eating'; this.prog('eat'); return 'You eat a meal.';
-      case 'train': n.energy = clamp01(n.energy - 0.15); { const s = this.social(pl)!; s.respect = clamp(s.respect + 1, 0, 100); } pb.action = 'Training'; this.prog('train'); this.prog('respect', 1); return 'You train. Respect rises slightly.';
+      case 'train': n.energy = clamp01(n.energy - 0.15); { const s = this.social(pl)!; s.respect = clamp(s.respect + 1, 0, 100); const a = this.attrs(pl); if (a) { a.strength = Math.min(99, a.strength + 1); a.stamina = Math.min(99, a.stamina + 0.6); } } pb.action = 'Training'; this.floatBy(pl, '+STR', '#ffd24a'); this.prog('train'); this.prog('respect', 1); return 'You train. Strength rises.';
       case 'work': return this.doJob(room);
       default: return '';
     }
@@ -2370,6 +2382,7 @@ export class Simulation {
       agent: this.ecs.get<Agent>(e, 'Agent'),
       social: this.ecs.get<Social>(e, 'Social'),
       inv: this.ecs.get<Inventory>(e, 'Inventory'),
+      attrs: this.ecs.get<Attributes>(e, 'Attributes'),
       isPlayer: e === this.playerId
     }));
     const objs: Record<string, { stash: string[]; open: boolean; locked: boolean }> = {};
@@ -2383,7 +2396,7 @@ export class Simulation {
       escapeSite: this.escapeSite
     };
     const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang, economy: this.economy, jobStreak: this.jobStreak, sentence: this.sentence, served: this.served };
-    return { version: 14, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
+    return { version: 15, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -2405,6 +2418,7 @@ export class Simulation {
       this.ecs.set<Needs>(e, 'Needs', r.needs ?? { hunger: 0, sleep: 0, hygiene: 0, energy: 1, anger: 0, fear: 0, health: 1 });
       this.ecs.set<Brain>(e, 'Brain', { ...r.brain, role: r.brain.role === 'guard' ? 'guard' : 'prisoner', traits: Array.isArray(r.brain.traits) ? r.brain.traits : [], targetRoom: r.brain.targetRoom ?? 'cellblock', attackCd: 0, timer: 0, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle', intent: 'schedule', intentCd: 0, checkpoint: undefined, dwell: 0, roleCd: 0, bubbleCd: 0, guardRole: r.brain.role === 'guard' ? 'patrol' : undefined, mem: r.brain.role === 'guard' ? undefined : sanitizeMemory(r.brain.mem), cphase: undefined, cTimer: 0, cResult: undefined, blockT: 0, pendingAtk: undefined, lastAttacker: undefined });
       this.ecs.set<Social>(e, 'Social', r.social ?? { reputation: 0, respect: 20, suspicion: 0, rel: 0 });
+      this.ecs.set<Attributes>(e, 'Attributes', (r.attrs && typeof r.attrs === 'object') ? { strength: num(r.attrs.strength, 40), agility: num(r.attrs.agility, 40), skill: num(r.attrs.skill, 40), stamina: num(r.attrs.stamina, 40) } : { strength: 40, agility: 40, skill: 40, stamina: 40 });
       this.ecs.set<Inventory>(e, 'Inventory', { items: Array.isArray(r.inv?.items) ? r.inv.items.filter((id: any) => typeof id === 'string') : [], money: num(r.inv?.money, 0) });
       if (r.isPlayer || r.brain.isPlayer) this.playerId = e;
     }

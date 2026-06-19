@@ -62,6 +62,10 @@ export interface Brain {
   injuredT?: number;       // ---- Stage 4.1 ---- seconds of lingering injury (weaker hits) after a beating
 }
 
+// ---- Stage 4.4 ---- persistent attributes (0..99, floor 30). "25% rule": effective = base*(0.75+0.25*energy).
+// reputation lives on Social; these are the trainable physical/mental stats.
+export interface Attributes { strength: number; agility: number; skill: number; stamina: number; }
+
 // Reputation / standing / suspicion. On the player: reputation+respect drive the loop;
 // on NPCs: respect = innate standing, rel = relationship toward the player.
 export interface Social {

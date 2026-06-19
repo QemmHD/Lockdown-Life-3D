@@ -14,6 +14,19 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.4.0-stats — Stage 4.4 Stats & Training
+Adds Hard Time's attribute core — your fighter is now **built, not fixed**. Build + smoke green; save v15.
+- **Attributes** (new ECS `Attributes` component): **Strength / Agility / Skill / Stamina**, 0–99
+  (floor 30). Every inmate + guard has them; guards start tougher.
+- **The "25% rule"**: an attribute is only as good as your **energy** —
+  `effective = base × (0.75 + 0.25 × energy)`. Tired = weaker.
+- **Strength drives combat**: hit damage scales with your **effective strength** (~0.88× at STR 30 to
+  ~1.3× at STR 99), on top of weapon/armor.
+- **Training builds you**: working out (weights / pull-up bar) raises **Strength** + **Stamina** each
+  session (energy cost) — real, visible progression, no XP/levels (pure Hard Time).
+- Player panel shows your **💪 strength**; attributes persist in save (**v15**).
+- Version → `v4.4.0-stats`.
+
 ## v4.3.0-escape — Stage 4.3 Escape is a project
 Escape stops being a one-tap coin flip and becomes a multi-day plan — Hard Time's signature pillar.
 Build + smoke green; save format **v14** (persists the escape site).

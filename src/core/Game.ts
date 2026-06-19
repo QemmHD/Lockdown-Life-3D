@@ -114,7 +114,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.3.0-escape'
+      version: 'v4.4.0-stats'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -339,7 +339,7 @@ export class Game {
     const gang = b.gang ? GANG_MAP[b.gang] : undefined;
     const gi = !isPlayer ? this.sim.gangInfoFor(e) : null;
     const meta = isPlayer
-      ? [`Rep ${Math.round(s.reputation)}`, `Respect ${Math.round(s.respect)}`, `Suspicion ${Math.round(s.suspicion)}`, `$${inv?.money ?? 0}`, ...(this.sim.gang.membership ? [`${GANG_MAP[this.sim.gang.membership].name}: ${['None', 'Associate', 'Member', 'Trusted', 'Enforcer', 'Shot Caller'][this.sim.gang.rank]}`] : [])]
+      ? [`Rep ${Math.round(s.reputation)}`, `Respect ${Math.round(s.respect)}`, `💪 ${this.sim.attrs(e)?.strength ?? 0}`, `Suspicion ${Math.round(s.suspicion)}`, `$${inv?.money ?? 0}`, ...(this.sim.gang.membership ? [`${GANG_MAP[this.sim.gang.membership].name}: ${['None', 'Associate', 'Member', 'Trusted', 'Enforcer', 'Shot Caller'][this.sim.gang.rank]}`] : [])]
       : [`Respect ${Math.round(s.respect)}`, `Toward you: ${this.relWord(s.rel)}`, ...(gi ? [`${gi.gang}: ${gi.label}${gi.relation !== 'neutral' ? ` (${gi.relation})` : ''}`] : [])];
     const items = (inv?.items ?? []).map((id) => ({ icon: ITEMS[id]?.icon ?? '▪', name: ITEMS[id]?.name ?? id, contraband: isContraband(id), key: id }));
     const actions: PanelAction[] = isPlayer ? this.playerActions(e) : this.npcActions(e, b.role);
