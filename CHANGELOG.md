@@ -14,6 +14,16 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.13.0-spirit — Stage 4.13 Spirit (the second bar)
+Adds Hard Time's missing HUD half — your mental state now matters. Build + smoke green.
+- New **Spirit** meter on every inmate (gold bar in the player panel, under Health). It **sags** when
+  you're neglected, hurt, or afraid, and **lifts** when you stay fed / clean / healthy.
+- **Adrenaline rush**: Spirit > 80% makes your hits land **+15%** harder. **Breakdown**: Spirit < 20%
+  cuts your damage to **~82%** — keep your head together.
+- Persists in the save (it rides on Needs). Foundation for the full adrenaline / nervous-breakdown
+  states + vices loop in the roadmap.
+- Version → `v4.13.0-spirit`.
+
 ## v4.12.0-decor — Stage 4.12 Lived-in decor
 More props so the block feels used (your "more decor" ask). Build + smoke green; render-only.
 - Scattered **non-interactive clutter** — crates, buckets, trash bags, stacked boxes — through the

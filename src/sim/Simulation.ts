@@ -234,7 +234,7 @@ export class Simulation {
     this.ecs.set<Agent>(e, 'Agent', { speed: traits.includes('fast') ? 2.6 : 2.0, path: null, step: 0, repathCd: 0 });
     this.ecs.set<Needs>(e, 'Needs', {
       hunger: this.rng.range(0.1, 0.4), sleep: this.rng.range(0.1, 0.3), hygiene: this.rng.range(0.1, 0.4),
-      energy: this.rng.range(0.6, 1), anger: this.rng.range(0.1, 0.4), fear: this.rng.range(0.1, 0.3), health: 1
+      energy: this.rng.range(0.6, 1), anger: this.rng.range(0.1, 0.4), fear: this.rng.range(0.1, 0.3), health: 1, morale: this.rng.range(0.45, 0.75)
     });
     const respect = 20 + (traits.includes('tough') ? 25 : 0) + (traits.includes('fighter') ? 20 : 0) - (traits.includes('weak') ? 15 : 0) + this.rng.int(0, 20);
     this.ecs.set<Social>(e, 'Social', { reputation: 0, respect: clamp(respect, 5, 95), suspicion: 0, rel: 0 });
@@ -961,7 +961,7 @@ export class Simulation {
     const tier = this.tier();
     const stats = {
       name: pb.name, day: this.day, hour: this.hour, room: this.currentRoomName(pl), action: pb.action ?? pb.state,
-      health: n.health, hunger: n.hunger, energy: n.energy, hygiene: n.hygiene, anger: n.anger, fear: n.fear,
+      health: n.health, hunger: n.hunger, energy: n.energy, hygiene: n.hygiene, anger: n.anger, fear: n.fear, morale: n.morale ?? 0.6,
       money: inv.money, suspicion: Math.round(ps.suspicion), respect: Math.round(ps.respect), reputation: Math.round(ps.reputation),
       discipline: pb.discipline ?? 'none', solitaryTimer: pb.state === 'solitary' ? Math.ceil(pb.discTimer ?? 0) : 0, injured: !!pb.injuredT,
       strength: Math.round(this.attrs(pl)?.strength ?? 0), agility: Math.round(this.attrs(pl)?.agility ?? 0), skill: Math.round(this.attrs(pl)?.skill ?? 0), stamina: Math.round(this.attrs(pl)?.stamina ?? 0),
@@ -1013,6 +1013,12 @@ export class Simulation {
         n.health = clamp01(n.health + dt * 0.006);   // recover slowly when you keep yourself together
       }
       n.anger = clamp01(n.anger + (n.hunger > 0.75 ? dt * 0.004 : -dt * 0.005));
+      // Stage 4.13 — Spirit/morale: sags from neglect/fear, lifts when you're kept content
+      const m0 = n.morale ?? 0.6;
+      let mr = -0.0008;
+      if (n.hunger > 0.75 || n.health < 0.4 || n.fear > 0.6) mr -= 0.0045;
+      else if (n.hunger < 0.45 && n.hygiene < 0.5 && n.health > 0.7) mr += 0.003;
+      n.morale = clamp01(m0 + dt * mr);
       // being in the scheduled room type satisfies the matching need
       const room = this.roomTypeAt(this.ecs.get<Position>(e, 'Position')!);
       if (room === 'cafeteria') n.hunger = clamp01(n.hunger - dt * 0.08);
@@ -1435,7 +1441,8 @@ export class Simulation {
     const armor = (this.inv(foe)?.items ?? []).map((id) => ITEMS[id]?.armor ?? 0).reduce((a, c) => Math.max(a, c), 0);
     const aatt = this.attrs(e); const aen = this.ecs.get<Needs>(e, 'Needs')!;
     const strMul = aatt ? (0.7 + this.effStat(aatt.strength, aen.energy) / 99 * 0.6) : 1;   // ~0.88x..1.3x by effective strength
-    let dmg = this.rng.range(ATTACKS[atk].dmgMin, ATTACKS[atk].dmgMax) * (b.traits.includes('tough') ? 1.2 : 1) * (b.traits.includes('weak') ? 0.7 : 1) * strMul;
+    const amor = aen.morale ?? 0.6; const moraleMul = amor > 0.8 ? 1.15 : amor < 0.2 ? 0.82 : 1;   // adrenaline rush / breakdown
+    let dmg = this.rng.range(ATTACKS[atk].dmgMin, ATTACKS[atk].dmgMax) * (b.traits.includes('tough') ? 1.2 : 1) * (b.traits.includes('weak') ? 0.7 : 1) * strMul * moraleMul;
     dmg += weapon * 0.025; if (outcome === 'glancing') dmg *= 0.45;
     if (b.injuredT) dmg *= 0.7;   // an injured attacker hits softer
     dmg *= (1 - armor * 0.8);     // the defender's armor soaks part of the blow

@@ -17,6 +17,7 @@ export interface Agent {
 export interface Needs {
   hunger: number; sleep: number; hygiene: number; energy: number;
   anger: number; fear: number; health: number;
+  morale?: number;   // ---- Stage 4.13 ---- Spirit/mind bar: high → adrenaline buff, low → breakdown debuff
 }
 
 export type BrainState = 'idle' | 'goto' | 'wander' | 'fight' | 'respond' | 'down' | 'solitary'

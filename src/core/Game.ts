@@ -114,7 +114,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.12.0-decor'
+      version: 'v4.13.0-spirit'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -349,6 +349,7 @@ export class Game {
       state: b.action ?? b.state, room: this.sim.currentRoomName(e), traits: b.traits, meta,
       needs: [
         { label: 'Health', value: n.health, color: '#e74c3c' },
+        { label: 'Spirit', value: n.morale ?? 0.6, color: '#f1c40f' },
         { label: 'Energy', value: n.energy, color: '#2ecc71' },
         { label: 'Hunger', value: 1 - n.hunger, color: '#e67e22' },
         { label: 'Hygiene', value: 1 - n.hygiene, color: '#3498db' },
