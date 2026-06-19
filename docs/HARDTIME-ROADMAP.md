@@ -1065,3 +1065,458 @@ Polish-tier knobs (config-gated amber ceiling, distinct medical profiles) that r
 - 4.10 — Grapple combat overhaul: extend the phase machine with GRAPPLE/GROUNDED phases and a data-driven MoveResolver (verb+direction+modifier→move), grab→throw/suplex/choke/release, taunt verb, SUBMIT/UNCONSCIOUS/KILLED outcomes, weapon classes with bleed DoT and a 95% riot-shield block. The largest combat-feel uplift; deserves its own stage.
 - 4.11 — Persistent living world (the signature pillar): serialize the world roster independently from the player run; NPC permadeath frees/reassigns cells and optionally reincarnates with same clothing; the dead PLAYER lives on as a cell-owning NPC discoverable by the next character; character editor + universe-roster restore on top. The strongest emergent-narrative payoff, built last because it touches save/persistence broadly.
 - Backlog / flagged (HT3-tier, gate behind difficulty or defer): firearms/gunplay; fire & environmental hazards (ride on flammable carryables from 4.8); start-your-own-gang (contradicts the 'never leader' default — opt-in only); amber energy ceiling and medical-item differentiation as polish folded into 4.7.
+
+
+---
+
+# AI smartness + conversations — build plan
+
+
+## Prisoner & Guard AI (src/sim AIIntent/PrisonerAISystem/GuardAISystem + Simulation wiring)  _(effort L)_
+
+Hard Time's emergent feel comes from a few simple rules layered on persistent relationships: NPCs follow loose routines, but harming/disrespecting someone makes a lasting enemy who retaliates on sight; gangs are fiercely loyal and gang up; high-reputation inmates get challenged by status-seekers while low-rep ones get bullied; characters self-preserve (low Mind/Health makes them erratic, flee, or surrender); and guards REACT to what they SEE (break up fights, confiscate contraband, haul offenders off) rather than being omniscient. Our code already has most of the scaffolding (intent scorer, AIMemory.foe/threat, gangs, tension, rallyAllies, dispatchGuard) but three gaps make it feel dumber than Hard Time: (1) the intent scorer is a flat if/else ladder that never acts on grudges offensively and never reacts to being hurt; (2) NPC-vs-NPC fights only spawn from tryStartFight's random room roll and rivalry standoffs, never from a remembered foe walking into view or from low health/fear self-defense; (3) dispatchGuard instantly picks the nearest free guard and teleport-paths them with perfect knowledge, with no LOS/notice/investigate step. The plan converts the intent ladder into an additive weighted scorer, adds offensive 'confront' + defensive 'defend'/'surrender' intents driven by memory.foe and Needs.health/fear, lets prisoners START fights from grudges and self-defend, and makes guards notice-then-investigate (LOS + reaction delay, walk to the disturbance, search/escort only on what they actually witnessed) so violence in a far hallway isn't instantly answered.
+
+**Changes:**
+- AIIntent.ts: extend PrisonerIntent union with 'confront' (close on a grudge/rival to start a fight) and 'surrender' (drop, hands up when overpowered); add labels. Add a GuardAlert posture type 'notice'|'investigate' and a NOTICE_DELAY + SIGHT_RANGE const. Keep INTENT_STICK but add a shorter STICK for reactive intents so self-defense isn't held 2.5s.
+- PrisonerAISystem.ts: replace the if/else ladder in choosePrisonerIntent with an additive weighted scorer (score each candidate intent, pick max, tie-break by roll). Extend PrisonerCtx with hurt(0..1 from low health), foeNear(remembered foe in sight, not just gang rival), foeId, overpowered(hostiles>=2 or health near 0), repGap(my respect vs nearby — status challenge), guardWatching(guard has LOS). Weights: fleeDanger gets +hurt+fear, surrender on overpowered, confront from grudge scaled by anger+tough-trait and GATED by !guardWatching (Hard Time inmates wait until guards aren't looking), avoidEnemy for cowards, watchFight for bystanders. This is pure/deterministic and testable.
+- Simulation.evalIntent: populate the new ctx fields — compute hurt from Needs.health, find nearest *remembered foe* (mem.foe/mem.threat) in LOS via existing hasLOS, count hostiles already targeting this entity (reuse the lethalKnockdown hostile-count pattern), compute repGap from Social.respect vs nearest inmate, set guardWatching via nearestGuard within sight + hasLOS.
+- Simulation.actOnIntent: add cases. 'confront' → path toward the foe (gotoEntity); when within ~1.4 and still !guardWatching, call a new startNpcFight(e, foe) (factored from tryStartFight's fight-setup block + rememberFoe + dispatchGuard + registerFight). 'surrender' → set state idle, hands-up bubble, drop foe, and make current attackers disengage / a nearby guard escort (de-escalation). 'defend' folds into existing fight state but ensure a prisoner whose mem.foe attacks them sets foe back rather than only fleeing.
+- Simulation: add NPC self-defense + grudge trigger. New lightweight per-tick check (or fold into prisonerAI loop): if an inmate has a live mem.foe in LOS within ~5 tiles, is not a coward, anger high, and no guard is watching, bias intent='confront'. If an inmate is being attacked (foe set on them by someone) and is tough/not-coward, they fight back instead of fleeing; if hurt>0.7 or overpowered they 'surrender'/'fleeDanger'. Wire rememberThreat retaliation so an insult/threat (already stored in mem.threat) can escalate to a confront later, matching Hard Time grudges.
+- GuardAISystem.ts: add GUARD_PRIORITY entries already exist; add a 'notice'/'investigate' role + label and a SIGHT/NOTICE constant. Add a pure helper guardShouldNotice(distance, hasLOS, chaos) so detection logic is unit-testable and lives with the route tables.
+- Simulation.dispatchGuard: replace instant nearest-guard assignment with a noticed-incident model. Only guards with LOS to the fight (hasLOS) OR within a hearing radius become 'aware'; the nearest aware guard waits a short NOTICE_DELAY (b.actTimer) then transitions to 'respond'. If NO guard can see/hear it, the fight goes unanswered until a patrol wanders into LOS (the prisonerAI/guardAI loop checks for visible fights each patrol step) — this is the key 'no teleport-omniscience' change. Far-off brawls now self-resolve or escalate tension, exactly like Hard Time.
+- Simulation.guardAI: in the CALM patrol branch, before picking the next route post, scan for a visible disturbance (nearestFight within SIGHT + hasLOS, or a prisoner with contraband within SIGHT) and divert to investigate (role='investigate'); on arrival run breakUpFight / begin a search. This makes guards proactively patrol-and-discover instead of only reacting to dispatch.
+- Simulation: contraband notice — when a guard's patrol brings a prisoner with hasContraband() into close LOS, start a search (existing 'searching' state + doSearchResult) instead of the current random/tension-based searches, so searches feel motivated.
+- Tuning/anti-twitch: give reactive intents (fleeDanger/surrender/defend/confront) a shorter intentCd so they respond within ~0.8s, while keeping schedule/socialize sticky. Add metrics counters (npcGrudgeFights, guardInvestigations, surrenders) alongside existing this.metrics for telemetry and tests.
+
+**Files:** D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/sim/AIIntent.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/sim/PrisonerAISystem.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/sim/GuardAISystem.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/sim/Simulation.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/sim/AIMemorySystem.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/ecs/components.ts
+
+**Snippets:**
+```ts
+// AIIntent.ts — extend vocabulary
+export type PrisonerIntent =
+  | 'schedule' | 'socialize' | 'group' | 'avoidEnemy' | 'watchFight' | 'fleeDanger'
+  | 'returnCell' | 'hide' | 'comply' | 'wander'
+  | 'confront' | 'defend' | 'surrender';
+export const INTENT_LABEL: Record<PrisonerIntent, string> = {
+  /* ...existing... */
+  confront: 'Squaring up', defend: 'Standing ground', surrender: 'Backing down'
+};
+export const REACTIVE_STICK = 0.8; // reactive intents re-evaluate fast (vs INTENT_STICK)
+export const GUARD_SIGHT = 8;      // tiles a guard can notice violence/contraband
+export const GUARD_NOTICE = 0.8;   // sim-seconds before a noticing guard commits to respond
+```
+```ts
+// PrisonerAISystem.ts — additive weighted scorer (replaces the if/else ladder)
+export interface PrisonerCtx {
+  phase: string; lockdown: boolean; riot: 'calm'|'warning'|'event';
+  anger: number; fear: number; hurt: number;        // hurt 0..1 from low health
+  enemyNear: boolean; foeNear: boolean;             // remembered grudge in sight
+  fightNear: boolean; allyNear: boolean;
+  overpowered: boolean;                             // >=2 hostiles or near-dead
+  repGap: number;                                   // my respect - nearby inmate's
+  tough: boolean; coward: boolean; social: boolean;
+  guardNear: boolean; guardWatching: boolean;       // guard has LOS to me
+}
+export function choosePrisonerIntent(c: PrisonerCtx, roll: number): PrisonerIntent {
+  if (c.lockdown) return 'returnCell';
+  if (c.overpowered && (c.coward || c.hurt > 0.7)) return 'surrender';
+  if (c.riot === 'event') return c.coward || c.fear > 0.6 ? 'hide' : (c.guardNear ? 'comply' : 'wander');
+  const w: Partial<Record<PrisonerIntent, number>> = {};
+  const add = (k: PrisonerIntent, v: number) => { w[k] = (w[k] ?? 0) + v; };
+  add('schedule', 0.5 + (c.social ? 0 : 0.4));
+  if (c.fightNear) { add('fleeDanger', 0.4 + c.fear + c.hurt); add('watchFight', (c.tough ? 0.6 : 0.1) + c.anger * 0.5); add('avoidEnemy', 0.5 + (c.coward ? 0.6 : 0)); }
+  if (c.enemyNear) { add('avoidEnemy', 0.4 + (c.coward ? 0.7 : 0) + c.fear); }
+  // grudge: close in and start it — but ONLY when no guard is watching (Hard Time)
+  if (c.foeNear && !c.guardWatching) add('confront', 0.3 + c.anger * 0.9 + (c.tough ? 0.5 : 0) - (c.coward ? 0.8 : 0) - c.hurt);
+  // status challenge: high-rep inmate provokes lower-rep when feeling strong
+  if (c.repGap > 25 && c.tough && !c.guardWatching) add('confront', 0.25 + c.anger * 0.4);
+  if (c.social && c.allyNear && !c.guardNear) add('group', 0.6);
+  if (c.social && c.anger < 0.5) add('socialize', 0.45 + (roll < 0.4 ? 0.2 : 0));
+  add('fleeDanger', c.hurt * 0.8);
+  let best: PrisonerIntent = 'schedule', bv = -Infinity;
+  for (const k in w) if ((w as any)[k] > bv) { bv = (w as any)[k]; best = k as PrisonerIntent; }
+  return bv > (w.schedule ?? 0) || best === 'schedule' ? best : 'schedule';
+}
+```
+```ts
+// Simulation.evalIntent — populate the richer context
+const nd = this.ecs.get<Needs>(e, 'Needs')!;
+const hurt = clamp01(1 - nd.health);
+const foe = this.nearestGrudge(e, b, p, 5.5);             // mem.foe/mem.threat in LOS
+const guardE = this.nearestGuard(e, GUARD_SIGHT);
+const guardWatching = guardE != null && this.hasLOS(guardE, e);
+let hostiles = 0; for (const g of this.ecs.query('Brain','Position')) { const gb=this.brain(g)!; if (gb.role==='prisoner'&&gb.state==='fight'&&gb.foe===e) hostiles++; }
+return choosePrisonerIntent({ /* ...existing... */ hurt, foeNear: !!foe, overpowered: hostiles>=2 || nd.health<0.06, repGap: this.repGapNear(e,b,p), guardWatching }, this.rng.float());
+```
+```ts
+// Simulation — grudge fight (factored from tryStartFight) + actOnIntent case
+private startNpcFight(a: Entity, target: Entity) {
+  const ab=this.brain(a)!, tb=this.brain(target)!;
+  ab.state='fight'; ab.foe=target; ab.cphase='squareUp'; ab.cTimer=0.4; ab.attackCd=0.3;
+  tb.state='fight'; tb.foe=a;      tb.cphase='squareUp'; tb.cTimer=0.4; tb.attackCd=0.5;
+  if (ab.mem) rememberFoe(ab.mem, target); if (tb.mem) rememberFoe(tb.mem, a);
+  this.metrics.npcGrudgeFights = (this.metrics.npcGrudgeFights??0)+1;
+  this.bus.emit('alert', { type:'fight', text:`${ab.name} jumps ${tb.name}!` });
+  this.dispatchGuard(a); this.registerFight(a);
+}
+// in actOnIntent switch:
+case 'confront': { const foe=this.nearestGrudge(e,b,p,6); if(!foe){ b.intent='schedule'; break; }
+  const fp=this.pos(foe)!; if(Math.hypot(fp.x-p.x,fp.z-p.z)<1.5 && this.nearestGuard(e,4)==null) this.startNpcFight(e,foe);
+  else this.gotoEntity(e,foe); break; }
+case 'surrender': { ag.path=null; b.foe=undefined; this.disengageAttackers(e);
+  if(!b.bubbleCd){ this.bubble(e, this.rng.pick(['Okay, okay!','I\'m done!','🙌']),'talk',1.4); b.bubbleCd=4; } break; }
+```
+```ts
+// Simulation.dispatchGuard — notice + investigate instead of instant teleport-respond
+private dispatchGuard(fighter: Entity) {
+  const fp = this.pos(fighter)!;
+  let best: Entity | null = null, bd = Infinity;
+  for (const g of this.ecs.query('Brain','Position')) {
+    const b=this.brain(g)!; if (b.role!=='guard'||['respond','searching','escorting'].includes(b.state)) continue;
+    const gp=this.pos(g)!; const d=Math.hypot(gp.x-fp.x,gp.z-fp.z);
+    const aware = d<=GUARD_SIGHT && this.hasLOS(g,fighter);   // must SEE it (or be very close = 'hear')
+    if ((aware || d<3) && d<bd){ bd=d; best=g; }
+  }
+  if (!best) return;                  // nobody noticed — fight goes unanswered (patrols may find it later)
+  const b=this.brain(best)!; this.setGuardRole(b,'investigate');
+  b.actTimer = GUARD_NOTICE; b.foe = fighter;                // brief delay, THEN commit in guardAI
+}
+// in guardAI, before the respond block:
+if (b.guardRole==='investigate' && b.foe!=null){ b.actTimer=(b.actTimer??0)-dt; if((b.actTimer??0)<=0){ b.state='respond'; b.actTimer=undefined; } }
+```
+```ts
+// Simulation.guardAI CALM branch — proactively discover trouble on patrol
+const seen = this.nearestFight(p, GUARD_SIGHT);
+if (seen && this.hasLOSPoint(p, seen)) { this.setGuardRole(b,'investigate'); b.actTimer=GUARD_NOTICE;
+  const f=this.fighterAt(seen); if(f!=null){ b.foe=f; this.gotoEntity(e,f); } this.metrics.guardInvestigations=(this.metrics.guardInvestigations??0)+1; continue; }
+const suspect = this.nearestContraband(p, GUARD_SIGHT);   // hasContraband() + LOS
+if (suspect!=null){ b.state='searching'; b.foe=suspect; continue; }
+```
+
+
+## Conversation / dialogue system (sim-authoritative) with HUD dialogue panel, feeding ally-recruit + vendetta  _(effort M)_
+
+Hard Time's "dialogue" is really a reputation-as-currency negotiation: you initiate by gesturing, pick a positive or aggressive line, and stat/mood checks decide if the target agrees. Pleasing builds friendship (and a chance of romance); intimidation gets your way "at the expense of the relationship" and turns the victim into an enemy (once per day); defeated foes can be spared by joining your gang. Our codebase already has the right bones (Social.rel/respect/reputation, AIMemory threat/foe/ally, FactionSystem standing/invites, resolveTarget verbs, rallyAllies taking sides), but conversations are a flat smalltalk line that nudges rel +6. The plan adds a real CONVERSATION layer: a new openConversation()/resolveConversation() pair in Simulation that runs a deterministic skill-vs-mood check per option, new verbs (compliment/persuade/intimidate/recruit/snitch/flirt), durable rel + AIMemory + gangStanding outcomes, a vendetta hook (mem.threat already drives nearestEnemy → avoidEnemy/watchFight and rallyAllies enemy side), and a dialogue MODAL in Menus.ts (mirroring the existing trade panel) wired through Game.ts npcActions/doAction. Effort M: ~1 new file (ConversationSystem.ts, pure), edits to Simulation.ts, Menus.ts, Game.ts, AIMemorySystem.ts; no new components needed — Social + AIMemory + PlayerGangState already carry all durable state.
+
+**Changes:**
+- RESEARCH FINDINGS (Hard Time): conversations are initiated by gesturing at someone; you pick a positive or negative response. Reputation/attitude is a CURRENCY 'you spend to get your own way' — bothering people or being rejected damages it. Being agreeable/cooperative grows friendships; 'every time you please someone, the relationship has a chance to become romantic' (hugs/kisses give health+happiness). Intimidation = grab + hold command: 'intimidating characters are more likely to get their own way at the expense of the relationship,' it 'turns the victim into an enemy wherever possible,' and 'cannot be used on the same person more than once a day.' Harming/disobeying makes enemies. Defeated opponents can be 'offered a chance to survive by joining a gang.' Recruiting = gang membership via standing. (Sources: mdickie.fandom.com/wiki/Hard_Time, /Hard_Time_III; HT3 manual mdickie.com/guides/hardtime3.pdf; mdickiegameguide.blogspot.com; tvtropes HardTime.)
+- DESIGN PRINCIPLE: model dialogue as a single check per option — outcome p = base(option) + skillTerm + repTerm + moodTerm + relTerm + traitTerm + crewTerm, rolled against this.rng (deterministic). Success durably moves Social.rel and feeds memory/standing; failure spends reputation (the 'currency'). This reuses our existing favor() logic but generalises it across new verbs and surfaces it in a panel instead of a one-shot button.
+- NEW VERBS (extend InteractAction union in Simulation.ts line ~52): add 'compliment' | 'persuade' | 'intimidate' | 'recruit' | 'snitch' | 'flirt'. Add ACTION_DUR/ACTION_STATE/SAY entries: compliment 0.9 talking '👍', persuade 1.0 talking 'Hear me out…', intimidate 1.0 threatening '😤', recruit 1.2 trading 'Run with us.', snitch 1.0 talking '🤫', flirt 0.9 talking '😏'.
+- NEW PURE MODULE src/sim/ConversationSystem.ts (mirrors AIIntent.ts/FactionSystem.ts style — pure data + scoring, no sim/render import). Defines ConvOption ids, labels, a ConvCtx (skill, respect, reputation, rel, anger, fear, traits flags, gangRelation, sameGang, rank, threatenedToday), and pure functions convOptions(ctx) -> available option list + convChance(opt, ctx) -> 0..1 and convDelta(opt, success) -> {rel, rep, respect, fear, standing}. Keeps all tuning numbers in one readable table so balance lives outside Simulation.
+- SIM ENTRY POINTS in Simulation.ts: add openConversation(target): ConvSnapshot — gathers ctx from Social/Needs/Brain/AIMemory/gang and returns the option list+chances+the NPC's current 'mood word' for the panel (parallels tradePanel() at ~835 and gangInfoFor()). add resolveConversation(target, optId): string — runs the deterministic check, applies durable outcomes, returns a flavor line. Route it through requestAction/resolveTarget so the existing approach/perform pipeline (walk-up, bubble, floatBy) is reused; the panel just calls a thin requestConversation(target, optId) wrapper.
+- OPTION MECHANICS (in resolveConversation, all clamp()'d like existing verbs): COMPLIMENT — high base, low risk; success rel +8..12, small rep +1, prog('relUp'); marks AIMemory ally (rememberAlly). PERSUADE/FAVOR-ASK — chance scales with skill+rep+rel+talker/clever traits+crew (reuse favor() formula at line 2201); success grants item/money + rel +4 + gangStanding; FAILURE spends reputation: ps.reputation -= 4 (the 'rejected damages rep' rule) and bubble refuse. INTIMIDATE — win = ps.respect + ps.reputation*0.3 + tier*6 + strength term vs ts.respect (reuse threaten() at 2192); on win you 'get your way' (item/info/standing) but rel -12 and rememberThreat(tb.mem, pl) → makes an enemy; GATED to once/day per NPC via new Brain.intimidatedDay (Hard Time's once-a-day rule); on loss → startPlayerFight. FLIRT — only unlocks when rel>35 and not gang-rival; small chance → rel +10 and a 'romance' flag (Brain.romance=true) that grants a tiny recurring health/anger relief when near them (the hugs/kisses health bump); low rel → rel -6. SNITCH — talk to a GUARD about an inmate: reputation -8, suspicion -10, and rememberThreat on the snitched inmate toward player if witnessed (feeds vendetta); crew standing -6 if same-gang. RECRUIT — see next.
+- RECRUIT / ALLY hook: 'recruit' verb routes into the existing FactionSystem. If player is in a gang and target is unaffiliated or low-standing, a successful persuade-style check (needs rank>=2 perk 'allies cluster near you') flips the NPC: set tb.gang = this.gang.membership, sc.rel += 20, gangStanding +6, emit alert. If target is in a crew you have standing with and you're NOT in one, recruit acts as 'ask to join' → openInvite() (reuse requestGangAction 'askgang' at 777). Also add the Hard Time 'spare a defeated foe → join' beat: in knockoutResolve (~2138, where wb.isPlayer), if loser is unaffiliated offer a recruit prompt so beating someone can convert them — strong tie between combat and the ally system.
+- VENDETTA hook (already wired — minimal new code): mem.threat/mem.foe drive nearestEnemy() (line 1113) → choosePrisonerIntent 'avoidEnemy'/'watchFight', and rallyAllies (line 2247) puts s.rel<-45 or remembered foes on the ENEMY side of fights. So intimidate/snitch failures that call rememberThreat() and drive rel below -45 automatically create durable grudges that surface as avoidance, crowd-siding, and gang pile-ons. Add one upgrade: persist a long grudge by adding AIMemory.grudge/grudgeT (longer-decay than threatT, ~120s) set on intimidate-win and snitch, and include it in nearestEnemy()'s hostile test and rallyAllies enemy test so vendettas outlast the 25s threat memory.
+- AIMemorySystem.ts edits: add grudge/grudgeT fields to AIMemory + newMemory + decayMemory + a rememberGrudge(m, who, secs=120) helper; keep sanitizeMemory dropping the entity ref (already transient-safe). Optionally add likeT to extend the 'pleased' window so repeated compliments compound toward romance.
+- UI — DIALOGUE PANEL (Menus.ts, mirror the trade modal): add Mode 'dialogue'; showDialogue(target) sets target+mode and render() draws option buttons from sim.openConversation(target) showing each option's label, a chance hint (e.g. 'likely/risky/long shot' from convChance buckets) and the NPC's mood word + current rel word. onClick handles data-m='conv' → hooks.onConverse(target, optId) → sim.requestConversation → re-render with the result line; an 'X'/Back closes like trade. Add MenuHooks.onConverse and tradeData-style dialogueData(target).
+- UI — Game.ts wiring: in npcActions() (line 381) replace the lone 'talk' button with a 'Talk' that opens the dialogue panel (like 'trade' at 416: this.menus.showDialogue(sel); this.paused=true), and keep quick verbs (Insult/Threaten/Fight) as direct buttons. Add 'conv' dispatch in doAction and the onConverse hook in the MenuHooks object (~line 105 near onAcceptInvite). Guards get a 'Snitch' option in the dialogue panel when an inmate was recently selected/witnessed.
+- PANEL META: openConversation returns the NPC mood (derive from Needs.anger/fear + rel: 'wary/calm/friendly/hostile/scared') so the player can read the room before spending reputation — matches Hard Time surfacing attitude. refreshPanel already shows 'Toward you: <relWord>' (line 343); the dialogue modal expands that into actionable options.
+- BALANCE/SAFETY: keep every delta clamped (clamp/clamp01) and small per the existing economy of rel (talk was +6); gate intimidate once/day, flirt behind rel>35, recruit behind rank/standing, snitch behind a guard target. All randomness via this.rng for deterministic saves; no new persisted component fields beyond AIMemory.grudge (already sanitized as transient) and Brain.intimidatedDay/romance (numbers/bools, add to Brain's sanitize path). Fictional prison-life framing only.
+
+**Files:** D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/sim/ConversationSystem.ts (NEW — pure options + chance/delta tables), D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/sim/Simulation.ts (new verbs; openConversation/resolveConversation/requestConversation/convCtx/grantFavor/resolveSnitch; recruit + spare-foe hook in knockoutResolve; grudge in nearestEnemy/rallyAllies), D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/sim/AIMemorySystem.ts (grudge/grudgeT fields + rememberGrudge + decay), D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/ecs/components.ts (Brain: intimidatedDay?: number; romance?: boolean — add to sanitize path), D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/ui/Menus.ts (Mode 'dialogue'; showDialogue; dialogue render; onConverse/dialogueData hooks), D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/core/Game.ts (npcActions opens dialogue panel; doAction 'conv'/'talk' dispatch; onConverse + dialogueData in MenuHooks)
+
+**Snippets:**
+```ts
+// src/sim/ConversationSystem.ts (NEW, pure — style matches AIIntent.ts / FactionSystem.ts)
+export type ConvOption = 'compliment' | 'persuade' | 'intimidate' | 'recruit' | 'snitch' | 'flirt';
+export const CONV_LABEL: Record<ConvOption, string> = { compliment: 'Compliment', persuade: 'Persuade', intimidate: 'Intimidate', recruit: 'Recruit', snitch: 'Snitch', flirt: 'Flirt' };
+export interface ConvCtx { skill: number; respect: number; reputation: number; rel: number; anger: number; fear: number; tRespect: number; talker: boolean; clever: boolean; sameGang: boolean; rank: number; rivalGang: boolean; intimidatedToday: boolean; }
+// 0..1 success chance per option — one readable table so balance lives here, not in Simulation
+export function convChance(o: ConvOption, c: ConvCtx): number {
+  const crew = c.sameGang ? 0.12 + c.rank * 0.03 : 0;
+  switch (o) {
+    case 'compliment': return clamp01(0.8 + c.rel * 0.002 - c.anger * 0.3);
+    case 'persuade':   return clamp01(0.4 + c.reputation * 0.003 + c.rel * 0.004 + c.skill * 0.004 + (c.talker ? 0.12 : 0) + (c.clever ? 0.06 : 0) + crew - c.anger * 0.2);
+    case 'intimidate': return clamp01(0.35 + (c.respect + c.reputation * 0.3 - c.tRespect) * 0.012);
+    case 'recruit':    return clamp01(0.25 + c.rel * 0.004 + c.reputation * 0.003 + c.rank * 0.05 + (c.talker ? 0.1 : 0));
+    case 'flirt':      return clamp01(0.15 + (c.rel - 35) * 0.01 + (c.talker ? 0.1 : 0));
+    case 'snitch':     return 1; // always 'works' with the guard; cost is reputation
+  }
+}
+function clamp01(v: number) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+export function chanceWord(p: number): string { return p > 0.7 ? 'likely' : p > 0.45 ? 'even odds' : p > 0.2 ? 'risky' : 'long shot'; }
+```
+```ts
+// Simulation.ts — option availability gates (mirrors npcActions gang gating)
+export function convOptions(c: ConvCtx): ConvOption[] {
+  const out: ConvOption[] = ['compliment', 'persuade'];
+  if (!c.intimidatedToday) out.push('intimidate');
+  if (c.sameGang && c.rank >= 2) out.push('recruit');        // perk: allies cluster near you
+  if (c.rel > 35 && !c.rivalGang) out.push('flirt');
+  return out;
+}
+```
+```ts
+// Simulation.ts — resolveConversation (durable outcomes; same clamp/prog/bubble idioms as resolveTarget)
+private resolveConversation(target: Entity, opt: ConvOption): string {
+  const pl = this.playerId; const tb = this.brain(target); const ps = this.social(pl)!; const ts = this.social(target); if (!tb || !ts) return '';
+  const ctx = this.convCtx(target); const ok = this.rng.chance(convChance(opt, ctx));
+  switch (opt) {
+    case 'compliment':
+      ts.rel = clamp(ts.rel + (ok ? 10 : 2), -100, 100); if (ok && tb.mem) rememberAlly(tb.mem, pl);
+      this.prog('relUp'); if (tb.gang) this.gangStanding(tb.gang, 1.5);
+      return ok ? `${tb.name} warms up to you.` : `${tb.name} shrugs you off.`;
+    case 'persuade':
+      if (ok) { ts.rel = clamp(ts.rel + 4, -100, 100); this.grantFavor(target); if (tb.gang) this.gangStanding(tb.gang, 3); return `${tb.name} comes around.`; }
+      ps.reputation = clamp(ps.reputation - 4, -100, 100); return `${tb.name} brushes you off.`; // rejection spends reputation
+    case 'intimidate': {
+      tb.intimidatedDay = this.day;                         // once-per-day rule
+      if (ok) { ts.rel = clamp(ts.rel - 12, -100, 100); ps.reputation = clamp(ps.reputation + 4, -100, 100);
+        if (tb.mem) rememberGrudge(tb.mem, pl); this.ecs.get<Needs>(target, 'Needs')!.fear = clamp01(this.ecs.get<Needs>(target,'Needs')!.fear + 0.35);
+        this.grantFavor(target); return `${tb.name} caves — but won't forget it.`; }       // gets their way at the cost of the relationship
+      ps.reputation = clamp(ps.reputation - 3, -100, 100); this.startPlayerFight(target, false); return `${tb.name} squares up!`; }
+    case 'recruit': {
+      if (ok && this.gang.membership && !tb.gang) { tb.gang = this.gang.membership; ts.rel = clamp(ts.rel + 20, -100, 100); this.gangStanding(this.gang.membership, 6);
+        this.bus.emit('alert', { type: 'player', text: `${tb.name} runs with your crew now.` }); return `${tb.name} joins you.`; }
+      return ok ? `${tb.name} hears you out.` : `${tb.name} isn't interested.`; }
+    case 'flirt':
+      if (ok) { ts.rel = clamp(ts.rel + 10, -100, 100); tb.romance = true; this.floatBy(pl, '❤', '#ff9ad0'); return `Something clicks with ${tb.name}.`; }
+      ts.rel = clamp(ts.rel - 6, -100, 100); return `${tb.name} isn't feeling it.`;
+    case 'snitch': return this.resolveSnitch(target);
+  }
+}
+```
+```ts
+// AIMemorySystem.ts — durable grudge that outlives the 25s threat window (vendetta fuel)
+export function rememberGrudge(m: AIMemory, who: number, secs = 120) { m.grudge = who; m.grudgeT = secs; m.angerT = Math.max(m.angerT, 15); }
+// in decayMemory: if (m.grudgeT > 0 && (m.grudgeT -= dt) <= 0) { m.grudge = 0; m.grudgeT = 0; }
+// in nearestEnemy() hostile test (Simulation.ts ~1113): add b.mem.grudge === o
+// in rallyAllies enemy test (~2247): add (!!s && tb.mem && tb.mem.grudge === player) so old grudges pile on in fights
+```
+```ts
+// Game.ts npcActions — open the dialogue panel instead of a one-line talk (mirrors trade at line 416)
+{ key: 'talk', label: 'Talk', kind: 'social' }   // doAction: if (!isPlayerSel && key === 'talk') { this.menus.showDialogue(sel); this.paused = true; return; }
+```
+```ts
+// Menus.ts — dialogue modal hook (parallels showTrade / tradeData)
+showDialogue(target: number) { this.convTarget = target; this.mode = 'dialogue'; this.render(); }
+// onClick: if (a === 'conv') { const line = this.hooks.onConverse(this.convTarget, el.dataset.id!); this.lastConvLine = line; this.render(); return; }
+// render(dialogue): const d = this.hooks.dialogueData(this.convTarget); // { name, moodWord, relWord, options:[{id,label,word}] }
+```
+
+
+---
+
+# Graphics realism — build plan
+
+
+## Render realism overhaul (materials + lighting + post + procedural maps)  _(effort M, mobile: "Texture gen: normal+roughness maps are 256x256 canvases generated once at load via Sobel loops (~65k px each, a few ms each, ~6-8 textures total). One-time CPU cost at startup, negligible runtime. VRAM: doubling/tripling maps per material adds ~0.2-0.5MB per 256px texture — small; reuse shared concrete normal map across all walls (one InstancedMesh material) so it is paid once. Runtime GPU: normalMap+roughnessMap+envMap (PMREM) add per-fragment work but on the iso view fill rate is modest. The real cost is PostFX: GTAO is the heaviest pass (full-screen depth-AO multi-pass) — gate it OFF on mobile/low-end entirely. Bloom+SMAA+grade+vignette are cheap-ish but still extra full-screen passes; on lowEnd skip the whole composer and renderer.render direct (zero post cost), drop shadow map 2048->1024, pixelRatio cap 2->1.5, normalScale halved, no PMREM env (flat scene.environment color). Net: High tier targets desktop/strong tablets; Low tier mobile keeps just the material/lighting/palette upgrades (which are the bulk of the realism win and nearly free) without any post overhead. Detect via userAgent + deviceMemory + effective resolution.")_
+
+The "cartoony" look comes from four things in the current render code: (1) materials use only a color map with roughness=0.95-1.0 and metalness=0 and no normal/roughness maps, so every surface is uniformly matte and flat; (2) lighting is extremely flat — AmbientLight intensity 1.35 + HemisphereLight 0.85 wash out all shadow contrast, leaving no contact darkening; (3) the palette (THEME) is a high-key cool grey with bright tints, reading like flat-shaded toy plastic; (4) there is NO post-processing on the active core render path (src/core/Game.ts:564 calls renderer.render directly) even though a fully-working EffectComposer stack already exists in legacy/game/PostFX.ts (GTAO+Bloom+grade+vignette+SMAA, three r160). The build-ready fix: generate procedural normal+roughness maps on canvas from the existing height-ish noise, retune every MeshStandardMaterial to real roughness/metalness ranges with those maps, cut ambient/hemi intensity and add a proper key/fill/rim 3-light rig with softer larger-radius shadows + warmer moodier palette + tighter fog, and wire a device-gated EffectComposer (adapt legacy PostFX) into the core loop with AO/SMAA/bloom/vignette/grade. All stays procedural (CanvasTextures only) and mobile-OK via a quality tier that disables AO + post and drops shadow map size on low-end/mobile.
+
+**Changes:**
+- TEXTURES — add createNormalMap helper: generate a procedural normal map on canvas from a luminance heightfield. New file src/render/textures/createNormalMap.ts. Build a grayscale height canvas (reuse the same speckle/stain/crack/tile-seam draw logic), then Sobel-sample neighbors to compute per-pixel normals: dx=h(x-1)-h(x+1), dy=h(y-1)-h(y+1), n=normalize(dx*strength, dy*strength, 1) packed to RGB ((n*0.5+0.5)*255). Return a CanvasTexture with RepeatWrapping, colorSpace=NoColorSpace/LinearSRGB (normal maps must NOT be sRGB). Seams: walls strength~2.0, concrete floor ~1.2, tile ~3.0 (deep grout grooves).
+- TEXTURES — add createRoughnessMap helper (src/render/textures/createRoughnessMap.ts): single-channel-ish grayscale canvas where dark=smooth, light=rough. Drive it from the same stain/puddle data: stains/grime -> lighter (rougher), wet puddles in shower -> dark blobs (smooth/wet), tile faces slightly darker than grout. colorSpace = NoColorSpace. This gives spatially-varying highlights instead of one flat roughness scalar — the single biggest realism win.
+- TEXTURES — refactor createConcreteTexture/createTileTexture to optionally also emit a height canvas so normal+roughness derive from the SAME pattern (cracks become grooves, seams become grout). Cheapest approach: add an exported buildConcreteHeight(repeat) and buildTileHeight(tiles) that return an offscreen canvas; createNormalMap/createRoughnessMap consume it. Keeps a single source of pattern truth.
+- WORLDRENDER — walls (WorldRenderer.ts:77): replace bodyMat with map+normalMap+roughnessMap, roughness 0.9 (let map modulate), metalness 0.04, normalScale new THREE.Vector2(0.8,0.8), REMOVE flatShading:true (flatShading is a primary cartoon tell on the box walls — it kills the normal map and faceted-shades everything). Cap mat: roughness 0.85, slight metalness 0.05.
+- WORLDRENDER — floors (lines 33,46): add normalMap+roughnessMap to base concrete and per-room floor materials. Wet shower: roughness 0.25 + metalness 0.35 + envMap for reflective sheen (see env map item). Dry rooms: keep roughnessMap-driven 0.7-0.95. Drop the separate transparent grime PLANE overlay (lines 49-51) into an aoMap/darkening baked into the roughness+color instead, or keep but reduce opacity — the floating overlay plane reads flat.
+- WORLDRENDER — add a small procedural cubemap/PMREM environment so MeshStandardMaterial gets real specular reflections (without an env map, metalness/roughness look dead). Build a 6-face gradient cube (dark floor color below, warm-grey ceiling above) via THREE.WebGLCubeRenderTarget or a DataTexture equirect, run through PMREMGenerator, assign scene.environment. This alone makes metal bars/door frames and wet floors look grounded. Cheap: generated once at startup.
+- THREEAPP lighting (ThreeApp.ts:21-34) — kill the flat wash and build a 3-point rig: AmbientLight intensity 1.35 -> 0.25; HemisphereLight 0.85 -> 0.35 (sky warm-grey, ground dark concrete). Key DirectionalLight: keep but warmer (0xffe8c4) intensity ~2.2, raise shadow.radius to 4-6 and use VSM or keep PCFSoft with mapSize 2048 (1024 on mobile), bias -0.0004 + normalBias 0.02 to kill peter-panning. Add a cool FILL DirectionalLight (0x6a82b4, intensity ~0.4, opposite side, NO shadow). Add a RIM/back light (0xbfd4ff, intensity ~0.6, low and behind) to separate characters/walls from background — rim light is the classic realism separator.
+- THREEAPP — soften + tune: set renderer.toneMappingExposure ~1.0 (down from 1.22 so highlights aren't blown), scene.fog near/far tighter and color matched to a moodier bg (e.g. 0x1c2029) for atmospheric depth that hides the flat horizon. Add renderer.shadowMap.type = THREE.VSMShadowMap option on high tier for softer penumbra (or PCFSoft on mobile).
+- VISUALTHEME (VisualTheme.ts) — moodier, lower-key palette: drop bg/fog to 0x1c2026 (cool charcoal), warm the key light, desaturate+darken room floor tints (cafeteria stays warm but less candy-orange), reduce per-room lightI by ~25% (PointLights at 1.5x were over-lighting). Lower ambientI/hemiI as above. Wall side color slightly darker + add a roughness scalar field per surface. Add THEME.quality presets (high/low) consumed by ThreeApp + PostFX.
+- POST — adapt legacy/game/PostFX.ts into the core path. Create src/render/PostFX.ts (copy the legacy class — it already imports EffectComposer/GTAOPass/UnrealBloomPass/SMAAPass/BrightnessContrastShader/VignetteShader/OutputPass, all present in three r160 examples/jsm). Tune: GTAO radius ~1.5 samples 6-8 (grounds props/corners — replaces the missing contact AO), Bloom strength 0.12 threshold 0.85 (only lamps/signs glow), grade contrast +0.18 brightness -0.03 (gritty), vignette darkness 0.55. SMAA instead of MSAA for cheap AA after the buffer passes.
+- CORE WIRING — in src/core/Game.ts: instantiate PostFX after scene build (this.fx = new PostFX(this.app.renderer, this.app.scene, this.cam.activeCamera)) gated by a quality check; at line 564 replace `this.app.renderer.render(...)` with `if (this.fx) this.fx.render(); else this.app.renderer.render(this.app.scene, this.cam.activeCamera)`. NOTE: PostFX binds a camera at construction but the game swaps cam.activeCamera (iso vs char cam) — add fx.setCamera(cam.activeCamera) before render each frame (update renderPass.camera + gtao camera) so post follows the active camera. Also call fx.resize() from ThreeApp.resize/Game resize.
+- MOBILE GATING — detect tier: const lowEnd = /Mobi|Android/i.test(navigator.userAgent) || (navigator.deviceMemory ?? 8) <= 4 || window.innerWidth*window.devicePixelRatio < 1600. On lowEnd: skip PostFX entirely (render direct), shadow.mapSize 1024, pixelRatio cap 1.5, drop fill+rim to ambient only, skip env PMREM (use a flat scene.environment color), normalScale halved. Expose THEME.quality + a settings toggle so users can force High/Low.
+
+**Files:** D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/ThreeApp.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/VisualTheme.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/WorldRenderer.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/textures/createConcreteTexture.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/textures/createTileTexture.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/textures/createGrimeTexture.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/textures/createNormalMap.ts (NEW), D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/textures/createRoughnessMap.ts (NEW), D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/PostFX.ts (NEW, adapt from src/legacy/game/PostFX.ts), D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/core/Game.ts
+
+**Snippets:**
+```ts
+// src/render/textures/createNormalMap.ts — Sobel height->normal, procedural
+export function createNormalMap(height: HTMLCanvasElement, strength = 2, repeat = 6): THREE.Texture {
+  const S = height.width; const src = height.getContext('2d')!.getImageData(0,0,S,S).data;
+  const out = document.createElement('canvas'); out.width = out.height = S;
+  const octx = out.getContext('2d')!; const dst = octx.createImageData(S,S); const o = dst.data;
+  const L = (x:number,y:number)=>{ const i=(((y+S)%S)*S+((x+S)%S))*4; return src[i]/255; };
+  for (let y=0;y<S;y++) for (let x=0;x<S;x++){
+    const dx=(L(x-1,y)-L(x+1,y))*strength, dy=(L(x,y-1)-L(x,y+1))*strength;
+    const len=Math.hypot(dx,dy,1)||1; const i=(y*S+x)*4;
+    o[i]=((dx/len)*0.5+0.5)*255; o[i+1]=((dy/len)*0.5+0.5)*255; o[i+2]=((1/len)*0.5+0.5)*255; o[i+3]=255;
+  }
+  octx.putImageData(dst,0,0);
+  const t=new THREE.CanvasTexture(out); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(repeat,repeat);
+  t.colorSpace=THREE.NoColorSpace; return t; // normal maps must be linear, NOT sRGB
+}
+```
+```ts
+// ThreeApp.ts — flatten LESS, light MORE deliberately (3-point rig)
+this.scene.add(new THREE.AmbientLight(THEME.lights.ambient, 0.25));               // was 1.35
+const hemi=new THREE.HemisphereLight(THEME.lights.hemiSky, THEME.lights.hemiGround, 0.35); // was 0.85
+this.scene.add(hemi);
+const key=new THREE.DirectionalLight(0xffe8c4, 2.2); key.position.set(26,44,18);
+key.castShadow=true; key.shadow.mapSize.set(quality.high?2048:1024);
+key.shadow.radius=quality.high?5:2; key.shadow.bias=-0.0004; key.shadow.normalBias=0.02; this.scene.add(key);
+const fill=new THREE.DirectionalLight(0x6a82b4,0.4); fill.position.set(-30,20,-22); this.scene.add(fill); // cool fill, no shadow
+const rim=new THREE.DirectionalLight(0xbfd4ff,0.6); rim.position.set(-10,8,-34); this.scene.add(rim);   // back/rim separator
+this.renderer.toneMappingExposure=1.0;
+```
+```ts
+// WorldRenderer.ts walls — drop flatShading, add normal+roughness maps + tiny metalness
+const wallH = buildConcreteHeight(1);
+const bodyMat = new THREE.MeshStandardMaterial({
+  map: concreteTex, normalMap: createNormalMap(wallH, 2.0, 1), roughnessMap: createRoughnessMap(wallH, 1),
+  color: THEME.walls.side, roughness: 0.9, metalness: 0.04,
+  normalScale: new THREE.Vector2(quality.high?0.85:0.45, quality.high?0.85:0.45)
+}); // removed flatShading:true  <-- key cartoon fix
+```
+```ts
+// src/render/PostFX.ts (adapt legacy) wired into core/Game.ts loop
+this.fx = quality.high ? new PostFX(this.app.renderer, this.app.scene, this.cam.activeCamera) : null;
+// ...in loop(), before drawing:
+if (this.fx){ this.fx.setCamera(this.cam.activeCamera); this.fx.render(); }
+else this.app.renderer.render(this.app.scene, this.cam.activeCamera);
+// setCamera updates renderPass.camera + gtaoPass.camera since active cam swaps (iso<->char)
+```
+```ts
+// procedural environment for real specular (metal bars, wet floor) — once at startup
+const pmrem=new THREE.PMREMGenerator(this.renderer);
+const envScene=new THREE.Scene(); // tiny gradient room: dark below, warm-grey above
+envScene.background=new THREE.Color(0x2a2e36);
+this.scene.environment=pmrem.fromScene(envScene,0,0.1,40).texture; pmrem.dispose();
+```
+
+
+## render: CharacterFactory.ts + PropRenderer.ts material/geometry overhaul, plus a new procedural normal/roughness texture-gen module shared with textures/  _(effort M, mobile: Net NEUTRAL to slightly positive. WINS: removing the BackSide OUTLINE shells deletes ~10-14 extra meshes per character (each was a full duplicate draw) — for a yard of 20+ inmates that's hundreds of fewer draw calls, more than paying for the added work. Texture maps are shared at MODULE scope (SKIN/CLOTH/DENIM/METAL built once, ~5 textures total at 256px = trivial VRAM, a few MB), so NO per-character/per-prop texture allocation. NEW COSTS: normal+roughness sampling adds a few texture fetches per fragment in MeshStandardMaterial — negligible on the small screen-footprint of chars/props. The onBeforeCompile SSS is one extra shader variant compiled ONCE (shared skin material), 3 cheap ALU ops per skin fragment. The PMREM/RoomEnvironment is a single offscreen bake at startup (0.04 quality = cheap), zero per-frame cost, and lets you DROP some fill lighting later. Keep textures at 256px, normalScale low (0.25-0.5), and do NOT add a post-processing EffectComposer (the existing additive-sprite bloom stays). Material.clone() for per-prop wear adds materials but they share geometry+textures; cap wear-cloning to hero props (lockers/bunks/counter), not every decal. Verdict: ships on mid-tier mobile.)_
+
+The "cartoony/AI" read comes from three specific things in the current code, all fixable while staying procedural and mobile-OK: (1) every body part carries a BackSide MeshBasicMaterial OUTLINE shell (CharacterFactory L27-34) — this is THE toon tell and also doubles char draw calls; drop it entirely. (2) Every char/prop material is a flat MeshStandardMaterial with only color+roughness — zero maps, so surfaces read as untextured plastic. Add procedural normalMap + roughnessMap (derived from the SAME canvas noise you already generate) to skin, cloth, and metal. (3) Faces use literal sphere eyes/cone nose/box mouth glued on (L180-207) which screams "AI low-poly"; replace with a single baked face CanvasTexture on the head + subtle geometry. The plan: remove outline shells, switch lit materials to mapped MeshStandardMaterial, add one shared makeSurfaceMaps() that returns {normalMap,roughnessMap} from a tiled canvas, add a cheap rim/SSS cheat via onBeforeCompile on skin only (no post pass), smooth limbs with higher-segment capsules + merged head/neck, and enrich props with bevels (RoundedBox-style via small chamfer boxes), per-instance wear tint, edge grime, and emissive accent strips. Keep one shared texture set (generate once, reuse) so VRAM and draw calls stay flat. No EffectComposer/post-processing — keep the existing additive-sprite bloom. Net mobile cost is roughly NEUTRAL because removing ~12 outline meshes per character offsets the added texture sampling.
+
+**Changes:**
+- DROP THE TOON OUTLINE SHELLS. Delete the OUTLINE material + shell() helper (CharacterFactory L27-28) and every shell() call (L34, L138, L174). This single change removes the #1 cartoony tell AND halves character mesh count (~10-14 fewer meshes per char). Replace the lost silhouette pop with a subtle Fresnel rim in the skin/cloth shader (see snippet) + the existing contact shadow.
+- ADD a shared procedural map generator module src/render/textures/createSurfaceMaps.ts that returns {map?, normalMap, roughnessMap} from one tiled 256px canvas. Reuse your existing speckle/noise loop (same as createConcreteTexture) but ALSO emit a normal map by computing per-pixel height = luminance, then Sobel dx/dy into RGB (0.5+dx, 0.5+dy, 1.0) on a second canvas, and a roughness map from inverted/blurred luminance. normalMap.colorSpace must stay LinearSRGBColorSpace (NOT sRGB) or lighting is wrong.
+- BUILD shared map sets ONCE at module scope (not per character): SKIN_MAPS (fine pore noise, normalScale ~0.25), CLOTH_MAPS (woven directional noise via horizontal+vertical line passes, normalScale ~0.45, roughness 0.85-1.0), DENIM_MAPS for trousers, WORN_METAL_MAPS (brushed streaks + scratch lines + edge-darken, metalness 0.7, roughnessMap with bright scratch lines = polished where worn). Assign these to the existing skinMat/uniMat/legMat (CharacterFactory L117-120) and the M.* prop materials (PropRenderer L11-26).
+- SMOOTH the humanoid: bump CapsuleGeometry segments in limb() from (3,8) to (4,12) radial — still cheap. Merge neck+head visually by making the head a slightly squashed CapsuleGeometry or keeping the sphere but adding a skinMat neck that overlaps (already present L170). Widen shoulder taper and add a thin chest/back bevel box so the torso isn't a raw cuboid. Use buildDef to also vary head size slightly per build for less clone-army feel.
+- REPLACE the glued-on face primitives (eyes/brows/nose/mouth/ears, L180-207) with a baked FACE CanvasTexture applied to the FRONT of the head only (a small planar decal mesh at z=+0.2, or set headMesh material.map to a face texture with UVs facing +z). Draw eyes/brows/mouth with canvas strokes + soft shadows so they read as painted-on, not 3D blobs. Keep ears as tiny geometry. This is the second-biggest realism win after the outlines.
+- ADD a cheap SSS/skin cheat via skinMat.onBeforeCompile: inject a warm Fresnel term into gl_FragColor (rim = pow(1.0 - dot(N,V), 2.0)) tinted toward a subsurface red (~0.55,0.25,0.20) at low intensity (~0.12). Apply ONLY to skin (1 material, ~all chars share it) so it compiles one extra shader, not N. Gives ears/edges that translucent glow without any post pass.
+- ENRICH props with bevels + wear. Add a roundedBox(w,h,d,bevel,mat) helper (cheap: a slightly inset core box + thin chamfer boxes, OR use a low-seg geometry with beveled corners) and swap the raw box() calls in bunk/locker/table/counter/desk for it on the prominent edges. Add per-prop wear by cloning the shared material and multiplying color by a small random factor (0.9-1.05) and nudging roughness, so the locker row isn't identical. Add AO-ish edge darkening by baking a dark border into the metal/wood color maps.
+- ADD emissive ACCENT detail to props: thin emissive strip on lockers (number plate), warm rim on the serving counter food wells, a subtle screen flicker tint on desk monitors (M.screen already emissive — give it an emissiveMap CanvasTexture with scanlines). Keep using the existing glowSprite() for halos (no post pass).
+- TIGHTEN material PBR values: skin roughness 0.55 (not 0.75) so light wraps; cloth 0.85 with normalMap; worn metal metalness 0.7 + roughnessMap; porcelain metalness 0.0 roughness 0.25 for a wet ceramic sheen. Add envMap via a cheap PMREM from a tiny gradient (or scene.environment from a RoomEnvironment) so metals/porcelain actually reflect something instead of reading flat — this is the single biggest 'looks rendered not flat' upgrade for metal/ceramic and costs one PMREM render at startup.
+- SET scene.environment once in ThreeApp.ts using THREE.PMREMGenerator on a RoomEnvironment (or a hand-built gradient scene) so ALL MeshStandardMaterials get image-based reflections. envMapIntensity ~0.5-0.8. This alone removes most of the 'flat AI' look on metal/porcelain/screens for ~zero per-frame cost (baked once).
+
+**Files:** D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/CharacterFactory.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/PropRenderer.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/ThreeApp.ts, D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/textures/createSurfaceMaps.ts (NEW), D:/ClaudeResourcesProjects/Projects-working-on/Lockdown-Life-3D/src/render/VisualTheme.ts (minor: skin/cloth roughness + envMapIntensity tuning)
+
+**Snippets:**
+```ts
+// === src/render/textures/createSurfaceMaps.ts (NEW) ===
+// One canvas -> color + normal + roughness. Reuses the speckle approach already in createConcreteTexture.
+import * as THREE from 'three';
+export interface SurfaceMaps { map?: THREE.Texture; normalMap: THREE.Texture; roughnessMap: THREE.Texture; }
+export function createSurfaceMaps(opts: {
+  base?: string; grain?: number; dirX?: number; dirY?: number; // directional weave/brush
+  scratches?: number; repeat?: number;
+}): SurfaceMaps {
+  const S = 256; const grain = opts.grain ?? 26; const rep = opts.repeat ?? 4;
+  const hgt = new Float32Array(S * S);
+  // base height field = value noise + directional streaks
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    let h = (Math.random() - 0.5) * grain;
+    if (opts.dirX) h += Math.sin(y * 0.6) * opts.dirX;   // horizontal weave
+    if (opts.dirY) h += Math.sin(x * 0.6) * opts.dirY;   // vertical weave
+    hgt[y * S + x] = h;
+  }
+  // scratch lines bump the height sharply (worn metal)
+  // ... (draw N random thin lines into hgt) ...
+  // --- normal map via Sobel on the height field ---
+  const nC = document.createElement('canvas'); nC.width = nC.height = S; const nctx = nC.getContext('2d')!;
+  const nImg = nctx.createImageData(S, S); const nd = nImg.data;
+  const at = (x: number, y: number) => hgt[((y + S) % S) * S + ((x + S) % S)];
+  const strength = 2.0;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const dx = (at(x - 1, y) - at(x + 1, y)) * strength;
+    const dy = (at(x, y - 1) - at(x, y + 1)) * strength;
+    const i = (y * S + x) * 4;
+    nd[i] = 128 + dx; nd[i + 1] = 128 + dy; nd[i + 2] = 255; nd[i + 3] = 255; // RGB normal
+  }
+  nctx.putImageData(nImg, 0, 0);
+  const normalMap = new THREE.CanvasTexture(nC);
+  normalMap.colorSpace = THREE.LinearSRGBColorSpace;        // CRITICAL: normals are NOT sRGB
+  normalMap.wrapS = normalMap.wrapT = THREE.RepeatWrapping; normalMap.repeat.set(rep, rep);
+  // --- roughness map: darker height = more polished (worn), so invert luminance ---
+  const rC = document.createElement('canvas'); rC.width = rC.height = S; const rctx = rC.getContext('2d')!;
+  const rImg = rctx.createImageData(S, S); const rdd = rImg.data;
+  for (let p = 0; p < S * S; p++) { const v = 200 - hgt[p]; const i = p * 4; rdd[i] = rdd[i + 1] = rdd[i + 2] = Math.max(0, Math.min(255, v)); rdd[i + 3] = 255; }
+  rctx.putImageData(rImg, 0, 0);
+  const roughnessMap = new THREE.CanvasTexture(rC);
+  roughnessMap.colorSpace = THREE.LinearSRGBColorSpace;
+  roughnessMap.wrapS = roughnessMap.wrapT = THREE.RepeatWrapping; roughnessMap.repeat.set(rep, rep);
+  return { normalMap, roughnessMap };
+}
+```
+```ts
+// === CharacterFactory.ts: DELETE these (the toon tell) ===
+// const OUTLINE = new THREE.MeshBasicMaterial({ color: 0x0b0b0e, side: THREE.BackSide });
+// function shell(mesh, s=1.12){ ... mesh.add(m); }   <-- remove
+// remove every  shell(m, ...)  call (limb L34, torso L138, head L174)
+
+// === Shared map sets, module scope (built ONCE) ===
+import { createSurfaceMaps } from './textures/createSurfaceMaps';
+const SKIN_MAPS  = createSurfaceMaps({ grain: 10, repeat: 2 });            // fine pores
+const CLOTH_MAPS = createSurfaceMaps({ grain: 8, dirX: 6, dirY: 6, repeat: 6 }); // woven
+const DENIM_MAPS = createSurfaceMaps({ grain: 14, dirX: 10, repeat: 8 });
+
+const skinMat = new THREE.MeshStandardMaterial({ color: skinColor, roughness: 0.55,
+  normalMap: SKIN_MAPS.normalMap, normalScale: new THREE.Vector2(0.25, 0.25),
+  roughnessMap: SKIN_MAPS.roughnessMap, envMapIntensity: 0.4 });
+const uniMat = new THREE.MeshStandardMaterial({ color: uniColor, roughness: 0.9,
+  normalMap: CLOTH_MAPS.normalMap, normalScale: new THREE.Vector2(0.45, 0.45),
+  roughnessMap: CLOTH_MAPS.roughnessMap });
+const legMat = new THREE.MeshStandardMaterial({ color: trouserColor, roughness: 0.95,
+  normalMap: DENIM_MAPS.normalMap, normalScale: new THREE.Vector2(0.5, 0.5) });
+```
+```ts
+// === Cheap SSS / rim on SKIN ONLY (no post pass). One shared material -> one shader compile ===
+skinMat.onBeforeCompile = (shader) => {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <output_fragment>',
+    `
+    vec3 V = normalize( vViewPosition );
+    float fres = pow( 1.0 - clamp( dot( normalize(normal), V ), 0.0, 1.0 ), 2.0 );
+    vec3 sss = vec3(0.55, 0.25, 0.20) * fres * 0.12;   // warm translucent edge
+    outgoingLight += sss;
+    #include <output_fragment>
+    `
+  );
+};
+// NOTE r160: if 'output_fragment' include is gone in your build, target
+// '#include <opaque_fragment>' or the 'gl_FragColor = vec4( outgoingLight, ...' line instead.
+```
+```ts
+// === ThreeApp.ts: IBL so metal/porcelain stop looking flat (baked once, ~0 per-frame cost) ===
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+// in constructor, after renderer setup:
+const pmrem = new THREE.PMREMGenerator(this.renderer);
+this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+// then on metal/porcelain materials set envMapIntensity ~0.5-0.8.
+// Cost: one offscreen render at startup, no runtime cost. Mobile-safe.
+```
+```ts
+// === PropRenderer.ts: beveled box + per-prop wear (kills the 'identical AI boxes' look) ===
+function roundedBox(w:number,h:number,d:number,bevel:number,mat:THREE.Material,x=0,y=0,z=0){
+  const g=new THREE.Group();
+  g.add(box(w, h-bevel*2, d, mat, x, y, z));          // core
+  g.add(box(w-bevel*2, h, d-bevel*2, mat, x, y, z));   // chamfer cross gives rounded read
+  return g;
+}
+// wear: clone shared mat so the locker ROW isn't a clone army
+function worn(mat: THREE.MeshStandardMaterial){ const m=mat.clone();
+  const f=0.9+Math.random()*0.15; m.color.multiplyScalar(f); m.roughness=Math.min(1, m.roughness+(Math.random()-0.5)*0.2); return m; }
+// shared metal now carries maps:
+metal: new THREE.MeshStandardMaterial({ color:0x6b7079, roughness:0.6, metalness:0.45,
+  normalMap: METAL_MAPS.normalMap, normalScale:new THREE.Vector2(0.3,0.3),
+  roughnessMap: METAL_MAPS.roughnessMap, envMapIntensity:0.8 })
+```
+```ts
+// === Baked FACE texture instead of glued-on eye/nose/mouth blobs (L180-207) ===
+function faceTexture(skin:number): THREE.CanvasTexture {
+  const c=document.createElement('canvas'); c.width=c.height=128; const x=c.getContext('2d')!;
+  x.fillStyle = '#'+new THREE.Color(skin).getHexString(); x.fillRect(0,0,128,128);
+  // soft eye sockets (shadow), painted eyes, brows, subtle mouth — all 2D, reads realistic
+  x.fillStyle='rgba(0,0,0,0.18)'; x.beginPath(); x.ellipse(46,58,12,8,0,0,7); x.ellipse(82,58,12,8,0,0,7); x.fill();
+  x.fillStyle='#f8f8f6'; x.beginPath(); x.ellipse(46,58,7,4,0,0,7); x.ellipse(82,58,7,4,0,0,7); x.fill();
+  x.fillStyle='#2a2622'; x.beginPath(); x.arc(46,58,3,0,7); x.arc(82,58,3,0,7); x.fill();
+  x.strokeStyle='#3a2c20'; x.lineWidth=3; x.beginPath(); x.moveTo(36,46); x.lineTo(56,44); x.moveTo(72,44); x.lineTo(92,46); x.stroke();
+  x.strokeStyle='rgba(60,30,30,0.5)'; x.lineWidth=2; x.beginPath(); x.moveTo(54,86); x.quadraticCurveTo(64,90,74,86); x.stroke();
+  const t=new THREE.CanvasTexture(c); t.colorSpace=THREE.SRGBColorSpace; return t;
+}
+// apply: give headMesh material a per-char clone with .map = faceTexture(skinColor),
+// head UVs already face +z on SphereGeometry; rotate head so seam is at back.
+```

@@ -13,7 +13,7 @@ export class ThreeApp {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.22;
+    this.renderer.toneMappingExposure = 1.05;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.scene.background = new THREE.Color(THEME.bg);
     this.scene.fog = new THREE.Fog(THEME.fog.color, THEME.fog.near, THEME.fog.far);
@@ -28,8 +28,13 @@ export class ThreeApp {
     dir.shadow.camera.left = -d; dir.shadow.camera.right = d;
     dir.shadow.camera.top = d; dir.shadow.camera.bottom = -d;
     dir.shadow.camera.near = 1; dir.shadow.camera.far = 140;
-    dir.shadow.bias = -0.0004;
+    dir.shadow.bias = -0.0004; dir.shadow.normalBias = 0.02; dir.shadow.radius = 5;
     this.scene.add(dir);
+
+    // cool fill (no shadow) lifts the shadow side so it isn't crushed black; low back rim separates
+    // characters/walls from the dark background — the classic 3-point realism rig.
+    const fill = new THREE.DirectionalLight(0x6f86b4, 0.45); fill.position.set(-22, 20, -14); this.scene.add(fill);
+    const rim = new THREE.DirectionalLight(0xbfd4ff, 0.6); rim.position.set(-8, 10, -28); this.scene.add(rim);
 
     this.scene.add(new THREE.HemisphereLight(THEME.lights.hemiSky, THEME.lights.hemiGround, THEME.lights.hemiI));
   }

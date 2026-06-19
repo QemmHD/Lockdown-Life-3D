@@ -114,7 +114,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.8.0-balance'
+      version: 'v4.9.0-realism'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 

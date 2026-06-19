@@ -8,18 +8,20 @@ export const THEME = {
   // far enough not to feel cramped. distance = horizontal pullback, height = camera elevation.
   charCamera: { fov: 50, distance: 12, height: 15, lookHeight: 1.2, minDistance: 7, maxDistance: 22 },
 
-  bg: 0x2a3040,
-  fog: { color: 0x2a3040, near: 90, far: 200 },
+  bg: 0x161a21,
+  fog: { color: 0x161a21, near: 52, far: 150 },
 
+  // 4.9 realism: cut the flat ambient/hemi wash (the main "cartoony" tell) and lean on a strong warm
+  // key + cool fill + back rim (the fill/rim lights are added in ThreeApp) for real shadow contrast.
   lights: {
-    ambient: 0xd0d8ea, ambientI: 1.35,
-    key: 0xfff4e0, keyI: 1.55,
-    hemiSky: 0xd8e4ff, hemiGround: 0x5a5a48, hemiI: 0.85
+    ambient: 0x808ea8, ambientI: 0.5,
+    key: 0xffe6c0, keyI: 2.1,
+    hemiSky: 0x9fb0d0, hemiGround: 0x383631, hemiI: 0.42
   },
 
-  walls: { side: 0x6a6e78, top: 0xa0a5b0, base: 0x44474f, grime: 0x3a3d46, bars: 0x30353e, frame: 0x585d68 },
+  walls: { side: 0x585b63, top: 0x868b96, base: 0x3a3d44, grime: 0x33363d, bars: 0x2a2e36, frame: 0x4c5059 },
 
-  floor: { base: 0x505660 },
+  floor: { base: 0x44484f },
 
   // per room-type look: brighter floor tints + warmer room lights
   rooms: {

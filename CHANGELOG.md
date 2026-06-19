@@ -14,6 +14,19 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.9.0-realism — Stage 4.9 Realism lighting pass
+First step on the "less cartoony" graphics ask (research-driven). Build + smoke green; render-only.
+- **Killed the flat ambient wash** (ambient 1.35→0.5, hemi 0.85→0.42) — the #1 thing making it read
+  as flat/toy.
+- **Proper 3-point light rig**: a stronger **warm key**, a cool **fill** (lifts shadows so they're not
+  crushed black), and a low **back rim** that separates characters/walls from the background.
+- **Moodier palette**: darker charcoal bg + tighter fog for atmospheric depth; grittier walls/floors;
+  softer shadows (radius + normalBias, less peter-panning); exposure eased so the key doesn't blow out.
+- Net: real shadow contrast + depth — grounded and gritty, orange jumpsuits still pop.
+- Planned next realism steps (in docs): procedural normal/roughness maps, an EffectComposer post stack
+  (GTAO/grade/vignette, adapted from legacy/PostFX), richer props/decor, and a more accurate layout.
+- Version → `v4.9.0-realism`.
+
 ## v4.8.0-balance — Stage 4.8 Pacing & guard rebalance (playtest feedback)
 - **Longer days**: a game-hour is now **12s** (was 5) — days ~2.4× longer, so there's time to actually
   live the prison day instead of speed-running.
