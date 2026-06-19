@@ -14,6 +14,17 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.5.0-survival — Stage 4.5 Survival stakes
+Needs finally have teeth — the survival loop matters. Build + smoke green; no save change.
+- **Death by neglect**: let **hunger or sleep** max out and it eats your **health** — for you that's a
+  **GAME OVER** (the death ending is now reachable without a fight, true to Hard Time). Eat / rest
+  before you collapse.
+- **Stamina pays off**: higher **Stamina** slows how fast hunger/sleep/hygiene build up — your trained
+  stat keeps you going longer.
+- **Self-care heals**: keep hunger + sleep low and your **health regenerates** over time (also slowly
+  recovers injuries).
+- Version → `v4.5.0-survival`.
+
 ## v4.4.0-stats — Stage 4.4 Stats & Training
 Adds Hard Time's attribute core — your fighter is now **built, not fixed**. Build + smoke green; save v15.
 - **Attributes** (new ECS `Attributes` component): **Strength / Agility / Skill / Stamina**, 0–99

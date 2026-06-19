@@ -974,10 +974,18 @@ export class Simulation {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
       if (b.role !== 'prisoner') continue;
       const n = this.ecs.get<Needs>(e, 'Needs')!;
-      const dm = b.isPlayer ? this.diff.decayMul : 1;   // difficulty only speeds the player's needs
+      const sta = this.attrs(e)?.stamina ?? 50;
+      const dm = (b.isPlayer ? this.diff.decayMul : 1) * (1.12 - sta / 250);   // higher stamina slows the grind
       n.hunger = clamp01(n.hunger + dt * 0.012 * dm);
       n.sleep = clamp01(n.sleep + dt * 0.008 * dm);
       n.hygiene = clamp01(n.hygiene + dt * 0.006 * dm);
+      // Stage 4.5: neglect is fatal — maxed hunger/sleep eats your health; for you that's a GAME OVER.
+      if (n.hunger >= 0.98 || n.sleep >= 0.98) {
+        n.health = clamp01(n.health - dt * 0.02);
+        if (b.isPlayer && n.health <= 0.001 && !this.runEnd) { this.bus.emit('alert', { type: 'critical', text: 'You collapse from neglect…' }); this.endRun('dead'); }
+      } else if (n.health < 1 && n.hunger < 0.6 && n.sleep < 0.6) {
+        n.health = clamp01(n.health + dt * 0.006);   // recover slowly when you keep yourself together
+      }
       n.anger = clamp01(n.anger + (n.hunger > 0.7 ? dt * 0.01 : -dt * 0.004));
       // being in the scheduled room type satisfies the matching need
       const room = this.roomTypeAt(this.ecs.get<Position>(e, 'Position')!);

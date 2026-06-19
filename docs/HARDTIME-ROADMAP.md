@@ -966,3 +966,102 @@ private settingsTab():string{ const s=this.hooks.getSettings();
 - Settings slider 'input' listener is bound in render(); since pause re-renders on every tab click, ensure the listener is re-attached after each render (bind inside render, not constructor) to avoid a dead slider.
 - reduceMotion should also damp the existing alarm-screen flash and impact rings for a truly accessible mode — optional but expected; at minimum gate shake+hitstop.
 - EventBus: if it's strongly typed, new event names need to be added to its type map or emit/on calls won't compile — check src/core/EventBus.ts first.
+
+
+---
+
+# MISSED MECHANICS BACKLOG (ranked)
+
+The Attributes scaffolding for 4.4 is already in code (effStat 25%-rule getter, per-prisoner spawn, save/hydrate, STR wired into combat damage) — so the real gap isn't stats existing, it's that the signature Hard Time LOOPS are absent: the two-bar morale/mind model (no morale field at all), the grapple/submit/throw combat verbs, the court/trial adjudication, allies who rush in on line-of-sight, world-as-weapon pickup/throw, crafting/combine, a commissary, and the persistent-death world. Highest ROI is morale + the cheap couplings that make existing systems FEEL like Hard Time; the big-L narrative pillars (grapple, persistent-death world, court) are what actually sell it as Hard Time and should anchor their own stages.
+
+
+### #1 — The 25% rule applied to ALL stats + per-station training routing (agility/skill/stamina read by combat/jobs/escape, weights/treadmill/books/pool stations)  _(impact high, effort S)_
+effStat() and the Attributes component already exist but only strength feeds combat and 'train' is one generic STR bump. Wiring agility into attack cadence/dodge, skill into counters/court, stamina into decay+sleep restore, and routing each station to its stat turns dead scaffolding into a real build system for near-zero new code.
+
+### #2 — Sleep gating (can't sleep while energy high) + death-by-neglect  _(impact high, effort S)_
+Two tiny changes (reject rest when energy>~0.6; drain health toward 0 when hunger/sleep maxed) that close the anti-fast-forward loop and add the distinct starvation fail-state. Makes the survival loop matter instead of being skippable.
+
+### #3 — Reputation works AGAINST you at trial + skill/intelligence helps you win (double-edged obedience)  _(impact high, effort S)_
+Pure coupling on existing Social.reputation and the new attributes — feed rep into P(guilty), apply respect penalty for an innocent verdict. The single most 'Hard Time' tradeoff (rep buys obedience but raises sentence) for a few lines once court exists.
+
+### #4 — Two-bar Health/Morale model (add a yellow Mind/morale field; fold hunger/hygiene/anger/fear into energy+morale drains)  _(impact high, effort L)_
+There is NO morale field today — it's the missing half of Hard Time's signature HUD and the prerequisite for breakdown, adrenaline, vices, and leisure. Refactoring Needs to {energy, morale, +internal mods} unlocks an entire domain. High effort but foundational.
+
+### #5 — Allies rush to your aid on line-of-sight (auto fight-join, gang piles on)  _(impact high, effort M)_
+Reuses existing rel/gang/LOS plumbing and crowdReact; on fight-start scan same-gang/high-rel actors with clear LOS and set them to fight your attacker. Turns 'who is connected' into pre-fight strategy — core to surviving Hard Time.
+
+### #6 — Adrenaline rush (morale full → +10% all + finisher) & nervous breakdown (morale empty → AI seizes player ~60s)  _(impact high, effort M)_
+Once morale exists, two BrainStates that reuse the PrisonerAI takeover and the effStat multiplier. Gives the morale bar teeth at both extremes and a non-lethal soft-loss distinct from death.
+
+### #7 — Pick up / throw / hold world objects ('anything is a weapon') gated on Strength  _(impact high, effort L)_
+'pickup' is already in the InteractAction union with zero implementation. Tag props throwable+strReq, add a held field + throw projectile reusing doStrike's damage path. Pillar #2 of the design bible; also smashes windows for escape and trains STR.
+
+### #8 — Commissary / store with subsidised prices, charged-on-release, theft-if-broke  _(impact high, effort M)_
+Reuses priceFor/tradePanel/release flow; just a fixed-stock vendor interactable + a checkout-on-release deduction that converts to a charge if you can't pay. High legibility, fixes the awkward 'buy only from the NPC holding the item' economy.
+
+### #8 — Crafting by combining two objects + gun/taser reload (skill-gated recipe table)  _(impact high, effort M)_
+Raw-material items (part, batteries, blade, tool) already exist with no combine use. A pure recipe table + combine() gated on effective skill (now available) yields shivs/syringes/charged items — the manufacturing loop and a sink for scavenged junk.
+
+### #10 — Court / trial as a real adjudication scene (witness-gated charges, verdict, intellect defense, bribe-to-skip)  _(impact high, effort L)_
+Today addSentenceDays silently bumps the clock. A CourtSystem that only charges WITNESSED crimes (reuse LOS), rolls guilt weighted by rep vs skill, and supports guard-bribe-or-court is a signature Hard Time pillar and the home for rank-3's rep coupling.
+
+### #11 — Grapple phase (GRAB→throw/suplex/choke/release) + SUBMIT/UNCONSCIOUS/KILLED outcomes + taunt verb  _(impact high, effort L)_
+Grapple is THE central Hard Time combat verb and we have only stand-up phases + a shove. Extending the phase machine with a MoveResolver and a struggle meter is the biggest combat-feel uplift, but genuinely large.
+
+### #12 — NPC death persistence & player reincarnation as a cell-owning NPC (world roster persists across characters)  _(impact high, effort L)_
+The design bible's single strongest emergent-narrative feature — your dead character lives on as an NPC owning the same cell. Requires serializing the world roster independently from the player run. Highest narrative payoff, highest effort.
+
+### #13 — Smoking/drinking/drugs as vices with addiction, tolerance & withdrawal (the vice loop)  _(impact high, effort M)_
+cash IS cigarettes already but can't be smoked for morale; medicine only adds health. Once morale exists, vices give a spike then a withdrawal drag — the compulsion loop that fills downtime. Depends on the two-bar refactor.
+
+### #14 — Deeper dialogue verbs: persuade/plead/bribe, once-per-day intimidate that makes a durable enemy, guard shakedown (pay-or-court), warden warrant bribe  _(impact high, effort M)_
+Extends the existing interact() switch and Social.rel/reputation into a reputation-currency tree. Makes social play a real economy and feeds the court/heat systems.
+
+### #15 — Recruit individual allies into a persistent entourage + romance from the please-loop (hug/kiss, jealousy)  _(impact medium, effort M)_
+rel exists but ally memory decays in ~40s so no durable bond. A persistent allied flag + recruit/hug/kiss actions create the relationship layer that makes the LOS fight-join (rank 5) meaningful.
+
+### #16 — Bladder/toilet need + structured multi-stat use-effects + over-eat vomit  _(impact medium, effort M)_
+Replaces the flat use/useAmt with useEffects[] (already specced in the design doc) and adds the toilet loop driven by eat/drink/smoke. Medium-value flavor that deepens needs once the two-bar model lands.
+
+### #17 — Body-type STR↔AGI tradeoff (5% swings) driving the cosmetic build mesh  _(impact high, effort M)_
+Appearance.build (slim/average/stocky) is cosmetic-only today. A bodyType scalar that swings STR/AGI oppositely from training/eating and swaps the mesh gives free visual feedback and forces build identity.
+
+### #18 — Bleeding DoT from SHARP weapons + weapon class (SHARP/BLUNT/FIREARM/THROWN/SHIELD) + riot shield 95% block  _(impact medium, effort S)_
+Weapons are a flat combat number. A class tag enabling bleed-over-time, knockout-bias, and a 95% shield block adds tactical weapon identity cheaply once the class field exists.
+
+### #19 — Gambling (cards/dice bets, fight-to-the-death wagers)  _(impact medium, effort M)_
+cards/dice items exist as inert props. A gamble() action with escrow + skill-biased roll, and fight-wagers routed through existing onFightWin, is a high-risk income loop that reuses combat and the money ledger.
+
+### #20 — Durable NPC vendettas/grudges persisted across days + alert-feed callouts  _(impact medium, effort M)_
+Memory decays in ~25-30s today so feuds never escalate. A persistent grudge map biasing AI toward ambush, inherited by gang-mates, generates the self-authored drama Hard Time is famous for.
+
+### #21 — Job variety with reputation tradeoffs (menial work LOWERS rep; painting/fixing/library/workshop; attribute gates; warden tasks pay sentence-days)  _(impact high, effort M)_
+5 flat jobs all wrongly grant +rep. Flipping menial to -rep, gating tiers on effective attributes, and routing warden tasks to sentence-days makes the work loop a real tradeoff economy.
+
+### #22 — Contraband depth: questioning events, take-the-blame transfers, cell-owner stash criticism, backpack containers, debt/warrant-gated release  _(impact medium, effort M)_
+Solid search/stash model already exists; these extensions (esp. blocking release while you owe debts/warrants) deepen the smuggling and tie loose ends into the release win-condition.
+
+### #23 — Start & expand your OWN gang (name/colors/greeting) + inter-gang alliances  _(impact medium, effort L)_
+Design currently hard-codes 'never the leader'. An opt-in late-game founder path using the existing faction map is a satisfying endgame for high-rep players but contradicts a stated design default, so lower priority.
+
+### #24 — Firearms / gunplay (aim-hold-release, ammo, reload via crafting)  _(impact medium, effort L)_
+Largely an HT3-tier feature in a melee-centric setting. Worth gating behind a difficulty/world flag; significant new aim+projectile+ammo systems for a setting that doesn't need it yet.
+
+### #25 — Fire & environmental hazards (ignite/spread, warmth-when-sleeping, extinguisher, cold/flood modifiers)  _(impact medium, effort L)_
+Strong chaos generator but needs a new particle/render concern and a hazard tick system. High flavor, lower priority than the structural loops; do after world-objects exist (fire rides on flammable carryables).
+
+### #26 — Character editor / persistent universe roster management (edit any inmate, restore default roster)  _(impact low, effort M)_
+The player creator is already strong. A full NPC editor + universe-restore is a power-user convenience that only pays off once the persistent-death world (rank 12) exists; sandbox/debug panel first.
+
+### #27 — Amber energy ceiling + stamina-scaled decay/recovery tuning + medical item differentiation (painkiller/syringe/medkit, craftable)  _(impact low, effort M)_
+Polish-tier knobs (config-gated amber ceiling, distinct medical profiles) that refine the survival loop once the two-bar model and crafting exist. Low standalone impact, cheap to fold into those refactors.
+
+
+## Proposed grouping into stages
+- 4.6 — Cheap couplings that instantly feel like Hard Time (ALL-the-S-tier, do first): wire agility/skill/stamina into combat/escape/jobs via the existing effStat() getter; per-station training routing (weights/treadmill/books/pool→distinct stats) replacing the generic STR bump; sleep-gating (can't sleep while energy>~0.6) + death-by-neglect; body-type STR↔AGI swing driving the slim/average/stocky mesh; skill-vs-reputation inverse coupling. All reuse the already-built Attributes scaffolding and existing meters — biggest ROI in the backlog.
+- 4.7 — The Two-Bar Mind: refactor Needs into the green-energy + yellow-morale model with hunger/hygiene/anger/fear as internal drains; bladder/toilet loop; multi-stat useEffects + over-eat vomit; adrenaline rush & nervous-breakdown morale-threshold states; vices (smoke/drink/drugs) with addiction/tolerance/withdrawal; retarget leisure items (TV/payphone/books/visits/hugs) to feed morale. This is the prerequisite domain that unlocks half the remaining backlog.
+- 4.8 — World-as-weapon & the maker economy: implement the dormant 'pickup' action into hold/throw of world props (STR-gated, smashes windows for escape); crafting/combine recipe table (skill-gated, plus taser/gun reload); a real commissary with subsidised prices and charge-on-release; gambling (cards/dice + fight-wagers); job variety with rep tradeoffs. Pillar-2 chaos plus the money loops that fund everything.
+- 4.9 — Court, crime & the social web: a CourtSystem with witness-gated charges, verdict rolls weighted by reputation (against you) vs effective skill (for you), guard-shakedown bribe-or-court and warden warrant bribes; deeper dialogue (persuade/plead/intimidate-once-per-day); recruit-an-entourage + romance/jealousy; durable persistent vendettas surfaced in the alert feed; debt/warrant-gated release and contraband depth (questioning, take-the-blame, backpacks).
+- 4.10 — Grapple combat overhaul: extend the phase machine with GRAPPLE/GROUNDED phases and a data-driven MoveResolver (verb+direction+modifier→move), grab→throw/suplex/choke/release, taunt verb, SUBMIT/UNCONSCIOUS/KILLED outcomes, weapon classes with bleed DoT and a 95% riot-shield block. The largest combat-feel uplift; deserves its own stage.
+- 4.11 — Persistent living world (the signature pillar): serialize the world roster independently from the player run; NPC permadeath frees/reassigns cells and optionally reincarnates with same clothing; the dead PLAYER lives on as a cell-owning NPC discoverable by the next character; character editor + universe-roster restore on top. The strongest emergent-narrative payoff, built last because it touches save/persistence broadly.
+- Backlog / flagged (HT3-tier, gate behind difficulty or defer): firearms/gunplay; fire & environmental hazards (ride on flammable carryables from 4.8); start-your-own-gang (contradicts the 'never leader' default — opt-in only); amber energy ceiling and medical-item differentiation as polish folded into 4.7.
