@@ -14,6 +14,14 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.12.0-decor — Stage 4.12 Lived-in decor
+More props so the block feels used (your "more decor" ask). Build + smoke green; render-only.
+- Scattered **non-interactive clutter** — crates, buckets, trash bags, stacked boxes — through the
+  common rooms (cells/solitary skipped — already furnished), only on free walkable tiles so nothing
+  blocks movement.
+- With the moodier 4.9 lighting + the 22-inmate population, the prison reads far more lived-in.
+- Version → `v4.12.0-decor`.
+
 ## v4.11.0-social — Stage 4.11 Conversations & NPC grudges
 First slice of the smarter-AI + Hard Time conversations plan. Build + smoke green.
 - **Conversations that change relationships**: open any inmate and **Compliment** (build the bond —

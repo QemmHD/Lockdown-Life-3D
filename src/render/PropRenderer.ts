@@ -185,6 +185,23 @@ export function dressRooms(scene: THREE.Scene, map: TileMap, rooms: Room[], cell
       }
     }
   }
+  // decor scatter — non-interactive clutter so rooms feel lived-in (Stage 4.12)
+  const crate = () => box(0.5, 0.5, 0.5, M.wood, 0, 0.25, 0);
+  const bucket = () => cyl(0.18, 0.32, M.steel, 0, 0.16, 0);
+  const trashBag = () => { const m = new THREE.Mesh(new THREE.SphereGeometry(0.28, 8, 6), M.black); m.scale.set(1, 0.85, 1); m.position.y = 0.22; m.castShadow = true; return m; };
+  const stack = () => { const g = new THREE.Group(); g.add(box(0.45, 0.4, 0.45, M.wood, 0, 0.2, 0)); g.add(box(0.4, 0.34, 0.4, M.wood, 0.05, 0.57, 0.04)); return g; };
+  const decor = [crate, bucket, trashBag, stack];
+  for (const r of rooms) {
+    if (r.type === 'cellblock' || r.type === 'solitary') continue;   // cells are already furnished
+    const minX = r.x - W / 2, minZ = r.y - H / 2;
+    const n = 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < n; i++) {
+      const x = minX + 0.7 + Math.random() * (r.w - 1.4), z = minZ + 0.7 + Math.random() * (r.h - 1.4);
+      const t = map.worldToTile(x, z);
+      if (!map.inBounds(t.x, t.y) || !map.isWalkable(t.x, t.y) || map.blocked[map.idx(t.x, t.y)]) continue;
+      place(decor[Math.floor(Math.random() * decor.length)](), x, z, Math.random() * Math.PI * 2);
+    }
+  }
   scene.add(root);
   return { root, interactables, hitMeshes };
 }
