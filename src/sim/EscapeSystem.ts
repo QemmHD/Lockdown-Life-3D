@@ -22,11 +22,12 @@ export function newEscape(): EscapeState {
 }
 
 // Fictional outcome: attempts mostly fail. Success is rare and only when no guards are nearby.
-export function rollEscapeOutcome(roll: number, guardsNear: number): EscapeOutcome {
-  if (guardsNear > 0) return roll < 0.65 ? 'caught' : 'interrupted';
-  if (roll < 0.45) return 'caught';
-  if (roll < 0.8) return 'interrupted';
-  if (roll < 0.95) return 'abandoned';
+export function rollEscapeOutcome(roll: number, guardsNear: number, aid = 0): EscapeOutcome {
+  const r = Math.min(0.999, roll + aid);   // escape tools (file / lockpick / improvised tool) improve the odds
+  if (guardsNear > 0) return r < 0.6 ? 'caught' : r < 0.92 ? 'interrupted' : 'success';
+  if (r < 0.45) return 'caught';
+  if (r < 0.8) return 'interrupted';
+  if (r < 0.95) return 'abandoned';
   return 'success';
 }
 

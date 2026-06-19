@@ -14,6 +14,19 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.2.0-gear — Stage 4.2 Gear power ladder
+Contraband stops being points-and-risk and becomes Hard Time's "buy gear that changes what you can
+**do**" ladder. Build + smoke green; save format unchanged (item data only).
+- **Weapon tiers**: new **Makeshift Shiv** (cheap, concealable sharp), **Steel Pipe** (blunt — knocks
+  down), and the **Improvised Tool** is now a weak weapon too, alongside the existing **Sharp Object**
+  (most lethal). Weapon damage scales (`combat × 0.025`); a real weapon (combat ≥ 3) can turn a
+  knockdown lethal (4.1) and raises guard **heat** when the player swings it.
+- **Armor**: a **Padded Vest** soaks ~28% of incoming damage in a fight.
+- **Blunt knockdowns**: the pipe (`wKnock`) can drop a foe even at moderate health.
+- **Escape gear matters**: the **Improvised Tool** (`escapeAid`) measurably improves escape-attempt
+  odds — the priciest contraband finally pays off, feeding the real ESCAPED ending.
+- Version → `v4.2.0-gear`.
+
 ## v4.1.0-death — Stage 4.1 Death & Injuries
 Wires up the third Hard Time ending and gives every fight real stakes. Sim-authoritative, build +
 smoke green, save format unchanged (v13 — injuries are transient).

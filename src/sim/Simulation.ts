@@ -1379,18 +1379,22 @@ export class Simulation {
     // a landed hit
     this.metrics.hits++;
     const weapon = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.combat ?? 0).reduce((a, c) => Math.max(a, c), 0);
+    const armor = (this.inv(foe)?.items ?? []).map((id) => ITEMS[id]?.armor ?? 0).reduce((a, c) => Math.max(a, c), 0);
     let dmg = this.rng.range(ATTACKS[atk].dmgMin, ATTACKS[atk].dmgMax) * (b.traits.includes('tough') ? 1.2 : 1) * (b.traits.includes('weak') ? 0.7 : 1);
-    dmg += weapon * 0.02; if (outcome === 'glancing') dmg *= 0.45;
+    dmg += weapon * 0.025; if (outcome === 'glancing') dmg *= 0.45;
     if (b.injuredT) dmg *= 0.7;   // an injured attacker hits softer
+    dmg *= (1 - armor * 0.8);     // the defender's armor soaks part of the blow
     fn.health = clamp01(fn.health - dmg);
+    if (weapon >= 3 && b.isPlayer) this.addHeat(2);   // brandishing a real weapon draws guard attention
     fb.lastAttacker = e;
     this.bus.emit('impact', { x: fp.x, z: fp.z });
     if (dmg > 0.02) this.bus.emit('float', { x: fp.x, z: fp.z, text: `-${Math.round(dmg * 100)}`, color: '#ff7a6a' });
     // knockback (path-safe) + hit reaction / stumble
     const ang = Math.atan2(fp.x - ep.x, fp.z - ep.z);
     this.nudge(fp, Math.sin(ang) * ATTACKS[atk].knockback * 0.6, Math.cos(ang) * ATTACKS[atk].knockback * 0.6);
+    const blunt = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.wKnock ?? 0).reduce((a, c) => Math.max(a, c), 0);
     const heavy = ATTACKS[atk].knockback > 0.5 || dmg > 0.16;
-    if (fn.health <= 0.2 || (heavy && fn.energy < 0.2)) { this.knockDown(foe, fb, e, b); }
+    if (fn.health <= 0.2 || (heavy && fn.energy < 0.2) || (blunt > 0 && fn.health < 0.5 && this.rng.float() < blunt)) { this.knockDown(foe, fb, e, b); }
     else { fb.cphase = heavy ? 'stumble' : 'hitReact'; fb.cTimer = heavy ? STUMBLE : HITREACT; fn.fear = clamp01(fn.fear + 0.06); }
     this.faceWatchers(fp.x, fp.z);
     this.crowdReact(fp.x, fp.z);
@@ -1766,7 +1770,8 @@ export class Simulation {
   private resolveEscape() {
     const pl = this.playerId; const pb = this.brain(pl)!; const ps = this.social(pl)!;
     const guardsNear = this.ecs.query('Brain', 'Position').filter((g) => this.brain(g)!.role === 'guard' && this.dist(g, pl) < 8).length;
-    const outcome = rollEscapeOutcome(this.rng.float(), guardsNear);
+    const aid = (this.inv(pl)?.items ?? []).map((id) => ITEMS[id]?.escapeAid ?? 0).reduce((a, c) => Math.max(a, c), 0);
+    const outcome = rollEscapeOutcome(this.rng.float(), guardsNear, aid);
     this.escape = newEscape();
     if (outcome === 'success') {
       pb.action = 'ESCAPED'; this.bus.emit('alert', { type: 'player', text: '🚨 You slipped out — ESCAPED!' });
