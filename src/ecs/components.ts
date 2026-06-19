@@ -59,6 +59,7 @@ export interface Brain {
   blockT?: number;         // active block window (player Block)
   pendingAtk?: string;     // player-queued attack type (strike/heavy/shove)
   lastAttacker?: Entity;   // who last struck this character
+  injuredT?: number;       // ---- Stage 4.1 ---- seconds of lingering injury (weaker hits) after a beating
 }
 
 // Reputation / standing / suspicion. On the player: reputation+respect drive the loop;

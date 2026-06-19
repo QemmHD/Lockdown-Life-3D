@@ -14,6 +14,19 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.1.0-death — Stage 4.1 Death & Injuries
+Wires up the third Hard Time ending and gives every fight real stakes. Sim-authoritative, build +
+smoke green, save format unchanged (v13 — injuries are transient).
+- **Death is real (GAME OVER)**: a brutal knockdown can now KILL the player — risk scales with a
+  **weapon**, **near-zero health**, a **pile-on** (multiple attackers nearby), and **chaos**
+  (lockdown/riot/alarm); the `tough` trait halves it. Routes to the `endRun('dead')` verdict card.
+- **No more free heal**: the old auto-revive floor (health snapping back to 0.45 on standing up) is
+  gone — you get up at **0.2** and stay hurt, so losing a fight actually costs you.
+- **Injuries**: a beating leaves you **injured** for ~20–40s — your hits land **30% softer** until you
+  heal (a **medical item** clears it instantly, or it wears off with time). Exposed as `injured` on
+  the player snapshot.
+- Version → `v4.1.0-death`.
+
 ## v4.0.0-sentence — Stage 4.0 The Sentence (Hard Time spine)
 Turns the open-ended day-loop into an actual **game with a goal and an ending** — the core of
 Mdickie's _Hard Time_. Sim-authoritative, save format v13, typecheck + build + smoke green (verdict
