@@ -247,10 +247,16 @@ versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARC
 - **Player chaos actions**: Comply, Return to Cell, Hide, Calm Down, Help Guard.
 - **Tuning (3.1)**: eased Heat that decays when calm, smoothed riot pressure with hysteresis + cooldowns, lockdown re-entry cooldown, deduped alerts, contextual player panel, and `?debug` playtest telemetry (`sim.metrics`).
 
-## Planned next
-With audio (3.9) and the visual passes (3.8 / 3.8A / 3.8B) shipped, the next lanes are **world
-expansion** (more areas + routing/schedule anchors), a **settings menu** (volume slider, difficulty),
-or deeper **audio** (music / stingers, per-area mix) — then iOS (Capacitor) packaging prep.
+## Planned next — the Hard Time 4.x remake
+The game is being built toward a **modern remake of Mdickie's _Hard Time_**. The full design is in
+[`docs/HARDTIME-DESIGN.md`](./docs/HARDTIME-DESIGN.md); the staged roadmap:
+- **4.0 — The Sentence** ✅ (shipped): serve a term, time-off / added-time, **release / escape / death** endings.
+- **4.1 — Death & stakes**: remove the revive floor, wire fatal beatings to `GAME OVER`, persistent injuries.
+- **4.2 — Gear power ladder**: weapon tiers (shiv / blunt) + armor + tool-driven doors/escape.
+- **4.3 — Escape as a project**: acquire a tool → dig/cut over days → hide from searches → break for the wall.
+- **4.4 — Stats & training**: two-bar survival (energy/morale) + attributes (STR/AGI/SKILL…) with the "25% rule".
+- **4.5 — Allies & vendettas**: recruit a crew that fights for you; NPC-vs-NPC feuds; notoriety that NPCs react to.
+- Plus a graphics/animation pass, a settings menu, and iOS (Capacitor) packaging.
 
 ---
 
