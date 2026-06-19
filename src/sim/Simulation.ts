@@ -1452,10 +1452,10 @@ export class Simulation {
     const ln = this.ecs.get<Needs>(loser, 'Needs')!;
     const weapon = (this.inv(winner)?.items ?? []).some((id) => (ITEMS[id]?.combat ?? 0) >= 3);
     const lp = this.pos(loser)!;
-    let hostiles = 0;
-    for (const g of this.ecs.query('Brain', 'Position')) { const gb = this.brain(g)!; if (gb.role !== 'prisoner' || gb.isPlayer || gb.state !== 'fight') continue; const gp = this.pos(g)!; if (Math.hypot(gp.x - lp.x, gp.z - lp.z) < 4) hostiles++; }
+    let hostiles = 0;   // only count enemies actually targeting the loser (not allies / bystanders)
+    for (const g of this.ecs.query('Brain', 'Position')) { const gb = this.brain(g)!; if (gb.role !== 'prisoner' || gb.isPlayer || gb.state !== 'fight' || gb.foe !== loser) continue; const gp = this.pos(g)!; if (Math.hypot(gp.x - lp.x, gp.z - lp.z) < 4) hostiles++; }
     const chaos = this.lockdown.active || this.riotLevel === 'event' || this.alarm.active;
-    let risk = 0.03 + (ln.health <= 0.02 ? 0.16 : 0) + (weapon ? 0.34 : 0) + (hostiles >= 2 ? 0.2 : 0) + (chaos ? 0.1 : 0);
+    let risk = 0.03 + (ln.health <= 0.02 ? 0.16 : 0) + (weapon ? 0.34 : 0) + (hostiles >= 2 ? 0.14 : 0) + (chaos ? 0.1 : 0);
     if (this.brain(loser)!.traits.includes('tough')) risk *= 0.55;
     return this.rng.float() < risk;
   }
@@ -1874,7 +1874,7 @@ export class Simulation {
   requestAction(target: Entity, action: InteractAction): string {
     const pl = this.playerId; const pb = this.brain(pl)!; const ps = this.social(pl)!;
     if (pb.state === 'solitary' || pb.state === 'escorted') return 'You can\'t act right now.';
-    if (action === 'backoff') { this.act = null; if (pb.state === 'fight') { pb.state = 'idle'; pb.foe = undefined; } pb.action = 'Idle'; ps.reputation = clamp(ps.reputation - 1, -100, 100); this.bubble(pl, '…', 'talk', 0.8); return 'You back off.'; }
+    if (action === 'backoff') { this.act = null; if (pb.state === 'fight') { pb.state = 'idle'; pb.foe = undefined; } this.disengagePlayerFoes(); pb.action = 'Idle'; ps.reputation = clamp(ps.reputation - 1, -100, 100); this.bubble(pl, '…', 'talk', 0.8); return 'You back off.'; }
     if (action === 'fight') { this.act = null; this.startPlayerFight(target); return 'Fight!'; }
     const self = SELF_ACTIONS.includes(action);
     const dur = ACTION_DUR[action] ?? 0.9;
@@ -2184,7 +2184,7 @@ export class Simulation {
         if (tb.mem) rememberThreat(tb.mem, pl);    // they'll avoid/retaliate against you later
         ps.reputation = clamp(ps.reputation + 2, -100, 100);
         const aggr = tb.traits.includes('aggressive') || (ts ? ts.respect : 0) > ps.respect + 10;
-        if (aggr && this.rng.chance(0.6)) { this.startPlayerFight(target); return `${tb.name} takes a swing at you!`; }
+        if (aggr && this.rng.chance(0.6)) { this.startPlayerFight(target, false); return `${tb.name} takes a swing at you!`; }
         return `You insult ${tb.name}. They glare back.`;
       }
       case 'threaten': {
@@ -2192,7 +2192,7 @@ export class Simulation {
         const win = ps.respect + ps.reputation * 0.3 + this.tier().index * 6 > (ts ? ts.respect : 30);
         if (win || tb.traits.includes('cowardly')) { if (ts) { ts.rel = clamp(ts.rel - 8, -100, 100); } ps.reputation = clamp(ps.reputation + 4, -100, 100); this.ecs.get<Needs>(target, 'Needs')!.fear = clamp01(this.ecs.get<Needs>(target, 'Needs')!.fear + 0.3); return `${tb.name} backs down.`; }
         ps.reputation = clamp(ps.reputation - 2, -100, 100);
-        if (this.rng.chance(0.5)) { this.startPlayerFight(target); return `${tb.name} calls your bluff — fight!`; }
+        if (this.rng.chance(0.5)) { this.startPlayerFight(target, false); return `${tb.name} calls your bluff — fight!`; }
         return `${tb.name}: "You don't scare me."`;
       }
       case 'favor': {
@@ -2220,19 +2220,19 @@ export class Simulation {
     }
   }
 
-  private startPlayerFight(target: Entity) {
+  private startPlayerFight(target: Entity, explicit = true) {
     const pl = this.playerId; const pb = this.brain(pl)!; const tb = this.brain(target)!;
     pb.state = 'fight'; pb.foe = target; pb.attackCd = 0.3; pb.action = 'Fighting'; pb.cphase = 'squareUp'; pb.cTimer = 0.4;
     tb.state = 'fight'; tb.foe = pl; tb.attackCd = 0.5; tb.cphase = 'squareUp'; tb.cTimer = 0.4;
     if (tb.mem) rememberFoe(tb.mem, pl);
     this.bus.emit('alert', { type: 'fight', text: `Fight: You vs ${tb.name}!` });
-    this.rallyAllies(pl, target);
+    this.rallyAllies(pl, target, explicit);
     this.dispatchGuard(pl);
     this.registerFight(pl);
   }
   // Stage 4.6: nearby inmates who can SEE the brawl take sides — your gang/friends jump in for you,
   // the foe's crew / your enemies pile on against you. Who you're connected to now decides the fight.
-  private rallyAllies(player: Entity, foe: Entity) {
+  private rallyAllies(player: Entity, foe: Entity, explicit = true) {
     const pb = this.brain(player)!; const fb = this.brain(foe); const pp = this.pos(player)!; const pGang = pb.gang;
     let forMe = 0, against = 0;
     for (const e of this.ecs.query('Brain', 'Position', 'Social')) {
@@ -2246,14 +2246,19 @@ export class Simulation {
       const ally = (!!pGang && b.gang === pGang) || s.rel > 40;
       const enemy = (!!fb?.gang && b.gang === fb.gang && fb.gang !== pGang) || s.rel < -45 || (!!pGang && areEnemies(b.gang, pGang));
       if (ally && forMe < 2) { this.joinFight(e, b, foe); forMe++; this.bubble(e, 'I got you!', 'talk', 1.0); }
-      else if (enemy && against < 2) { this.joinFight(e, b, player); against++; this.bubble(e, 'Get him!', 'insult', 1.0); }
+      else if (enemy && against < (explicit ? 2 : 1)) { this.joinFight(e, b, player); against++; this.bubble(e, 'Get him!', 'insult', 1.0); }
     }
     if (forMe) { this.metrics.allyHelp += forMe; this.bus.emit('alert', { type: 'player', text: `Your people jump in — ${forMe} backing you!` }); }
     if (against) this.bus.emit('alert', { type: 'fight', text: `${against} pile on against you!` });
   }
   private joinFight(e: Entity, b: Brain, target: Entity) {
+    this.releaseFor(e); b.objTarget = undefined;   // drop any object reservation when pulled into a brawl
     b.state = 'fight'; b.foe = target; b.cphase = 'squareUp'; b.cTimer = 0.5; b.attackCd = this.rng.range(0.4, 0.8);
     this.ecs.get<Agent>(e, 'Agent')!.path = null;
+  }
+  // disengage every prisoner currently swinging at the player (Back Off actually ends the gank)
+  private disengagePlayerFoes() {
+    for (const e of this.ecs.query('Brain')) { const b = this.brain(e)!; if (b.role === 'prisoner' && !b.isPlayer && b.state === 'fight' && b.foe === this.playerId) this.endFighter(e, b); }
   }
   // line-of-sight: clear if no structural wall sits between the two points
   private hasLOS(a: Entity, b: Entity): boolean {

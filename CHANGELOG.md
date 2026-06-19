@@ -14,6 +14,15 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.7.1-balance — Allies balance patch (adversarial-review fixes)
+Fixes the 5 issues a multi-agent review found in 4.6 allies (the game had gotten unfairly deadly):
+- **Lethal risk now only counts enemies actually targeting you** (your own allies / bystanders no
+  longer inflate the death chance), and the pile-on term was eased (0.2 → 0.14).
+- **Dialogue-escalated fights** (insult/threaten) now pull in **at most 1** enemy, not 2 — no more
+  unwarned 2-enemy gank from a social action.
+- **Back Off actually disengages** every inmate swinging at you (was leaving you chased while idle).
+- Rallied inmates **release their object reservation** when pulled into a brawl (no stuck locks).
+
 ## v4.7.0-bleed — Stage 4.7 Bleeding blades
 Sharp weapons now **cut** — a Hard Time staple. Build + smoke green; item data + transient state only.
 - **Bleed DoT**: a hit with a **Sharp Object** or **Shiv** opens a wound — the victim bleeds
