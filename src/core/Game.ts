@@ -114,7 +114,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.7.1-balance'
+      version: 'v4.8.0-balance'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -379,7 +379,7 @@ export class Game {
     return a;
   }
   private npcActions(e: Entity, role: string): PanelAction[] {
-    if (role === 'guard') return [{ key: 'talk', label: 'Talk', kind: 'social' }, { key: 'comply', label: 'Comply', kind: 'guard' }, { key: 'argue', label: 'Argue', kind: 'risky' }];
+    if (role === 'guard') return [{ key: 'talk', label: 'Talk', kind: 'social' }, { key: 'comply', label: 'Comply', kind: 'guard' }, { key: 'argue', label: 'Argue', kind: 'risky' }, { key: 'fight', label: 'Attack', kind: 'risky', danger: true }];
     const tinv = this.sim.ecs.get<Inventory>(e, 'Inventory');
     const canTrade = !!tinv && tinv.items.length > 0;
     const a: PanelAction[] = [

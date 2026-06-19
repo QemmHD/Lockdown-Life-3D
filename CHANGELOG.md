@@ -14,6 +14,18 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.8.0-balance — Stage 4.8 Pacing & guard rebalance (playtest feedback)
+- **Longer days**: a game-hour is now **12s** (was 5) — days ~2.4× longer, so there's time to actually
+  live the prison day instead of speed-running.
+- **Slower needs**: hunger/sleep/hygiene build **~3–4× slower** (hunger now takes ~a full day to bite,
+  not ~80s); anger creeps gentler. You manage needs a couple times a day instead of chasing them.
+- **Guards notice realistically**: a guard only responds to a fight if one is within **~14 units AND
+  has line-of-sight** (no more reacting from across the prison, through walls) — unless an alarm/
+  lockdown already has them alert.
+- **You can fight the cops**: guards now have an **Attack** option — but hitting one trips the
+  **alarm**, spikes heat/suspicion, and sends **every** guard after you. A Hard Time death wish.
+- Version → `v4.8.0-balance`.
+
 ## v4.7.1-balance — Allies balance patch (adversarial-review fixes)
 Fixes the 5 issues a multi-agent review found in 4.6 allies (the game had gotten unfairly deadly):
 - **Lethal risk now only counts enemies actually targeting you** (your own allies / bystanders no

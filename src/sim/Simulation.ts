@@ -24,7 +24,7 @@ import { NewGameSetup, sanitizeSetup, defaultSetup, randomSetup, traitSimTokens,
 import { PlayerGangState, newGangState, sanitizeGangState, RANKS, standingLabel, rankFromState, perksForRank, rollGangGoals, INVITE_STANDING, INVITE_RESPECT, INVITE_LIFE, INVITE_CD } from './FactionSystem';
 import { EconomyState, MarketOffer, newEconomy, sanitizeEconomy, priceFor, refusesToTrade, searchRisk, jobPay, stashInfo, stashLabel, driftEconomy } from './EconomySystem';
 
-const SECONDS_PER_HOUR = 5;
+const SECONDS_PER_HOUR = 12;   // longer days — time to actually live the prison day (was 5)
 const PATROL_ROOMS = ['hallway', 'cellblock', 'yard', 'cafeteria', 'shower'];
 const RESTRICTED = ['guardroom', 'intake', 'storage', 'solitary'];
 const DEBUG = typeof location !== 'undefined' && /[?&]debug/.test(location.search);
@@ -976,9 +976,9 @@ export class Simulation {
       const n = this.ecs.get<Needs>(e, 'Needs')!;
       const sta = this.attrs(e)?.stamina ?? 50;
       const dm = (b.isPlayer ? this.diff.decayMul : 1) * (1.12 - sta / 250);   // higher stamina slows the grind
-      n.hunger = clamp01(n.hunger + dt * 0.012 * dm);
-      n.sleep = clamp01(n.sleep + dt * 0.008 * dm);
-      n.hygiene = clamp01(n.hygiene + dt * 0.006 * dm);
+      n.hunger = clamp01(n.hunger + dt * 0.0035 * dm);   // ~a game-day to get hungry (was a frantic ~80s)
+      n.sleep = clamp01(n.sleep + dt * 0.0022 * dm);
+      n.hygiene = clamp01(n.hygiene + dt * 0.0014 * dm);
       // Stage 4.5: neglect is fatal — maxed hunger/sleep eats your health; for you that's a GAME OVER.
       if (n.hunger >= 0.98 || n.sleep >= 0.98) {
         n.health = clamp01(n.health - dt * 0.02);
@@ -986,7 +986,7 @@ export class Simulation {
       } else if (n.health < 1 && n.hunger < 0.6 && n.sleep < 0.6) {
         n.health = clamp01(n.health + dt * 0.006);   // recover slowly when you keep yourself together
       }
-      n.anger = clamp01(n.anger + (n.hunger > 0.7 ? dt * 0.01 : -dt * 0.004));
+      n.anger = clamp01(n.anger + (n.hunger > 0.75 ? dt * 0.004 : -dt * 0.005));
       // being in the scheduled room type satisfies the matching need
       const room = this.roomTypeAt(this.ecs.get<Position>(e, 'Position')!);
       if (room === 'cafeteria') n.hunger = clamp01(n.hunger - dt * 0.08);
@@ -1518,6 +1518,9 @@ export class Simulation {
     const fp = this.ecs.get<Position>(fighter, 'Position')!;
     let best = guards[0], bd = Infinity;
     for (const g of guards) { const gp = this.ecs.get<Position>(g, 'Position')!; const d = Math.hypot(gp.x - fp.x, gp.z - fp.z); if (d < bd) { bd = d; best = g; } }
+    // a guard only responds if one is close enough to NOTICE (range + line-of-sight), unless an
+    // alarm/lockdown already has them on alert — fixes guards reacting from across the prison
+    if (!(this.alarm.active || this.lockdown.active) && (bd > 14 || !this.hasLOS(best, fighter))) return;
     const b = this.ecs.get<Brain>(best, 'Brain')!; b.state = 'respond'; b.foe = fighter; this.ecs.get<Agent>(best, 'Agent')!.path = null;
   }
   private breakUpFight(guard: Entity, near: Entity) {
@@ -2226,9 +2229,17 @@ export class Simulation {
     tb.state = 'fight'; tb.foe = pl; tb.attackCd = 0.5; tb.cphase = 'squareUp'; tb.cTimer = 0.4;
     if (tb.mem) rememberFoe(tb.mem, pl);
     this.bus.emit('alert', { type: 'fight', text: `Fight: You vs ${tb.name}!` });
+    if (tb.role === 'guard') this.assaultGuard(pl);
     this.rallyAllies(pl, target, explicit);
     this.dispatchGuard(pl);
     this.registerFight(pl);
+  }
+  // attacking a guard brings the whole block down on you (Hard Time lets you — it's a death wish)
+  private assaultGuard(pl: Entity) {
+    this.triggerAlarm('assault', 3);
+    const ps = this.social(pl)!; ps.suspicion = clamp(ps.suspicion + 40, 0, 100); this.addHeat(20);
+    this.bus.emit('alert', { type: 'critical', text: 'You hit a guard — the whole block is coming for you!' });
+    for (const g of this.ecs.query('Brain')) { const gb = this.brain(g)!; if (gb.role === 'guard' && gb.state !== 'respond' && gb.state !== 'down') { gb.state = 'respond'; gb.foe = pl; this.ecs.get<Agent>(g, 'Agent')!.path = null; } }
   }
   // Stage 4.6: nearby inmates who can SEE the brawl take sides — your gang/friends jump in for you,
   // the foe's crew / your enemies pile on against you. Who you're connected to now decides the fight.
