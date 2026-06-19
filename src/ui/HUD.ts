@@ -15,6 +15,7 @@ export interface HUDHooks {
   onAction: (key: string) => void;       // interaction / self-action / job button
   onItem: (key: string) => void;         // tap an inventory item (drop)
   onToggleCam?: () => void;              // Stage 3.8A: toggle iso / character camera
+  onToggleSound?: () => void;            // Stage 3.9: mute / unmute audio
 }
 
 export class HUD {
@@ -33,6 +34,7 @@ export class HUD {
           <div class="tb-sub"><span id="tb-day">Day 1</span> · <span id="tb-time">6:00</span></div>
         </div>
         <div class="tb-block right">
+          <button id="snd-toggle" class="snd-btn" title="Sound on/off">🔊</button>
           <div class="tb-chip" id="chip-heat"><span>HEAT</span><b id="tb-heat">0</b></div>
           <div class="tb-chip" id="chip-riot"><span>RIOT</span><b id="tb-riot">0%</b></div>
           <div class="tb-chip" id="chip-lock" style="display:none"><span>LOCK</span><b id="tb-lock">0s</b></div>
@@ -51,7 +53,7 @@ export class HUD {
         <button data-b="cam" class="hud-btn cam-toggle"><span class="b-ico" id="cam-ico">🎥</span><span class="b-lbl">Camera</span></button>
       </div>`;
     document.getElementById('ui-root')!.appendChild(this.root);
-    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'chip-lock', 'tb-lock', 'chaos-banner', 'alert-feed', 'obj-tracker', 'panel', 'speed-x', 'alarm', 'cam-ico'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
+    ['tb-phase', 'tb-day', 'tb-time', 'tb-heat', 'tb-riot', 'chip-riot', 'chip-heat', 'chip-lock', 'tb-lock', 'chaos-banner', 'alert-feed', 'obj-tracker', 'panel', 'speed-x', 'alarm', 'cam-ico', 'snd-toggle'].forEach((id) => this.els[id] = this.root.querySelector('#' + id) as HTMLElement);
     this.root.querySelectorAll('#bottombar button').forEach((b) => {
       const k = (b as HTMLElement).dataset.b!;
       b.addEventListener('click', () => {
@@ -60,6 +62,7 @@ export class HUD {
         else if (k === 'cam' && hooks.onToggleCam) hooks.onToggleCam();
       });
     });
+    this.els['snd-toggle']?.addEventListener('click', () => hooks.onToggleSound?.());
     this.hooks = hooks;
   }
   private hooks!: HUDHooks;
@@ -77,6 +80,7 @@ export class HUD {
   }
   setSpeed(label: string) { this.els['speed-x'].textContent = label; }
   setCamMode(isChar: boolean) { this.els['cam-ico'].textContent = isChar ? '🏠' : '🎥'; }
+  setMuted(muted: boolean) { const b = this.els['snd-toggle']; if (b) { b.textContent = muted ? '🔇' : '🔊'; b.classList.toggle('muted', muted); } }
   setAlarm(level: number) { this.els['alarm'].style.opacity = level > 0.6 ? String(Math.min(0.42, (level - 0.6) * 1.05)) : '0'; }
   // chaos banner + lockdown chip. info.level: 'calm' | 'warning' | 'event'
   setChaos(info: { lockdown: boolean; lockdownTimer: number; lockdownReason: string; alarm: boolean; level: string; objective: string }) {

@@ -3,6 +3,7 @@ import { ThreeApp } from '../render/ThreeApp';
 import { IsoCamera } from '../render/IsoCamera';
 import { RenderSync } from '../render/RenderSync';
 import { Feedback } from '../render/Feedback';
+import { AudioSystem } from '../audio/AudioSystem';
 import { buildPrison } from '../render/WorldRenderer';
 import { dressRooms } from '../render/PropRenderer';
 import { Simulation } from '../sim/Simulation';
@@ -29,6 +30,7 @@ export class Game {
   private sim: Simulation;
   private sync: RenderSync;
   private feedback!: Feedback;
+  private audio = new AudioSystem();
   private hud: HUD;
   private menus!: Menus;
   private clock = new THREE.Clock();
@@ -83,9 +85,11 @@ export class Game {
       hasSave: () => SaveManager.has(),
       onAction: (key) => this.doAction(key),
       onItem: (key) => { const r = this.sim.dropItem(key); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; this.refreshPanel(); },
-      onToggleCam: () => { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); }
+      onToggleCam: () => { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); },
+      onToggleSound: () => { const muted = this.audio.toggleMute(); this.audio.unlock(); this.hud.setMuted(muted); }
     });
     this.select(this.playerEntity);   // panel shows the player by default
+    this.hud.setMuted(this.audio.isMuted());   // reflect persisted mute state
 
     // menus / title / pause / daily summary (Stage 3.4)
     this.menus = new Menus({
@@ -109,7 +113,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v3.8.1-atmosphere'
+      version: 'v3.9.0-audio'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -121,6 +125,10 @@ export class Game {
     this.bus.on('float', ({ x, z, text, color }) => this.feedback.float(x, z, text, color));
     this.bus.on('bubble', ({ e, text, kind, dur }) => this.feedback.bubble(e, text, kind, dur));
     this.bus.on('actionResult', ({ text }) => this.hud.alert(text, 'info'));
+    // audio (read-only presentation listeners): combat thud, typed event cues, UI confirm
+    this.bus.on('impact', () => this.audio.hit());
+    this.bus.on('alert', ({ type }) => this.audio.alert(type));
+    this.bus.on('actionResult', ({ text }) => this.audio.result(text));   // confirm on success, soft 'no' on failure
 
     const onResize = () => { this.app.resize(); this.cam.resize(); };
     window.addEventListener('resize', onResize);
@@ -132,7 +140,7 @@ export class Game {
     this.loop();
   }
 
-  private doorVisuals: { id: string; pivot: THREE.Object3D; baseRot: number; lampMat: THREE.MeshStandardMaterial }[] = [];
+  private doorVisuals: { id: string; pivot: THREE.Object3D; baseRot: number; lampMat: THREE.MeshStandardMaterial; lastOpen?: boolean }[] = [];
   private static RESTRICTED_ROOMS = ['guardroom', 'intake', 'storage', 'solitary'];
 
   // register each room's door/gate as an interactable object (hitbox + visible, stateful leaf)
@@ -216,6 +224,8 @@ export class Game {
     const flash = chaos ? 0.5 + Math.abs(Math.sin(this.clock.elapsedTime * 6)) * 1.2 : 1.2;
     for (const d of this.doorVisuals) {
       const o = this.sim.getObj(d.id); if (!o) continue;
+      if (d.lastOpen === undefined) d.lastOpen = o.open;            // prime; no sound on first frame
+      else if (o.open !== d.lastOpen) { d.lastOpen = o.open; this.audio.door(o.open); }   // slide / clang on change
       const target = o.open ? Math.PI * 0.46 : 0;                   // swing the leaf open/closed
       d.pivot.rotation.y += (target - d.pivot.rotation.y) * Math.min(1, dt * 8);
       const col = o.restricted ? 0xff3322 : o.locked ? 0xffaa22 : o.open ? 0x33ff66 : 0xccbb44;
@@ -422,6 +432,7 @@ export class Game {
     SaveManager.clear();
     this.sim.startNewRun(setup, this.interactableDefs as any);
     this.sync.reset(); this.feedback.reset(); this.sync.setEcs(this.sim.ecs);
+    for (const d of this.doorVisuals) d.lastOpen = undefined;   // re-prime door SFX (no stray clang on new run)
     this.playerEntity = this.sim.player();
     const sp = this.sim.ecs.get<Position>(this.playerEntity, 'Position'); if (sp) this.cam.focus(sp.x, sp.z);
     this.speedIdx = 0; this.paused = false; this.hud.setSpeed('1×');
@@ -437,6 +448,7 @@ export class Game {
     this.sync.reset();
     this.feedback.reset();
     this.sync.setEcs(this.sim.ecs);
+    for (const d of this.doorVisuals) d.lastOpen = undefined;   // re-prime door SFX (no stray clang on load)
     this.playerEntity = this.sim.player();
     this.panelDirty = true;
     this.hud.clearAlerts();             // drop any stale alert lines from before the load
@@ -537,6 +549,8 @@ export class Game {
       lockdown: this.sim.lockdown.active, lockdownTimer: this.sim.lockdown.timer, lockdownReason: this.sim.lockdown.reason,
       alarm: this.sim.alarm.active, level: this.sim.riotLevel, objective: this.sim.playerObjective
     });
+    // ambient audio bed: rises with riot pressure, klaxon on alarm/lockdown, ducked when paused/menus
+    this.audio.updateAmbient(!this.paused, riot, this.sim.alarm.active || this.sim.lockdown.active, this.sim.hour);
     // objective tracker (throttled with the panel) + once-a-day summary modal
     if (this.panelTimer >= 0.14) this.hud.setObjectives(this.sim.objectives, this.sim.tier());
     if (this.sim.pendingSummary && !this.menus.isOpen()) { this.menus.showSummary(this.sim.takeSummary()); this.paused = true; }

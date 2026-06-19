@@ -25,13 +25,14 @@ low-poly geometry** — no external art/audio assets.
 - **Three.js** for rendering (orthographic isometric camera)
 - **DOM / CSS** overlay HUD (no UI framework)
 - **`localStorage`** saves (versioned, currently v12)
-- **Procedural low-poly geometry** built at runtime (no model/texture/audio files)
+- **Procedural low-poly geometry** built at runtime (no model/texture files)
+- **Procedural audio** — synthesized at runtime via WebAudio (no sound files, Stage 3.9)
 - A small **ECS-lite** simulation (`src/ecs` + `src/sim`)
 
-There is **no** audio and no *WebGL* post-processing pipeline in the current build. The cinematic
-look (edge vignette, cool/warm colour grade, faint film grain — Stage 3.8B) is a **zero-cost CSS
-overlay** layered over the canvas, not a render pass, so it stays mobile-cheap. Controls are
-touch/mouse only (no keyboard/gamepad).
+There is no *WebGL* post-processing pipeline in the current build. The cinematic look (edge vignette,
+cool/warm colour grade, faint film grain — Stage 3.8B) is a **zero-cost CSS overlay** layered over the
+canvas, not a render pass, so it stays mobile-cheap. Audio is fully **synthesized** (no asset files)
+and mutes/persists from a topbar toggle. Controls are touch/mouse only (no keyboard/gamepad).
 
 ---
 
@@ -144,6 +145,7 @@ Gangs are purely fictional game data. You can build standing with a crew, get in
 - **Faction progression**: build standing → NPC gang invite → join, ranks (Associate→Shot Caller), crew goals, small perks, rival consequences, Gangs menu
 - **Economy / contraband depth**: item categories + dynamic prices (demand/supply/heat/relationship/gang), trade panel (buy/sell), item use, stash capacity/risk, job payouts + streak, daily market restock, gang/crew supply, economy objectives & daily summary
 - **Cinematic atmosphere (3.8B)**: zero-cost CSS overlay (edge vignette + cool/warm colour grade + film grain) over the canvas, **fake-bloom glow halos** on emissive props (ceiling lamps, security light, signs, scanner) via additive sprites — no post-processing pass — and a soft additive **ground-glow pool** under the selected/player inmate (gold for *you*, green for a selected NPC)
+- **Procedural audio (3.9)**: synthesized WebAudio (no sound files) — combat thud, door slide/clang, typed event cues (fight / lockdown / search / alarm / trade…), UI confirm, an **ambient bed** that rises with riot pressure + an **alarm klaxon**, all ducked when paused. Topbar mute toggle, persisted to `localStorage`; AudioContext unlocks on first tap (mobile autoplay-safe)
 
 **Partial**
 - Guard AI (roles + routes + checkpoints, but no formal squad tactics / dynamic routes)
@@ -157,9 +159,9 @@ Gangs are purely fictional game data. You can build standing with a crew, get in
 
 **Planned / Future**
 - Deeper riot warfare, event director, deeper gang hierarchy/squad commands
-- Economy/contraband depth, settings menu, audio
-- World expansion / more areas, deeper appearance / cosmetics
-- Real audio / SFX
+- Settings menu (volume slider, difficulty), deeper appearance / cosmetics
+- World expansion / more areas
+- Audio depth: music / stingers, positional per-area mix
 - More animation
 - Capacitor / iOS `.ipa` packaging
 - Performance profiling
@@ -199,6 +201,8 @@ src/
     Glow.ts               # additive fake-bloom sprites + ground-glow (no post pipeline)
     VisualTheme.ts        # colours / lighting / camera constants
     textures/             # procedural CanvasTextures
+  audio/
+    AudioSystem.ts        # procedural WebAudio: event cues + ambient bed (presentation; bus-only)
   ui/
     HUD.ts                # DOM overlay HUD (topbar, alerts, panel, action bar, bottom bar)
   data/
@@ -230,7 +234,7 @@ versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARC
 - Single hand-authored prison (no procedural prison generation).
 - Guard/NPC AI is intentionally light; deeper planning is a future stage.
 - The chaos layer is a first vertical slice — riot *events* are small and controlled, not full riot warfare.
-- No audio yet. Character creation, menus, objectives, reputation tiers, and gang lean exist; gang joining is added in Stage 3.6.
+- Audio is procedural (synthesized SFX + ambient bed) — no music yet. Character creation, menus, objectives, reputation tiers, and gang lean exist; gang joining is added in Stage 3.6.
 - Balance is rough and subject to change.
 - The follow camera reframes the subject slightly left of centre so the right-side panel doesn't cover it.
 
@@ -244,7 +248,9 @@ versioned snapshot of sim state. Full details + future refactor plan: [`docs/ARC
 - **Tuning (3.1)**: eased Heat that decays when calm, smoothed riot pressure with hysteresis + cooldowns, lockdown re-entry cooldown, deduped alerts, contextual player panel, and `?debug` playtest telemetry (`sim.metrics`).
 
 ## Planned next
-Economy/contraband depth, audio/polish, or world expansion — then iOS (Capacitor) packaging prep.
+With audio (3.9) and the visual passes (3.8 / 3.8A / 3.8B) shipped, the next lanes are **world
+expansion** (more areas + routing/schedule anchors), a **settings menu** (volume slider, difficulty),
+or deeper **audio** (music / stingers, per-area mix) — then iOS (Capacitor) packaging prep.
 
 ---
 
