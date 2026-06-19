@@ -141,8 +141,8 @@ export class Simulation {
     this.map = layout.map;
     this.rooms = layout.rooms;
     this.cells = layout.cells;
-    for (let i = 0; i < 14; i++) this.spawnPrisoner();
-    for (let i = 0; i < 4; i++) this.spawnGuard(i);
+    for (let i = 0; i < 22; i++) this.spawnPrisoner();   // livelier population (was 14)
+    for (let i = 0; i < 6; i++) this.spawnGuard(i);
     // promote the first prisoner to the directly-controlled player
     this.playerId = this.ecs.query('Brain').find((e) => this.ecs.get<Brain>(e, 'Brain')!.role === 'prisoner')!;
     const pb = this.ecs.get<Brain>(this.playerId, 'Brain')!;
