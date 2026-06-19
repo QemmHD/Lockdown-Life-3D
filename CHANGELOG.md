@@ -13,6 +13,24 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v3.8.1-atmosphere — Stage 3.8B Atmosphere & Bloom
+A small **presentation** follow-up to the 3.8 / 3.8A overhaul — adds depth and "juice" on top of the
+brighter palette without touching the simulation. Render-only (`RenderSync` stays read-only), art
+stays 100% procedural (no asset files), typecheck + build pass, 0 runtime errors, save format
+unchanged (v12).
+- **Cinematic atmosphere** (`index.html` + `style.css`, new `#atmosphere` layer): a zero-cost CSS
+  overlay above the canvas / below the HUD — edge **vignette**, gentle cool-top/warm-bottom **colour
+  grade** (`soft-light`), and a faint static **film grain** from an inline SVG `feTurbulence` data-URI
+  (`overlay`). No WebGL post-processing pass. Kept deliberately gentle so it **complements** 3.8A's
+  brighter, more-readable palette rather than darkening it. `#atmosphere` is intentionally outside its
+  own stacking context so the blend layers grade against the canvas.
+- **Fake bloom** (new `render/Glow.ts`): additive, camera-facing **glow sprites** on emissive props
+  (ceiling lamps, security light, doorway/hallway signs, intake scanner) — bloom without a post
+  pipeline, off a single shared cached soft-disc texture.
+- **Selection / player ground glow** (`CharacterFactory.ts` / `RenderSync.ts`): a soft additive pool
+  of light under the selected/player inmate (gold for *you*, green for a selected NPC), pulsing with
+  the selection ring — improves at-a-glance "who am I" readability.
+
 ## v3.8.0-world — Stage World / Visual / Layout Overhaul 3.8
 A pass over the **world/render/collision** layer (no new sim systems): a believable floorplan with
 **real individual cells**, a **prop-collision model** so characters can no longer walk through walls,

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { THEME } from './VisualTheme';
+import { groundGlow } from './Glow';
 
 export interface CharView {
   group: THREE.Group;
@@ -10,6 +11,7 @@ export interface CharView {
   head: THREE.Group;
   hit: THREE.Mesh;        // invisible large tap target
   ring: THREE.Mesh;       // selection ring
+  glow: THREE.Mesh;       // soft ground pool of light under player/selected
   icon: THREE.Sprite;
   iconTex: THREE.CanvasTexture;
   iconCanvas: HTMLCanvasElement;
@@ -100,6 +102,9 @@ export function makeCharacter(kind: 'prisoner' | 'guard', color: number, look?: 
   const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.52, 18),
     new THREE.MeshBasicMaterial({ color: THEME.contactShadow, transparent: true, opacity: 0.45, depthWrite: false }));
   shadow.rotation.x = -Math.PI / 2; shadow.position.y = 0.02; group.add(shadow);
+
+  // soft ground glow under the picked/player inmate (additive pool of light)
+  const glow = groundGlow(THEME.selection, 1.8, 0.4); glow.visible = false; group.add(glow);
 
   // selection ring (thick + bright so the picked inmate pops)
   const ring = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.78, 28),
@@ -268,7 +273,7 @@ export function makeCharacter(kind: 'prisoner' | 'guard', color: number, look?: 
 
   return {
     group, rig, torso, legL, legR, armL, armR, head: headGroup,
-    hit, ring, icon, iconTex, iconCanvas, lastIcon: '', walkPhase: Math.random() * 6,
+    hit, ring, glow, icon, iconTex, iconCanvas, lastIcon: '', walkPhase: Math.random() * 6,
     barGroup, barHealth, barEnergy, barSuspicion
   };
 }

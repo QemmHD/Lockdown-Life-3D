@@ -28,7 +28,9 @@ low-poly geometry** — no external art/audio assets.
 - **Procedural low-poly geometry** built at runtime (no model/texture/audio files)
 - A small **ECS-lite** simulation (`src/ecs` + `src/sim`)
 
-There is **no** audio and no WebGL post-processing pipeline in the current build; controls are
+There is **no** audio and no *WebGL* post-processing pipeline in the current build. The cinematic
+look (edge vignette, cool/warm colour grade, faint film grain — Stage 3.8B) is a **zero-cost CSS
+overlay** layered over the canvas, not a render pass, so it stays mobile-cheap. Controls are
 touch/mouse only (no keyboard/gamepad).
 
 ---
@@ -141,6 +143,7 @@ Gangs are purely fictional game data. You can build standing with a crew, get in
 - **Character creation**: new-game setup (name/appearance/traits/backstory/gang-lean/difficulty), randomize, run identity applied to the player
 - **Faction progression**: build standing → NPC gang invite → join, ranks (Associate→Shot Caller), crew goals, small perks, rival consequences, Gangs menu
 - **Economy / contraband depth**: item categories + dynamic prices (demand/supply/heat/relationship/gang), trade panel (buy/sell), item use, stash capacity/risk, job payouts + streak, daily market restock, gang/crew supply, economy objectives & daily summary
+- **Cinematic atmosphere (3.8B)**: zero-cost CSS overlay (edge vignette + cool/warm colour grade + film grain) over the canvas, **fake-bloom glow halos** on emissive props (ceiling lamps, security light, signs, scanner) via additive sprites — no post-processing pass — and a soft additive **ground-glow pool** under the selected/player inmate (gold for *you*, green for a selected NPC)
 
 **Partial**
 - Guard AI (roles + routes + checkpoints, but no formal squad tactics / dynamic routes)
@@ -193,6 +196,7 @@ src/
     CharacterFactory.ts   # procedural low-poly humanoids
     RenderSync.ts         # reads sim, animates characters — NEVER writes to sim
     Feedback.ts           # world-anchored floating text + speech bubbles (DOM)
+    Glow.ts               # additive fake-bloom sprites + ground-glow (no post pipeline)
     VisualTheme.ts        # colours / lighting / camera constants
     textures/             # procedural CanvasTextures
   ui/
