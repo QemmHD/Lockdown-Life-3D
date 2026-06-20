@@ -14,6 +14,16 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.16.0-builds — Stage 4.16 Character builds (zero-sum training + attributes that bite)
+Training is no longer a free ride to a maxed character — the Hard Time "you can never be good at everything" identity. Build + smoke green.
+- **Stations train different stats**: the **weights** build **Strength**, the **pull-up bar** builds **Agility** (each also tops up Stamina).
+- **Zero-sum couplings**: bulking up on the weights shaves a little **Agility**; agility drills shave a little **Strength**; **reading**
+  a book/magazine raises **Skill** but costs a sliver of **Reputation** (bookish reads as soft). You steer a build, you don't max it.
+- **Agility now bites in a fight**: agile fighters **recover between swings faster** (up to ~18% quicker at 99 AGI vs the floor) — so the
+  STR-vs-AGI choice is a real damage-vs-tempo trade, on top of Strength's existing damage scaling.
+- All attributes are floored at 30, so couplings can't gut a stat. Rides existing data — **no save change**.
+- Version → `v4.16.0-builds`.
+
 ## v4.15.0-mind — Stage 4.15 Mind states (breakdown & adrenaline finisher)
 The Spirit bar now has real drama at both ends — the missing "your mind can break / your mind can carry you" beat. Build + smoke + behavioral probe green.
 - **Nervous breakdown**: let Spirit bottom out (≈0) and you **snap** — a ~6–10s loss of control. You're locked out of acting,

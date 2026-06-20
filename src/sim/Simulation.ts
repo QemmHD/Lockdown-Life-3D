@@ -68,6 +68,8 @@ const VICE: Record<string, { morale: number; healthCost: number; angerRelief: nu
   cig:    { morale: 0.24, healthCost: 0.03, angerRelief: 0.14, sick: 0.05, label: 'Smoke break' },
   hooch:  { morale: 0.34, healthCost: 0.08, angerRelief: 0.22, sick: 0.22, label: 'Buzzed' }
 };
+// Stage 4.16 — which attribute a training station builds (couplings shave a paired stat — see trainStat)
+const STATION_STAT: Record<string, 'strength' | 'agility' | 'skill'> = { weights: 'strength', pullup: 'agility' };
 
 // The authoritative game world. Decides what happens; render only reflects it.
 export class Simulation {
@@ -717,6 +719,26 @@ export class Simulation {
   // Stage 4.4 "25% rule": an attribute is only as good as your energy (0.75..1.0 of base).
   effStat(base: number, energy: number): number { return base * (0.75 + 0.25 * Math.max(0, Math.min(1, energy))); }
   attrs(e: Entity): Attributes | undefined { return this.ecs.get<Attributes>(e, 'Attributes'); }
+  // Stage 4.16 — training is zero-sum: building one attribute shaves a coupled one (you can never max everything)
+  private trainStat(e: Entity, stationType: string): string {
+    const a = this.attrs(e); const n = this.ecs.get<Needs>(e, 'Needs'); const s = this.social(e);
+    if (!a || !n) return 'You train.';
+    if (n.energy < 0.16) return 'Too gassed to train right now.';
+    n.energy = clamp01(n.energy - 0.15);
+    const cap = (v: number) => Math.max(30, Math.min(99, v));
+    const stat = STATION_STAT[stationType] ?? 'strength';
+    if (stat === 'strength') { a.strength = cap(a.strength + 1.2); a.agility = cap(a.agility - 0.4); a.stamina = cap(a.stamina + 0.6); }
+    else if (stat === 'agility') { a.agility = cap(a.agility + 1.2); a.strength = cap(a.strength - 0.3); a.stamina = cap(a.stamina + 0.4); }
+    else { a.skill = cap(a.skill + 1.4); if (s) s.reputation = clamp(s.reputation - 1, -100, 100); }
+    if (s) s.respect = clamp(s.respect + 1, 0, 100);
+    if (e === this.playerId) {
+      this.floatBy(e, stat === 'strength' ? '+STR' : stat === 'agility' ? '+AGI' : '+SKILL', '#ffd24a');
+      this.prog('train'); this.prog('respect', 1);
+    }
+    return stat === 'agility' ? 'You drill speed — agility up (strength eases off).'
+      : stat === 'skill' ? 'You study — skill up.'
+      : 'You hit the weights — strength up (a touch less nimble).';
+  }
 
   // add days to the sentence (misconduct caught: contraband, solitary, escape attempt)
   private addTime(days: number, reason: string) {
@@ -915,7 +937,15 @@ export class Simulation {
     switch (it.use) {
       case 'food': n.hunger = clamp01(n.hunger - it.useAmt); this.floatBy(this.playerId, 'Fed', '#e8b52e'); break;
       case 'hygiene': n.hygiene = clamp01(n.hygiene - it.useAmt); this.floatBy(this.playerId, '+Hygiene', '#9fcad8'); break;
-      case 'comfort': n.fear = clamp01(n.fear - it.useAmt); n.anger = clamp01(n.anger - it.useAmt * 0.6); n.morale = clamp01((n.morale ?? 0.6) + it.useAmt * 0.6); this.floatBy(this.playerId, '+Spirit', '#f1c40f'); break;
+      case 'comfort': {
+        n.fear = clamp01(n.fear - it.useAmt); n.anger = clamp01(n.anger - it.useAmt * 0.6); n.morale = clamp01((n.morale ?? 0.6) + it.useAmt * 0.6); this.floatBy(this.playerId, '+Spirit', '#f1c40f');
+        if (itemId === 'book' || itemId === 'magazine') {   // Stage 4.16: reading trades a sliver of standing for skill
+          const a = this.attrs(this.playerId); const s = this.social(this.playerId);
+          if (a) { a.skill = Math.min(99, a.skill + 0.8); this.floatBy(this.playerId, '+SKILL', '#7fb2ff'); }
+          if (s) s.reputation = clamp(s.reputation - 0.5, -100, 100);
+        }
+        break;
+      }
       case 'medical': n.health = clamp01(n.health + it.useAmt); { const pbb = this.brain(this.playerId); if (pbb) { pbb.injuredT = 0; pbb.bleedT = 0; } } this.floatBy(this.playerId, '+Health', '#6dff9e'); break;
       case 'vice': {
         const v = VICE[itemId] ?? { morale: it.useAmt, healthCost: 0.03, angerRelief: 0.08, sick: 0.1, label: 'Buzzed' };
@@ -1426,7 +1456,9 @@ export class Simulation {
         if (inRange && b.attackCd <= 0) {
           const atk = this.pickAttack(e, b);
           b.cphase = 'windup'; b.cTimer = ATTACKS[atk].windup; b.cResult = atk;
-          b.attackCd = ATTACKS[atk].windup + ATTACKS[atk].recover + this.rng.range(0.2, 0.6);
+          const aa = this.attrs(e); const en = this.ecs.get<Needs>(e, 'Needs');
+          const agiMul = aa && en ? (1.12 - 0.28 * this.effStat(aa.agility, en.energy) / 99) : 1;   // Stage 4.16: agile fighters recover faster
+          b.attackCd = (ATTACKS[atk].windup + ATTACKS[atk].recover) * agiMul + this.rng.range(0.2, 0.6);
           this.metrics.attacksAttempted++;
         } else {
           // defensive NPCs occasionally raise a guard between exchanges (gives blocks + a block pose)
@@ -2043,7 +2075,7 @@ export class Simulation {
         break;
       }
       case 'eat': n.hunger = clamp01(n.hunger - 0.55); this.floatBy(pl, 'Fed', '#e8b52e'); this.prog('eat'); result = `You eat at the ${o.name}.`; break;
-      case 'train': { n.energy = clamp01(n.energy - 0.15); ps.respect = clamp(ps.respect + 1, 0, 100); const a = this.attrs(pl); if (a) { a.strength = Math.min(99, a.strength + 1); a.stamina = Math.min(99, a.stamina + 0.6); } this.floatBy(pl, '+STR', '#ffd24a'); this.prog('train'); this.prog('respect', 1); result = `You train on the ${o.name}.`; break; }
+      case 'train': { result = this.trainStat(pl, o.type); break; }
       case 'work': { const before = pinv.money; result = this.doJob(o.jobRoom ?? this.roomType(o.room)); const dM = pinv.money - before; if (dM) this.floatBy(pl, `$+${dM}`, '#9fe0a0'); break; }
       case 'inspect': result = (o.type === 'door' || o.type === 'gate') ? `${o.name}: ${o.restricted ? 'restricted, staff only' : o.locked ? 'locked down' : o.open ? 'open' : 'closed (unlocked)'}.` : `You inspect the ${o.name}.`; break;
       case 'search': {
@@ -2422,7 +2454,7 @@ export class Simulation {
       case 'rest': n.sleep = clamp01(n.sleep - 0.4); n.energy = clamp01(n.energy + 0.3); pb.action = 'Resting'; this.prog('rest'); return 'You rest. Energy restored.';
       case 'wash': n.hygiene = clamp01(n.hygiene - 0.5); pb.action = 'Washing'; this.prog('wash'); return 'You clean up.';
       case 'eat': n.hunger = clamp01(n.hunger - 0.5); pb.action = 'Eating'; this.prog('eat'); return 'You eat a meal.';
-      case 'train': n.energy = clamp01(n.energy - 0.15); { const s = this.social(pl)!; s.respect = clamp(s.respect + 1, 0, 100); const a = this.attrs(pl); if (a) { a.strength = Math.min(99, a.strength + 1); a.stamina = Math.min(99, a.stamina + 0.6); } } pb.action = 'Training'; this.floatBy(pl, '+STR', '#ffd24a'); this.prog('train'); this.prog('respect', 1); return 'You train. Strength rises.';
+      case 'train': pb.action = 'Training'; return this.trainStat(pl, 'weights');
       case 'work': return this.doJob(room);
       default: return '';
     }
