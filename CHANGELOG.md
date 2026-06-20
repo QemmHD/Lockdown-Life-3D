@@ -14,6 +14,13 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.27.1-swipe — Camera rotation as a one-finger swipe (iOS)
+The v4.27.0 rotation was keyboard-only; this makes it a natural touch gesture for the iOS target. Build + smoke + probe green.
+- **One-finger swipe rotates the view when zoomed in** (the normal play distance), so you can look around your character / past walls.
+  **Pinch out to the wide overview** and one-finger drag goes back to **panning** the map. **Two-finger pinch** always zooms.
+- Tap-to-move is untouched; Q/E / ← → still rotate on desktop. Surfaced in the onboarding card + Help.
+- Version → `v4.27.1-swipe`.
+
 ## v4.27.0-view — Rotatable camera + brighter image (test feedback)
 Two things you flagged while testing. Build + smoke + probe green; render-only, no save change.
 - **Rotate the view**: **Q** / **E** (or **← / →**) now orbit the camera in both the iso overview and the zoomed character camera — so walls

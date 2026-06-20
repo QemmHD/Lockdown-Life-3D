@@ -1,7 +1,8 @@
 import { EventBus } from './EventBus';
 
-// Unified pointer/touch input. Emits: 'tap'{x,y}, 'pan'{dx,dy}, 'zoom'{factor}, 'longpress'{x,y}
-// One-finger drag = pan, two-finger pinch = zoom. Works with mouse + touch.
+// Unified pointer/touch input. Emits: 'tap'{x,y}, 'pan'{dx,dy}, 'zoom'{factor}.
+// One-finger swipe = rotate when zoomed in / pan at the overview (decided in IsoCamera.pan);
+// two-finger pinch = zoom. Mouse + touch.
 export class InputManager {
   private dragging = false;
   private moved = 0;
@@ -59,7 +60,7 @@ export class InputManager {
       this.bus.emit('pan', { dx, dy });
     } else if (e.touches.length === 2) {
       const d = this.dist(e.touches[0], e.touches[1]);
-      if (this.pinchDist) this.bus.emit('zoom', { factor: this.pinchDist / d });
+      if (this.pinchDist) this.bus.emit('zoom', { factor: this.pinchDist / d });   // two-finger pinch = zoom
       this.pinchDist = d;
     }
   };

@@ -67,12 +67,13 @@ export class IsoCamera {
     this.fwd.set(-this.offset.x, 0, -this.offset.z).normalize();
     this.right.set(this.fwd.z, 0, -this.fwd.x).normalize();
   }
-  // Q/E (and ← →) rotate the view: orbit the iso overview, or swing the character camera around.
-  rotateView(dir: number) {
-    const step = 0.13 * dir;
-    if (this._charMode) { this.charAngle += step; this.applyPersp(); }
-    else { this.isoAngle += step; this.computeBasis(); this.apply(); }
+  // Orbit the view by a continuous angle delta (radians) — two-finger swipe (touch) + Q/E (desktop).
+  rotateBy(dRad: number) {
+    if (this._charMode) { this.charAngle += dRad; this.applyPersp(); }
+    else { this.isoAngle += dRad; this.computeBasis(); this.apply(); }
   }
+  // discrete step for keyboard (Q/E, ← →)
+  rotateView(dir: number) { this.rotateBy(dir * 0.13); }
   private updateProjection() {
     const aspect = window.innerWidth / window.innerHeight;
     // allow zooming out far enough to fit the whole prison given this aspect (narrow portrait needs more)
@@ -135,12 +136,12 @@ export class IsoCamera {
 
   // manual controls
   pan(screenDx: number, screenDy: number) {
-    this.manualTimer = THEME.camera.panHold;
-    if (this._charMode) {
-      // in character mode, a horizontal drag rotates the fixed viewing direction (user-initiated only)
-      this.charAngle -= screenDx * 0.004;
+    // iOS feel: zoomed in (or character cam) → one-finger swipe ORBITS the view; at the wide overview
+    // → one-finger drag PANS the map so you can still scan the prison. Two-finger pinch always zooms.
+    if (this._charMode || this.zoom < 16) {
+      this.rotateBy(-screenDx * 0.005);          // zoomed in / focused on player → one-finger swipe rotates
     } else {
-      // direct manipulation: drag the world with your finger (content follows the finger)
+      this.manualTimer = 45;                      // overview → free roam: the camera stays where you drag it
       const scale = this.zoom / 320;
       this.target.addScaledVector(this.right, screenDx * scale);
       this.target.addScaledVector(this.fwd, screenDy * scale);
@@ -153,6 +154,7 @@ export class IsoCamera {
     } else {
       this.zoom = THREE.MathUtils.clamp(this.zoom * factor, this.minZoom, this.maxZoom);
       this.updateProjection();
+      if (this.zoom < 16) this.manualTimer = 0;   // zooming back in re-focuses the camera on the player
     }
   }
   focus(x: number, z: number) { this.target.set(x, 0, z); this.clamp(); this.apply(); }

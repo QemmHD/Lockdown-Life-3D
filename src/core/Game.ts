@@ -123,11 +123,11 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.27.0-view'
+      version: 'v4.27.1-swipe'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
-    this.bus.on('pan', ({ dx, dy }) => this.cam.pan(dx, dy));
+    this.bus.on('pan', ({ dx, dy }) => this.cam.pan(dx, dy));   // one-finger swipe → rotate (zoomed) / pan (overview), see IsoCamera.pan
     this.bus.on('zoom', ({ factor }) => this.cam.zoomBy(factor));
     this.bus.on('tap', ({ x, y }) => this.onTap(x, y));
     this.bus.on('alert', ({ text, type }) => this.hud.alert(text, type));
