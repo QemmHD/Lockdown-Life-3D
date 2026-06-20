@@ -14,6 +14,14 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.22.0-postfx — Stage 4.22 Graphics realism v2 (post-processing grade)
+A filmic finish over the whole frame — the "less cartoony" graphics ask. Build + smoke green (verified on headless swiftshader + a live screenshot); render-only, **no save change**.
+- An **EffectComposer** post stack now drives the final image: a subtle **contrast + saturation** grade, a **warm institutional tint**,
+  an **edge vignette**, and a whisper of **film grain** — the block reads grittier and more grounded, jumpsuits still pop.
+- Deliberately **depth-pass-free** (no SSAO/GTAO) so it stays fast and works everywhere, including low-end GPUs and headless rendering.
+- Swaps the camera per-frame so it grades both the iso and character cameras; resizes with the window.
+- Version → `v4.22.0-postfx`.
+
 ## v4.21.0-court — Stage 4.21 Court & witnessed-crime hearings
 The signature Hard Time twist on the sentence: your **reputation works against you at trial**. Build + smoke + probe green; save 17 → 18 (backward-compatible).
 - **Witnessed crimes go on a rap sheet**: getting caught with **contraband**, **fighting where a guard can see you**, and especially

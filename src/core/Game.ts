@@ -4,6 +4,7 @@ import { IsoCamera } from '../render/IsoCamera';
 import { RenderSync } from '../render/RenderSync';
 import { Feedback } from '../render/Feedback';
 import { CombatFX } from '../render/CombatFX';
+import { PostFX } from '../render/PostFX';
 import { AudioSystem } from '../audio/AudioSystem';
 import { buildPrison } from '../render/WorldRenderer';
 import { dressRooms } from '../render/PropRenderer';
@@ -32,6 +33,7 @@ export class Game {
   private sync: RenderSync;
   private feedback!: Feedback;
   private combatFx!: CombatFX;
+  private post!: PostFX;
   private audio = new AudioSystem();
   private hud: HUD;
   private menus!: Menus;
@@ -69,6 +71,7 @@ export class Game {
     this.objHighlight.rotation.x = -Math.PI / 2; this.objHighlight.position.y = 0.07; this.objHighlight.visible = false; this.app.scene.add(this.objHighlight);
     this.sync = new RenderSync(this.app.scene, this.sim.ecs);
     this.combatFx = new CombatFX(this.app.scene);
+    this.post = new PostFX(this.app.renderer, this.app.scene, this.cam.activeCamera);
     this.feedback = new Feedback();
     // character-focused camera: clamp to the prison, follow the player prisoner
     this.cam.setBounds(this.sim.map.width / 2 - 5, this.sim.map.height / 2 - 5);
@@ -118,7 +121,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.21.0-court'
+      version: 'v4.22.0-postfx'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -136,7 +139,7 @@ export class Game {
     this.bus.on('alert', ({ type }) => this.audio.alert(type));
     this.bus.on('actionResult', ({ text }) => this.audio.result(text));   // confirm on success, soft 'no' on failure
 
-    const onResize = () => { this.app.resize(); this.cam.resize(); };
+    const onResize = () => { this.app.resize(); this.cam.resize(); this.post.setSize(window.innerWidth, window.innerHeight); };
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', () => setTimeout(onResize, 250));   // iOS settles after rotate
     window.visualViewport?.addEventListener('resize', onResize);                     // iOS toolbar show/hide
@@ -572,7 +575,8 @@ export class Game {
     // run end: sentence served (release), escape, or death → show the verdict card once
     if (this.sim.runEnd && !this.endingShown && !this.menus.isOpen()) { this.endingShown = true; this.menus.showEnding(this.sim.runEnd); this.paused = true; }
 
-    this.app.renderer.render(this.app.scene, this.cam.activeCamera);
+    this.post.setCamera(this.cam.activeCamera);
+    this.post.render(t);
     requestAnimationFrame(this.loop);
   };
 }
