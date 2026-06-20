@@ -18,6 +18,7 @@ export interface MenuHooks {
   onUseItem: (id: string) => void;
   onDropItem: (id: string) => void;
   onStashItem: (id: string) => void;
+  onCraft: (id: string) => void;
   onBuy: (seller: number, id: string) => void;
   onSell: (buyer: number, id: string) => void;
   tradeData: (seller: number) => any;
@@ -70,6 +71,7 @@ export class Menus {
     if (a === 'use') { this.hooks.onUseItem(el.dataset.id!); this.render(); return; }
     if (a === 'drop') { this.hooks.onDropItem(el.dataset.id!); this.render(); return; }
     if (a === 'stash') { this.hooks.onStashItem(el.dataset.id!); this.render(); return; }
+    if (a === 'craft') { this.hooks.onCraft(el.dataset.id!); this.render(); return; }
     if (a === 'closetrade') { this.hooks.onResume(); return; }
     if (a === 'accept-invite') { this.hooks.onAcceptInvite(); this.render(); return; }
     if (a === 'decline-invite') { this.hooks.onDeclineInvite(); this.render(); return; }
@@ -249,7 +251,13 @@ export class Menus {
         <span class="m-inv-act">${it.usable ? `<button class="su-card on" data-m="use" data-id="${it.id}">Use</button>` : ''}${it.contraband ? `<button class="su-card" data-m="stash" data-id="${it.id}">Stash</button>` : ''}<button class="su-card" data-m="drop" data-id="${it.id}">Drop</button></span></div>
       <div class="m-item-s">value $${it.value} · risk ${Math.round(it.risk * 100)}% · hide ${Math.round(it.concealment * 100)}% · demand ${it.demand}%${it.combat ? ` · ⚔${it.combat}` : ''} · ${it.category}</div>
     </div>`).join('');
-    return `<div class="m-h">Inventory</div>${warn}${rows}<div class="m-sub">Use items to manage needs; stash contraband near a bed/locker/shelf; sell via Trade.</div>`;
+    const craft = (s.crafting && s.crafting.length)
+      ? `<div class="m-h" style="margin-top:10px">🔧 Workshop</div>` + s.crafting.map((c: any) => `<div class="m-inv">
+        <div class="m-inv-top"><span class="m-item-n">${c.outIcon} ${c.outName}</span>
+          <span class="m-inv-act">${c.canMake ? `<button class="su-card on" data-m="craft" data-id="${c.id}">Craft</button>` : `<button class="su-card" disabled>Skill ${c.minSkill}</button>`}</span></div>
+        <div class="m-item-s">${c.inputs}${c.canMake ? '' : ' · need more skill'}</div></div>`).join('')
+      : '';
+    return `<div class="m-h">Inventory</div>${warn}${rows}${craft}<div class="m-sub">Use items to manage needs; stash contraband near a bed/locker/shelf; sell via Trade. Combine parts in the Workshop.</div>`;
   }
   private gangTab(s: any): string {
     const f = s.faction;

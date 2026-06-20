@@ -14,6 +14,16 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.20.0-crafting — Stage 4.20 Crafting (combine two items into something better)
+A named Hard Time pillar, and the make-side of the contraband loop. Build + smoke + probe green; render/UI only over existing data — no save change.
+- A **🔧 Workshop** panel in the Inventory tab lists every recipe you currently hold the parts for. **Skill-gated**: lower-skill recipes
+  show a Craft button, higher ones show the skill you still need.
+- Recipes: **Ferment Hooch** (snack ×2), **Sharpen a Shiv** (part ×2), **Fashion a Pipe** (tool + part), **Hone a Blade** (shiv + part),
+  **Rig a Phone** (batteries + part) — turning cheap junk into vices, weapons, and the rare phone.
+- **Risk + growth**: success scales with Skill (≈60–95%); a botched attempt **wastes the parts**; crafting contraband nudges suspicion,
+  and every craft teaches you a little **Skill**. Ties the trained Skill stat, the economy, and the new vices together.
+- Version → `v4.20.0-crafting`.
+
 ## v4.19.0-throw — Stage 4.19 Throw weapons + balance & AI hardening (adversarial-review pass)
 "Anything's a weapon" gets the throwing half, and a multi-agent review pass tightened the last five stages. Build + smoke + probe green; save bumped 16 → 17 (backward-compatible).
 - **Throw your weapon**: a **Throw** button appears in a fight when you're armed (shiv/blade/pipe/tool). Hurl it for a big burst (and a

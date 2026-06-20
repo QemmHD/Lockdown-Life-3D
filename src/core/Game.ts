@@ -111,13 +111,14 @@ export class Game {
       onUseItem: (id) => { const r = this.sim.useItem(id); if (r) this.hud.alert(r, 'info'); this.panelDirty = true; },
       onDropItem: (id) => { const r = this.sim.dropItem(id); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; },
       onStashItem: (id) => { const r = this.sim.stashNearest(id); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; },
+      onCraft: (id) => { const r = this.sim.craft(id); if (r) this.hud.alert(r, 'info'); this.panelDirty = true; },
       onBuy: (seller, id) => { const r = this.sim.buyItem(seller, id); if (r) this.hud.alert(r, 'trade'); },
       onSell: (buyer, id) => { const r = this.sim.sellItem(buyer, id); if (r) this.hud.alert(r, 'trade'); },
       tradeData: (seller) => this.sim.tradePanel(seller),
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.19.0-throw'
+      version: 'v4.20.0-crafting'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 

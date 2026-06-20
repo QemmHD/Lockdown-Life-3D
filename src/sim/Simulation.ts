@@ -70,6 +70,15 @@ const VICE: Record<string, { morale: number; healthCost: number; angerRelief: nu
 };
 // Stage 4.16 — which attribute a training station builds (couplings shave a paired stat — see trainStat)
 const STATION_STAT: Record<string, 'strength' | 'agility' | 'skill'> = { weights: 'strength', pullup: 'agility' };
+// Stage 4.20 — crafting recipes: combine two carried items into something better (SKILL-gated, abstract)
+interface Recipe { id: string; a: string; b: string; out: string; minSkill: number; label: string; }
+const RECIPES: Recipe[] = [
+  { id: 'ferment', a: 'snack', b: 'snack', out: 'hooch', minSkill: 35, label: 'Ferment Hooch' },
+  { id: 'sharpen', a: 'part', b: 'part', out: 'shiv', minSkill: 40, label: 'Sharpen a Shiv' },
+  { id: 'pipe', a: 'tool', b: 'part', out: 'club', minSkill: 45, label: 'Fashion a Pipe' },
+  { id: 'hone', a: 'shiv', b: 'part', out: 'blade', minSkill: 55, label: 'Hone a Blade' },
+  { id: 'rig', a: 'batteries', b: 'part', out: 'phone', minSkill: 60, label: 'Rig a Phone' }
+];
 
 // The authoritative game world. Decides what happens; render only reflects it.
 export class Simulation {
@@ -971,6 +980,43 @@ export class Simulation {
     this.bus.emit('actionResult', { text: `You use the ${it.name}.` });
     return `Used ${it.name}.`;
   }
+  // ---- Stage 4.20: crafting ----
+  private hasInputs(items: string[], a: string, b: string): boolean {
+    return a === b ? items.filter((x) => x === a).length >= 2 : items.includes(a) && items.includes(b);
+  }
+  // recipes the player currently has parts for (with a skill-gate flag) — for the Workshop menu
+  craftRecipes() {
+    const inv = this.inv(this.playerId); if (!inv) return [];
+    const skill = this.effStat(this.attrs(this.playerId)?.skill ?? 30, this.ecs.get<Needs>(this.playerId, 'Needs')?.energy ?? 1);
+    return RECIPES.filter((r) => this.hasInputs(inv.items, r.a, r.b)).map((r) => {
+      const out = ITEMS[r.out];
+      return { id: r.id, outName: out?.name ?? r.out, outIcon: out?.icon ?? '▪',
+        inputs: `${ITEMS[r.a]?.icon ?? ''} ${ITEMS[r.a]?.name ?? r.a} + ${ITEMS[r.b]?.icon ?? ''} ${ITEMS[r.b]?.name ?? r.b}`,
+        canMake: skill >= r.minSkill, minSkill: Math.round(r.minSkill) };
+    });
+  }
+  craft(recipeId: string): string {
+    const r = RECIPES.find((x) => x.id === recipeId); if (!r) return '';
+    const inv = this.inv(this.playerId); if (!inv) return '';
+    if (!this.hasInputs(inv.items, r.a, r.b)) return 'You no longer have the parts.';
+    const skill = this.effStat(this.attrs(this.playerId)?.skill ?? 30, this.ecs.get<Needs>(this.playerId, 'Needs')?.energy ?? 1);
+    const out = ITEMS[r.out];
+    if (skill < r.minSkill) return `You need more skill (${Math.round(r.minSkill)}) for the ${out?.name ?? r.out}.`;
+    inv.items.splice(inv.items.indexOf(r.a), 1);
+    inv.items.splice(inv.items.indexOf(r.b), 1);   // second find removes the other copy when a === b
+    this.metrics.itemsUsed++;
+    if (this.rng.float() >= Math.min(0.95, 0.6 + (skill - r.minSkill) / 120)) {
+      this.floatBy(this.playerId, 'Botched', '#ff7a6a');
+      this.bus.emit('actionResult', { text: `You ruin the parts making the ${out?.name}.` });
+      return `Botched the ${out?.name}.`;
+    }
+    inv.items.push(r.out);
+    const at = this.attrs(this.playerId); if (at) at.skill = Math.min(99, at.skill + 0.3);   // learning by doing
+    if (out?.contraband) this.social(this.playerId)!.suspicion = clamp(this.social(this.playerId)!.suspicion + 3, 0, 100);
+    this.floatBy(this.playerId, `+${out?.name ?? r.out}`, '#6dff9e');
+    this.bus.emit('actionResult', { text: `You craft a ${out?.name}.` });
+    return `Crafted ${out?.name}.`;
+  }
   // stash a specific item in the nearest reachable stash spot with room (menu convenience)
   stashNearest(itemId: string): string {
     const pinv = this.inv(this.playerId)!; const i = pinv.items.indexOf(itemId); if (i < 0) return '';
@@ -1047,7 +1093,7 @@ export class Simulation {
       goals: this.objectives.filter((o) => o.gang).map((o) => ({ text: o.text, progress: o.progress, goal: o.goal, done: o.done })),
       crewOffers: this.crewOffers()
     };
-    return { stats, tier, progression: this.progression, objectives: this.objectives, relationships, inventory, gangs, faction, contrabandCarried: inv.items.some(isContraband) };
+    return { stats, tier, progression: this.progression, objectives: this.objectives, relationships, inventory, gangs, faction, crafting: this.craftRecipes(), contrabandCarried: inv.items.some(isContraband) };
   }
   private relWordSim(v: number) { return v <= -50 ? 'enemy' : v <= -15 ? 'dislikes you' : v < 15 ? 'neutral' : v < 50 ? 'friendly' : 'ally'; }
   private standingWord(v: number) { return v <= -30 ? 'threatened' : v <= -10 ? 'disliked' : v < 12 ? 'neutral' : v < 40 ? 'respected' : 'watched'; }
