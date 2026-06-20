@@ -1464,7 +1464,7 @@ export class Simulation {
     const armor = (this.inv(foe)?.items ?? []).map((id) => ITEMS[id]?.armor ?? 0).reduce((a, c) => Math.max(a, c), 0);
     const aatt = this.attrs(e); const aen = this.ecs.get<Needs>(e, 'Needs')!;
     const strMul = aatt ? (0.7 + this.effStat(aatt.strength, aen.energy) / 99 * 0.6) : 1;   // ~0.88x..1.3x by effective strength
-    const amor = aen.morale ?? 0.6; const moraleMul = amor > 0.8 ? 1.15 : amor < 0.2 ? 0.82 : 1;   // adrenaline rush / breakdown
+    const amor = aen.morale ?? 0.6; const moraleMul = amor > 0.9 ? 1.28 : amor > 0.8 ? 1.15 : amor < 0.2 ? 0.82 : 1;   // adrenaline rush / finisher / breakdown
     let dmg = this.rng.range(ATTACKS[atk].dmgMin, ATTACKS[atk].dmgMax) * (b.traits.includes('tough') ? 1.2 : 1) * (b.traits.includes('weak') ? 0.7 : 1) * strMul * moraleMul;
     dmg += weapon * 0.025; if (outcome === 'glancing') dmg *= 0.45;
     if (b.injuredT) dmg *= 0.7;   // an injured attacker hits softer
@@ -1481,7 +1481,9 @@ export class Simulation {
     this.nudge(fp, Math.sin(ang) * ATTACKS[atk].knockback * 0.6, Math.cos(ang) * ATTACKS[atk].knockback * 0.6);
     const blunt = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.wKnock ?? 0).reduce((a, c) => Math.max(a, c), 0);
     const heavy = ATTACKS[atk].knockback > 0.5 || dmg > 0.16;
-    if (fn.health <= 0.2 || (heavy && fn.energy < 0.2) || (blunt > 0 && fn.health < 0.5 && this.rng.float() < blunt)) { this.knockDown(foe, fb, e, b); }
+    const finisher = b.isPlayer && amor > 0.9 && fn.health < 0.42 && !fb.blockT;   // Stage 4.15: adrenaline finisher
+    if (finisher) this.bus.emit('float', { x: fp.x, z: fp.z, text: 'ADRENALINE!', color: '#ffd24a' });
+    if (fn.health <= 0.2 || (heavy && fn.energy < 0.2) || (blunt > 0 && fn.health < 0.5 && this.rng.float() < blunt) || finisher) { this.knockDown(foe, fb, e, b); }
     else { fb.cphase = heavy ? 'stumble' : 'hitReact'; fb.cTimer = heavy ? STUMBLE : HITREACT; fn.fear = clamp01(fn.fear + 0.06); }
     this.faceWatchers(fp.x, fp.z);
     this.crowdReact(fp.x, fp.z);
@@ -1632,11 +1634,13 @@ export class Simulation {
   pos(e: Entity) { return this.ecs.get<Position>(e, 'Position'); }
   private dist(a: Entity, b: Entity) { const pa = this.pos(a), pb = this.pos(b); return pa && pb ? Math.hypot(pa.x - pb.x, pa.z - pb.z) : 999; }
   hasContraband(e: Entity) { return (this.inv(e)?.items ?? []).some(isContraband); }
+  // Stage 4.15 — the player is locked out of manual control during a nervous breakdown
+  playerStunned() { const b = this.brain(this.playerId); return !!b && b.state === 'breakdown'; }
 
   // direct player movement (tap-to-move). Returns the world point walked to, or null.
   playerMoveTo(wx: number, wz: number): { x: number; z: number } | null {
     const pl = this.playerId; const pb = this.brain(pl)!;
-    if (pb.state === 'solitary' || pb.state === 'down' || pb.state === 'escorted') return null;
+    if (pb.state === 'solitary' || pb.state === 'down' || pb.state === 'escorted' || pb.state === 'breakdown') return null;
     if (this.act && this.act.phase === 'perform') return null;   // locked mid-action
     this.releaseObj(); this.act = null;                          // tapping cancels a queued action
     if (pb.state === 'fight') { pb.state = 'idle'; pb.foe = undefined; }
@@ -2099,6 +2103,28 @@ export class Simulation {
         const t = this.map.tileXY(k); const w = this.map.toWorld(t.x, t.y); pp.x = w.x; pp.z = w.z;
         this.bus.emit('alert', { type: 'guard', text: 'You were released from solitary.' });
       }
+      return;
+    }
+
+    // Stage 4.15 — nervous breakdown: rock-bottom Spirit costs you control of yourself
+    const pn = this.ecs.get<Needs>(pl, 'Needs');
+    if (pb.state === 'breakdown') {
+      pb.breakdownT = (pb.breakdownT ?? 0) - dt;
+      pb.action = 'Breaking Down';
+      if (pn) { pn.anger = clamp01(pn.anger + dt * 0.12); pn.health = clamp01(pn.health - dt * 0.01); }
+      this.ecs.get<Agent>(pl, 'Agent')!.path = null;
+      if ((pb.breakdownT ?? 0) <= 0) {
+        pb.state = 'idle'; pb.action = 'Shaken'; pb.breakdownT = undefined;
+        if (pn) pn.morale = Math.max(pn.morale ?? 0.6, 0.34);   // come back from the edge
+        this.bus.emit('alert', { type: 'player', text: 'You pull yourself back together.' });
+      }
+      return;   // no manual control mid-breakdown
+    }
+    if (pn && (pn.morale ?? 0.6) <= 0.08 && pb.state !== 'fight' && pb.state !== 'down' && pb.state !== 'beingSearched' && !this.runEnd) {
+      pb.state = 'breakdown'; pb.breakdownT = this.rng.range(6, 10); pb.action = 'Breaking Down';
+      this.releaseObj(); this.act = null; this.ecs.get<Agent>(pl, 'Agent')!.path = null;
+      this.bus.emit('alert', { type: 'critical', text: 'You snap — a nervous breakdown. You lose control…' });
+      this.floatBy(pl, 'Breakdown', '#c08adf');
       return;
     }
 

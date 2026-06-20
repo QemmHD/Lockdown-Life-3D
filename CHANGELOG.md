@@ -14,6 +14,16 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.15.0-mind — Stage 4.15 Mind states (breakdown & adrenaline finisher)
+The Spirit bar now has real drama at both ends — the missing "your mind can break / your mind can carry you" beat. Build + smoke + behavioral probe green.
+- **Nervous breakdown**: let Spirit bottom out (≈0) and you **snap** — a ~6–10s loss of control. You're locked out of acting,
+  thrash in place (anger climbs, a little health bleeds), then **pull yourself back together** with Spirit nudged off the floor.
+  A hard, legible punishment for neglecting your head — manage it with food/hygiene/rest and **vices**.
+- **Adrenaline finisher**: ride Spirit **above 90%** into a fight and your hits land **+28%** (was +15% over 80%), and a solid
+  blow on a staggered, unguarded foe **finishes them outright** ("ADRENALINE!") — the high-Spirit payoff to match the breakdown risk.
+- Transient `breakdown` state on the existing Brain — **no save-format change**; a save made mid-breakdown loads back to normal.
+- Version → `v4.15.0-mind`.
+
 ## v4.14.0-vices — Stage 4.14 Vices (smoking & drinking feed the Spirit bar)
 Hard Time's vice loop — something now feeds the Spirit/Mind bar from the demand side of contraband. Build + smoke green.
 - Three consumables: **☕ Instant Coffee** (legit), **🚬 Cigarette**, and **🍶 Prison Hooch** (both contraband). Use one for an

@@ -29,6 +29,7 @@ export class RenderSync {
   }
 
   private icon(b: Brain, n: Needs): string {
+    if (b.state === 'breakdown') return '😵';
     if (b.state === 'fight') return '⚔️';
     if (b.state === 'down') return '💫';
     if (b.state === 'respond') return '❗';

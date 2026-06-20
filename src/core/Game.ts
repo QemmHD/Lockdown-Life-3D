@@ -114,7 +114,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.14.0-vices'
+      version: 'v4.15.0-mind'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -406,6 +406,7 @@ export class Game {
   private static GANG_KEYS = ['askgang', 'acceptinvite', 'declineinvite', 'helpmember'];
   private doAction(key: string) {
     this.panelDirty = true;
+    if (this.sim.playerStunned()) { this.hud.alert("You're not in control of yourself!", 'warning'); return; }
     if (this.selectedObj) {
       const status = this.sim.requestObjectAction(this.selectedObj, key);
       if (status) this.hud.alert(status, 'info');

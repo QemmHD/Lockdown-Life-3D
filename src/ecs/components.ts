@@ -22,7 +22,7 @@ export interface Needs {
 
 export type BrainState = 'idle' | 'goto' | 'wander' | 'fight' | 'respond' | 'down' | 'solitary'
   | 'talking' | 'threatening' | 'trading' | 'working' | 'resting' | 'washing' | 'eating' | 'training'
-  | 'searching' | 'beingSearched' | 'escorting' | 'escorted' | 'backoff';
+  | 'searching' | 'beingSearched' | 'escorting' | 'escorted' | 'backoff' | 'breakdown';
 
 export interface Brain {
   role: 'prisoner' | 'guard';
@@ -61,6 +61,7 @@ export interface Brain {
   pendingAtk?: string;     // player-queued attack type (strike/heavy/shove)
   lastAttacker?: Entity;   // who last struck this character
   injuredT?: number;       // ---- Stage 4.1 ---- seconds of lingering injury (weaker hits) after a beating
+  breakdownT?: number;     // ---- Stage 4.15 ---- seconds left in a nervous breakdown (transient loss of control)
   bleedT?: number;         // ---- Stage 4.7 ---- seconds left bleeding from a sharp-weapon wound
   bleedRate?: number;      // health drained per second while bleeding
 }
