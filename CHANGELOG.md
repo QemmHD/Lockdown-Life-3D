@@ -14,6 +14,17 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.25.0-grapple — Stage 4.25 Grapple throws (the wrestling verb)
+The central Hard Time brawling move that pays off a Strength build. Build + smoke + probe green; no save change.
+- New **Grapple** button in a fight: contest your **effective Strength** against the foe's strength + nimbleness. Win and you **slam them
+  down** — solid damage and a near-certain **knockdown**; lose (they're stronger, faster, or blocking) and you **overcommit and are left
+  open**. Strength finally has a signature payoff beyond raw hit damage.
+- Resolved inside the existing phase machine (windup → throw) so it animates and spaces like any other move; armor still soaks part of a
+  slam, and a thrown foe routes through the normal knockdown/lethality path.
+- Sits alongside Strike / Heavy / Shove / Throw / Block as a real tactical choice (grab beats a turtling blocker's trades; risky vs a
+  faster opponent).
+- Version → `v4.25.0-grapple`.
+
 ## v4.24.0-commissary — Stage 4.24 Commissary + review-pass fixes
 The honest money sink, plus a second adversarial-review pass over the recent stages. Build + smoke + probe green; no save change.
 - **Commissary** tab in the pause menu: buy legit goods (food, soap, towel, coffee, cards, book, batteries, wraps) at **honest base

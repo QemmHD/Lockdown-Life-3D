@@ -3,7 +3,7 @@
 // phases read-only. Deliberately abstract game combat — no real-world fighting detail.
 
 export type CombatPhase = 'squareUp' | 'windup' | 'strike' | 'block' | 'dodge' | 'hitReact' | 'stumble' | 'recover';
-export type AttackType = 'quick' | 'heavy' | 'shove';
+export type AttackType = 'quick' | 'heavy' | 'shove' | 'grab';
 export type CombatOutcome = 'hit' | 'glancing' | 'blocked' | 'dodged' | 'miss' | 'knockdown';
 
 export interface AttackDef {
@@ -13,7 +13,9 @@ export interface AttackDef {
 export const ATTACKS: Record<AttackType, AttackDef> = {
   quick: { windup: 0.34, recover: 0.42, stamina: 0.04, hitChance: 0.74, dmgMin: 0.07, dmgMax: 0.13, knockback: 0.22, repWin: 1 },
   heavy: { windup: 0.70, recover: 0.70, stamina: 0.10, hitChance: 0.54, dmgMin: 0.15, dmgMax: 0.26, knockback: 0.75, repWin: 2 },
-  shove: { windup: 0.24, recover: 0.40, stamina: 0.03, hitChance: 0.86, dmgMin: 0.00, dmgMax: 0.05, knockback: 0.95, repWin: 0 }
+  shove: { windup: 0.24, recover: 0.40, stamina: 0.03, hitChance: 0.86, dmgMin: 0.00, dmgMax: 0.05, knockback: 0.95, repWin: 0 },
+  // Stage 4.25 grapple: STR-contested throw resolved specially in Simulation.resolveGrab (slam + knockdown on a win)
+  grab: { windup: 0.52, recover: 0.85, stamina: 0.12, hitChance: 0.70, dmgMin: 0.14, dmgMax: 0.24, knockback: 0.45, repWin: 2 }
 };
 
 export const COMBAT_SPACING = 1.15;     // desired distance between two fighters

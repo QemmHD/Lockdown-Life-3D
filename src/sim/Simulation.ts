@@ -1617,6 +1617,7 @@ export class Simulation {
     b.cphase = 'strike'; b.cTimer = 0.18;
     const atk = (b.cResult as AttackType) in ATTACKS ? (b.cResult as AttackType) : 'quick';
     const an = this.ecs.get<Needs>(e, 'Needs')!; an.energy = clamp01(an.energy - ATTACKS[atk].stamina);
+    if (atk === 'grab') { this.resolveGrab(e, b, foe, fb, fp); return; }   // Stage 4.25: STR-contested throw
     const fn = this.ecs.get<Needs>(foe, 'Needs')!;
     const def = { fear: fn.fear, energy: fn.energy, coward: fb.traits.includes('cowardly') || fb.traits.includes('weak'), blocking: !!fb.blockT };
     const outcome = resolveDefense(atk, def, this.rng.float(), this.rng.float(), this.rng.float());
@@ -1656,6 +1657,31 @@ export class Simulation {
     if (finisher) this.bus.emit('float', { x: fp.x, z: fp.z, text: 'ADRENALINE!', color: '#ffd24a' });
     if (fn.health <= 0.2 || (heavy && fn.energy < 0.2) || (blunt > 0 && fn.health < 0.5 && this.rng.float() < blunt) || finisher) { this.knockDown(foe, fb, e, b); }
     else { fb.cphase = heavy ? 'stumble' : 'hitReact'; fb.cTimer = heavy ? STUMBLE : HITREACT; fn.fear = clamp01(fn.fear + 0.06); }
+    this.faceWatchers(fp.x, fp.z);
+    this.crowdReact(fp.x, fp.z);
+  }
+  // Stage 4.25 — a grapple throw: contest effective Strength vs their strength + nimbleness; a win slams them down
+  private resolveGrab(e: Entity, b: Brain, foe: Entity, fb: Brain, fp: Position) {
+    const aStr = this.effStat(this.attrs(e)?.strength ?? 30, this.ecs.get<Needs>(e, 'Needs')!.energy);
+    const dStr = this.effStat(this.attrs(foe)?.strength ?? 30, this.ecs.get<Needs>(foe, 'Needs')!.energy);
+    const dAgi = this.effStat(this.attrs(foe)?.agility ?? 30, this.ecs.get<Needs>(foe, 'Needs')!.energy);
+    const pWin = clamp01(0.5 + (aStr - (dStr * 0.7 + dAgi * 0.3)) / 120);
+    const an = this.ecs.get<Needs>(e, 'Needs')!; const fn = this.ecs.get<Needs>(foe, 'Needs')!;
+    if (fb.blockT || this.rng.float() > pWin) {                 // shrugged off — you overcommit and are left open
+      this.bus.emit('float', { x: fp.x, z: fp.z, text: 'Shrugged off', color: '#dfe3e6' });
+      b.cphase = 'stumble'; b.cTimer = STUMBLE; an.fear = clamp01(an.fear + 0.05);
+      return;
+    }
+    this.metrics.hits++;
+    const armor = (this.inv(foe)?.items ?? []).map((i) => ITEMS[i]?.armor ?? 0).reduce((a, c) => Math.max(a, c), 0);
+    const dmg = this.rng.range(ATTACKS.grab.dmgMin, ATTACKS.grab.dmgMax) * (b.traits.includes('tough') ? 1.15 : 1) * (1 - armor * 0.6);
+    fn.health = clamp01(fn.health - dmg);
+    fb.lastAttacker = e;
+    this.bus.emit('impact', { x: fp.x, z: fp.z });
+    this.bus.emit('blood', { x: fp.x, z: fp.z });
+    this.bus.emit('float', { x: fp.x, z: fp.z, text: `SLAM -${Math.round(dmg * 100)}`, color: '#ff7a6a' });
+    if (fn.health <= 0.25 || this.rng.float() < 0.8) this.knockDown(foe, fb, e, b);   // a throw usually puts them down
+    else { fb.cphase = 'stumble'; fb.cTimer = STUMBLE; fn.fear = clamp01(fn.fear + 0.14); }
     this.faceWatchers(fp.x, fp.z);
     this.crowdReact(fp.x, fp.z);
   }
@@ -2570,9 +2596,9 @@ export class Simulation {
     if (pb.state === 'fight') {
       const acts = [
         { key: 'strike', label: 'Strike' }, { key: 'heavy', label: 'Heavy' }, { key: 'shove', label: 'Shove' },
-        { key: 'block', label: 'Block' }, { key: 'backoff', label: 'Back Off' }
+        { key: 'grab', label: 'Grapple' }, { key: 'block', label: 'Block' }, { key: 'backoff', label: 'Back Off' }
       ];
-      if (this.playerHasThrowable()) acts.splice(3, 0, { key: 'throw', label: 'Throw' });   // Stage 4.19
+      if (this.playerHasThrowable()) acts.splice(4, 0, { key: 'throw', label: 'Throw' });   // Stage 4.19 (before Block)
       return acts;
     }
     return [];
@@ -2586,6 +2612,7 @@ export class Simulation {
       case 'strike': pb.pendingAtk = 'quick'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Strike!';
       case 'heavy': pb.pendingAtk = 'heavy'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Heavy swing!';
       case 'shove': pb.pendingAtk = 'shove'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Shove!';
+      case 'grab': pb.pendingAtk = 'grab'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Grapple!';
       case 'throw': return this.throwWeapon();
       case 'block': pb.blockT = 0.9; pb.cphase = 'block'; pb.cTimer = 0.5; this.bubble(pl, '🛡️', 'search', 0.8); return 'Blocking.';
       case 'backoff': { const foe = pb.foe; this.endFighter(pl, pb); pb.action = 'Idle'; if (foe != null) { const fb = this.brain(foe); if (fb && fb.state === 'fight') { fb.state = 'idle'; fb.foe = undefined; fb.cphase = undefined; } } this.social(pl)!.reputation = clamp(this.social(pl)!.reputation - 1, -100, 100); return 'You back off.'; }
