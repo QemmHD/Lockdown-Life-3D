@@ -14,6 +14,22 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.19.0-throw — Stage 4.19 Throw weapons + balance & AI hardening (adversarial-review pass)
+"Anything's a weapon" gets the throwing half, and a multi-agent review pass tightened the last five stages. Build + smoke + probe green; save bumped 16 → 17 (backward-compatible).
+- **Throw your weapon**: a **Throw** button appears in a fight when you're armed (shiv/blade/pipe/tool). Hurl it for a big burst (and a
+  real knockdown shot — blunt pipes especially), with a splatter and heat spike — **but you're unarmed for the rest of the brawl**. A
+  genuine risk/reward: spend the shiv now, or keep it for the bleed.
+- **Review-pass fixes** (from an adversarial multi-agent review of v4.14–4.18):
+  - **Training is now actually zero-sum**: stations shave their paired stat harder and gains hit **diminishing returns near the cap**, so
+    you specialize a build instead of farming STR/AGI/STA all to 99. Respect from training slowed.
+  - **Vices can't pin Spirit anymore**: vice morale gain **diminishes the fuller you already are**, and every vice now **costs sleep**
+    (coffee most) — no more zero-downside Spirit fountain holding the adrenaline band for free.
+  - **Adrenaline finisher reined in**: lower health threshold (30%) and now a **chance**, not a guaranteed auto-KO.
+  - **Guards never get stuck investigating**: they give up and stand down if the fight scatters / the suspect is unreachable or hauled to
+    solitary, and a lockdown cleanly preempts an in-progress investigation.
+  - **No breakdown mid-escort**; save **version 17**.
+- Version → `v4.19.0-throw`.
+
 ## v4.18.0-guards — Stage 4.18 Smarter guards (notice → investigate → respond)
 Guards no longer teleport-react to violence from across the block — positioning and cover finally matter. Build + smoke + probe green.
 - A guard who **sees** a fight (range + line-of-sight) now **clocks it, pauses to notice** (a short, distance-scaled beat — closer

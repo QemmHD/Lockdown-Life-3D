@@ -62,6 +62,7 @@ export interface Brain {
   lastAttacker?: Entity;   // who last struck this character
   injuredT?: number;       // ---- Stage 4.1 ---- seconds of lingering injury (weaker hits) after a beating
   breakdownT?: number;     // ---- Stage 4.15 ---- seconds left in a nervous breakdown (transient loss of control)
+  investigateGiveup?: number; // ---- Stage 4.18 ---- seconds a guard chases a scattered fight before standing down
   bleedT?: number;         // ---- Stage 4.7 ---- seconds left bleeding from a sharp-weapon wound
   bleedRate?: number;      // health drained per second while bleeding
 }

@@ -63,10 +63,10 @@ const OBJ_ICON: Record<string, string> = { rest: '😴', wash: '🚿', eat: '�
 // shown when a player convenience action finds no reachable matching object
 const SELF_REASON: Record<string, string> = { rest: 'Find a bed.', wash: 'No reachable shower or sink.', eat: 'No food station nearby.', train: 'No training equipment nearby.', work: 'No work object nearby.' };
 // Stage 4.14 — vices: a hit of Spirit (morale) now, paid for in health + a sickness gamble. Feeds the adrenaline buff (>80% morale = +15% dmg).
-const VICE: Record<string, { morale: number; healthCost: number; angerRelief: number; sick: number; label: string }> = {
-  coffee: { morale: 0.18, healthCost: 0.00, angerRelief: 0.06, sick: 0.00, label: 'Caffeinated' },
-  cig:    { morale: 0.24, healthCost: 0.03, angerRelief: 0.14, sick: 0.05, label: 'Smoke break' },
-  hooch:  { morale: 0.34, healthCost: 0.08, angerRelief: 0.22, sick: 0.22, label: 'Buzzed' }
+const VICE: Record<string, { morale: number; healthCost: number; angerRelief: number; sick: number; sleepCost: number; label: string }> = {
+  coffee: { morale: 0.18, healthCost: 0.00, angerRelief: 0.06, sick: 0.00, sleepCost: 0.12, label: 'Caffeinated' },
+  cig:    { morale: 0.24, healthCost: 0.03, angerRelief: 0.14, sick: 0.05, sleepCost: 0.04, label: 'Smoke break' },
+  hooch:  { morale: 0.34, healthCost: 0.08, angerRelief: 0.22, sick: 0.22, sleepCost: 0.10, label: 'Buzzed' }
 };
 // Stage 4.16 — which attribute a training station builds (couplings shave a paired stat — see trainStat)
 const STATION_STAT: Record<string, 'strength' | 'agility' | 'skill'> = { weights: 'strength', pullup: 'agility' };
@@ -727,10 +727,12 @@ export class Simulation {
     n.energy = clamp01(n.energy - 0.15);
     const cap = (v: number) => Math.max(30, Math.min(99, v));
     const stat = STATION_STAT[stationType] ?? 'strength';
-    if (stat === 'strength') { a.strength = cap(a.strength + 1.2); a.agility = cap(a.agility - 0.4); a.stamina = cap(a.stamina + 0.6); }
-    else if (stat === 'agility') { a.agility = cap(a.agility + 1.2); a.strength = cap(a.strength - 0.3); a.stamina = cap(a.stamina + 0.4); }
-    else { a.skill = cap(a.skill + 1.4); if (s) s.reputation = clamp(s.reputation - 1, -100, 100); }
-    if (s) s.respect = clamp(s.respect + 1, 0, 100);
+    const dim = (cur: number) => 0.3 + 0.7 * Math.max(0, (99 - cur) / 69);   // diminishing returns as a stat nears the cap
+    // genuinely zero-sum: each station shaves its paired stat harder than it builds near the top, so you specialize
+    if (stat === 'strength') { a.strength = cap(a.strength + 1.2 * dim(a.strength)); a.agility = cap(a.agility - 0.6); }
+    else if (stat === 'agility') { a.agility = cap(a.agility + 1.2 * dim(a.agility)); a.strength = cap(a.strength - 0.5); a.stamina = cap(a.stamina + 0.4 * dim(a.stamina)); }
+    else { a.skill = cap(a.skill + 1.4 * dim(a.skill)); if (s) s.reputation = clamp(s.reputation - 1, -100, 100); }
+    if (s) s.respect = clamp(s.respect + 0.5, 0, 100);
     if (e === this.playerId) {
       this.floatBy(e, stat === 'strength' ? '+STR' : stat === 'agility' ? '+AGI' : '+SKILL', '#ffd24a');
       this.prog('train'); this.prog('respect', 1);
@@ -948,11 +950,13 @@ export class Simulation {
       }
       case 'medical': n.health = clamp01(n.health + it.useAmt); { const pbb = this.brain(this.playerId); if (pbb) { pbb.injuredT = 0; pbb.bleedT = 0; } } this.floatBy(this.playerId, '+Health', '#6dff9e'); break;
       case 'vice': {
-        const v = VICE[itemId] ?? { morale: it.useAmt, healthCost: 0.03, angerRelief: 0.08, sick: 0.1, label: 'Buzzed' };
-        n.morale = clamp01((n.morale ?? 0.6) + v.morale);
+        const v = VICE[itemId] ?? { morale: it.useAmt, healthCost: 0.03, angerRelief: 0.08, sick: 0.1, sleepCost: 0.05, label: 'Buzzed' };
+        const cur = n.morale ?? 0.6;
+        n.morale = clamp01(cur + v.morale * (0.35 + 0.65 * (1 - cur)));   // diminishing near full — Spirit can't be pinned high by spamming
         n.anger = clamp01(n.anger - v.angerRelief);
         n.fear = clamp01(n.fear - v.angerRelief * 0.5);
         if (v.healthCost) n.health = clamp01(n.health - v.healthCost);
+        if (v.sleepCost) n.sleep = clamp01(n.sleep + v.sleepCost);   // the buzz costs you rest later
         this.floatBy(this.playerId, '+Spirit', '#f1c40f');
         if (v.sick && this.rng.float() < v.sick) {
           n.health = clamp01(n.health - 0.06);
@@ -1298,17 +1302,19 @@ export class Simulation {
         this.setGuardRole(b, 'investigate');
         const fp = this.ecs.get<Position>(b.foe, 'Position');
         const fb = this.ecs.get<Brain>(b.foe, 'Brain');
-        if (!fp || !fb) { b.actTimer = undefined; this.endRespond(e, b); continue; }
+        if (!fp || !fb) { this.endRespond(e, b); continue; }
         b.actTimer = (b.actTimer ?? 0) - dt;
         if ((b.actTimer ?? 0) > 0) { p.facing = Math.atan2(fp.x - p.x, fp.z - p.z); continue; }   // pause to notice
         const d = Math.hypot(fp.x - p.x, fp.z - p.z);
         if (fb.state === 'fight') {                                  // confirmed live → commit to a full response
-          b.actTimer = undefined;
           if (d < 1.7) { this.breakUpFight(e, b.foe); this.endRespond(e, b); }
-          else { b.state = 'respond'; if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, b.foe); ag.repathCd = 0.6; } }
-        } else if (d > 2.4) {                                        // it scattered — walk to the last spot, then stand down
-          if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, b.foe); ag.repathCd = 0.6; }
-        } else { b.actTimer = undefined; this.endRespond(e, b); }
+          else { b.state = 'respond'; b.actTimer = undefined; b.investigateGiveup = undefined; if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, b.foe); ag.repathCd = 0.6; } }
+        } else if (d > 2.4) {                                        // it scattered — chase briefly, then give up and stand down
+          if (fb.state === 'solitary' || fb.state === 'down' || fb.state === 'escorted' || fb.state === 'beingSearched') { this.endRespond(e, b); continue; }
+          b.investigateGiveup = (b.investigateGiveup ?? 4) - dt;
+          if (b.investigateGiveup <= 0) { this.endRespond(e, b); continue; }
+          if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, b.foe); if (!ag.path) { this.endRespond(e, b); continue; } ag.repathCd = 0.6; }
+        } else { this.endRespond(e, b); }
         continue;
       }
       // visible search: walk to suspect, then run a timed search
@@ -1342,6 +1348,8 @@ export class Simulation {
         }
         continue;
       }
+      // a leftover investigation is preempted by chaos — stand down cleanly before manning a post
+      if (b.state === 'investigate') this.endRespond(e, b);
       // CHAOS: during lockdown/alarm/riot, man a checkpoint post (or push toward the tensest area in a riot)
       if (this.checkpoints.length && (this.lockdown.active || this.alarm.active || this.riotLevel !== 'calm')) {
         let dest: { x: number; z: number } | null = null;
@@ -1411,7 +1419,7 @@ export class Simulation {
     const path = start >= 0 && goal >= 0 ? this.path(start, goal, e) : null;
     ag.path = path && path.length ? path : null; ag.step = 0;
   }
-  private endRespond(e: Entity, b: Brain) { b.state = 'idle'; b.foe = undefined; this.ecs.get<Agent>(e, 'Agent')!.path = null; b.timer = 0; }
+  private endRespond(e: Entity, b: Brain) { b.state = 'idle'; b.foe = undefined; this.ecs.get<Agent>(e, 'Agent')!.path = null; b.timer = 0; b.actTimer = undefined; b.investigateGiveup = undefined; }
   // nearby idle inmates turn to watch a brawl
   private faceWatchers(x: number, z: number) {
     for (const e of this.ecs.query('Brain', 'Position')) {
@@ -1533,7 +1541,7 @@ export class Simulation {
     this.nudge(fp, Math.sin(ang) * ATTACKS[atk].knockback * 0.6, Math.cos(ang) * ATTACKS[atk].knockback * 0.6);
     const blunt = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.wKnock ?? 0).reduce((a, c) => Math.max(a, c), 0);
     const heavy = ATTACKS[atk].knockback > 0.5 || dmg > 0.16;
-    const finisher = b.isPlayer && amor > 0.9 && fn.health < 0.42 && !fb.blockT;   // Stage 4.15: adrenaline finisher
+    const finisher = b.isPlayer && amor > 0.9 && fn.health < 0.30 && !fb.blockT && this.rng.float() < 0.6;   // Stage 4.15: adrenaline finisher (chance)
     if (finisher) this.bus.emit('float', { x: fp.x, z: fp.z, text: 'ADRENALINE!', color: '#ffd24a' });
     if (fn.health <= 0.2 || (heavy && fn.energy < 0.2) || (blunt > 0 && fn.health < 0.5 && this.rng.float() < blunt) || finisher) { this.knockDown(foe, fb, e, b); }
     else { fb.cphase = heavy ? 'stumble' : 'hitReact'; fb.cTimer = heavy ? STUMBLE : HITREACT; fn.fear = clamp01(fn.fear + 0.06); }
@@ -1642,7 +1650,7 @@ export class Simulation {
     // Stage 4.18 — notice-then-investigate: only an already-alert guard reacts instantly; otherwise they
     // clock it, pause to notice, then walk over to confirm (positioning + cover now matter).
     if (this.alarm.active || this.lockdown.active) { b.state = 'respond'; b.foe = fighter; }
-    else { b.state = 'investigate'; b.foe = fighter; b.actTimer = Math.min(1.6, 0.5 + bd * 0.08); }
+    else { b.state = 'investigate'; b.foe = fighter; b.actTimer = Math.min(1.6, 0.5 + bd * 0.08); b.investigateGiveup = undefined; }
     this.ecs.get<Agent>(best, 'Agent')!.path = null;
   }
   private breakUpFight(guard: Entity, near: Entity) {
@@ -2177,7 +2185,7 @@ export class Simulation {
       }
       return;   // no manual control mid-breakdown
     }
-    if (pn && (pn.morale ?? 0.6) <= 0.08 && pb.state !== 'fight' && pb.state !== 'down' && pb.state !== 'beingSearched' && !this.runEnd) {
+    if (pn && (pn.morale ?? 0.6) <= 0.08 && pb.state !== 'fight' && pb.state !== 'down' && pb.state !== 'beingSearched' && pb.state !== 'escorted' && !this.runEnd) {
       pb.state = 'breakdown'; pb.breakdownT = this.rng.range(6, 10); pb.action = 'Breaking Down';
       this.releaseObj(); this.act = null; this.ecs.get<Agent>(pl, 'Agent')!.path = null;
       this.bus.emit('alert', { type: 'critical', text: 'You snap — a nervous breakdown. You lose control…' });
@@ -2447,12 +2455,17 @@ export class Simulation {
   // contextual fight buttons: only while fighting, or when standing next to a hostile inmate
   playerCombatActions(): { key: string; label: string }[] {
     const pl = this.playerId; const pb = this.brain(pl); if (!pb) return [];
-    if (pb.state === 'fight') return [
-      { key: 'strike', label: 'Strike' }, { key: 'heavy', label: 'Heavy' }, { key: 'shove', label: 'Shove' },
-      { key: 'block', label: 'Block' }, { key: 'backoff', label: 'Back Off' }
-    ];
+    if (pb.state === 'fight') {
+      const acts = [
+        { key: 'strike', label: 'Strike' }, { key: 'heavy', label: 'Heavy' }, { key: 'shove', label: 'Shove' },
+        { key: 'block', label: 'Block' }, { key: 'backoff', label: 'Back Off' }
+      ];
+      if (this.playerHasThrowable()) acts.splice(3, 0, { key: 'throw', label: 'Throw' });   // Stage 4.19
+      return acts;
+    }
     return [];
   }
+  private playerHasThrowable(): boolean { return (this.inv(this.playerId)?.items ?? []).some((id) => (ITEMS[id]?.combat ?? 0) > 0); }
   // queue a combat input for the player's next phase / set a block window / disengage
   requestCombatAction(key: string): string {
     const pl = this.playerId; const pb = this.brain(pl)!; if (pb.state !== 'fight') return '';
@@ -2461,10 +2474,42 @@ export class Simulation {
       case 'strike': pb.pendingAtk = 'quick'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Strike!';
       case 'heavy': pb.pendingAtk = 'heavy'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Heavy swing!';
       case 'shove': pb.pendingAtk = 'shove'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Shove!';
+      case 'throw': return this.throwWeapon();
       case 'block': pb.blockT = 0.9; pb.cphase = 'block'; pb.cTimer = 0.5; this.bubble(pl, '🛡️', 'search', 0.8); return 'Blocking.';
       case 'backoff': { const foe = pb.foe; this.endFighter(pl, pb); pb.action = 'Idle'; if (foe != null) { const fb = this.brain(foe); if (fb && fb.state === 'fight') { fb.state = 'idle'; fb.foe = undefined; fb.cphase = undefined; } } this.social(pl)!.reputation = clamp(this.social(pl)!.reputation - 1, -100, 100); return 'You back off.'; }
     }
     return '';
+  }
+
+  // Stage 4.19 — hurl your weapon at your foe: a big burst (and a knockdown shot), but you're unarmed after.
+  private throwWeapon(): string {
+    const pl = this.playerId; const pb = this.brain(pl)!; const pinv = this.inv(pl)!;
+    if (pb.state !== 'fight' || pb.foe == null) return '';
+    let id = '', best = 0;
+    for (const it of pinv.items) { const c = ITEMS[it]?.combat ?? 0; if (c > best) { best = c; id = it; } }
+    if (!id) return 'Nothing to throw.';
+    const foe = pb.foe; const fb = this.brain(foe); const fp = this.pos(foe); const ep = this.pos(pl);
+    if (!fb || !fp || !ep) return '';
+    pinv.items.splice(pinv.items.indexOf(id), 1);   // it leaves your hand for good
+    const def = ITEMS[id];
+    ep.facing = Math.atan2(fp.x - ep.x, fp.z - ep.z);
+    pb.attackCd = Math.max(pb.attackCd, 0.6);
+    this.bubble(pl, 'Take this!', 'insult', 1.0);
+    this.addHeat(3);   // throwing a weapon is flagrant
+    if (this.rng.float() > 0.8) { this.bus.emit('float', { x: fp.x, z: fp.z, text: 'Miss', color: '#dfe3e6' }); return `You hurl the ${def.name} — wide!`; }
+    const fn = this.ecs.get<Needs>(foe, 'Needs')!;
+    const armor = (this.inv(foe)?.items ?? []).map((i) => ITEMS[i]?.armor ?? 0).reduce((a, c) => Math.max(a, c), 0);
+    const dmg = (0.12 + (def.combat ?? 0) * 0.035) * (1 - armor * 0.8);
+    fn.health = clamp01(fn.health - dmg);
+    fb.lastAttacker = pl; this.metrics.hits++;
+    this.bus.emit('impact', { x: fp.x, z: fp.z });
+    this.bus.emit('blood', { x: fp.x, z: fp.z });
+    this.bus.emit('float', { x: fp.x, z: fp.z, text: `-${Math.round(dmg * 100)}`, color: '#ff7a6a' });
+    if (def.bleed) { fb.bleedT = Math.max(fb.bleedT ?? 0, 6); fb.bleedRate = def.bleed; this.floatBy(foe, '🩸', '#ff5a4d'); }
+    const knock = (def.wKnock ?? 0) + (def.combat ?? 0) * 0.04;
+    if (fn.health <= 0.18 || this.rng.float() < knock) this.knockDown(foe, fb, pl, pb);
+    else { fb.cphase = 'stumble'; fb.cTimer = STUMBLE; fn.fear = clamp01(fn.fear + 0.1); }
+    return `You hurl the ${def.name}!`;
   }
 
   private smalltalk(tb: Brain): string {
@@ -2625,7 +2670,7 @@ export class Simulation {
       escapeSite: this.escapeSite
     };
     const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang, economy: this.economy, jobStreak: this.jobStreak, sentence: this.sentence, served: this.served, wardenCondition: this.wardenCondition };
-    return { version: 16, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
+    return { version: 17, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world

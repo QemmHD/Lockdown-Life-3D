@@ -117,7 +117,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.18.0-guards'
+      version: 'v4.19.0-throw'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -406,7 +406,7 @@ export class Game {
   }
   private static SELF_KEYS = ['rest', 'wash', 'eat', 'train', 'work'];
   private static CHAOS_KEYS = ['comply', 'returncell', 'hide', 'calm', 'helpguard'];
-  private static COMBAT_KEYS = ['strike', 'heavy', 'shove', 'block'];
+  private static COMBAT_KEYS = ['strike', 'heavy', 'shove', 'block', 'throw'];
   private static GANG_KEYS = ['askgang', 'acceptinvite', 'declineinvite', 'helpmember'];
   private doAction(key: string) {
     this.panelDirty = true;
