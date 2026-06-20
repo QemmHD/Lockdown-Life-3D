@@ -22,6 +22,11 @@ export interface CharView {
   barHealth: THREE.Mesh;
   barEnergy: THREE.Mesh;
   barSuspicion: THREE.Mesh;
+  // Stage 4.17 — held weapon + facial-emotion refs (read-only animation)
+  weaponSlot: THREE.Group;
+  weaponKind: string;
+  browL?: THREE.Mesh; browR?: THREE.Mesh;
+  mouth?: THREE.Mesh;
 }
 
 const OUTLINE = new THREE.MeshBasicMaterial({ color: 0x0b0b0e, side: THREE.BackSide });
@@ -165,6 +170,12 @@ export function makeCharacter(kind: 'prisoner' | 'guard', color: number, look?: 
   }
   torso.add(armL, armR);
 
+  // Stage 4.17 — weapon slot under the right hand (shown only during violence; see setWeapon)
+  const weaponSlot = new THREE.Group();
+  weaponSlot.position.y = -armH - 0.06;
+  weaponSlot.visible = false;
+  armR.add(weaponSlot);
+
   // --- NECK + HEAD ---
   const headGroup = new THREE.Group();
   const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.14, 8), skinMat);
@@ -187,12 +198,12 @@ export function makeCharacter(kind: 'prisoner' | 'guard', color: number, look?: 
     const ep = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), pupilMat);
     ep.position.set(ex, 0.03, 0.20); headGroup.add(ep);
   }
-  // eyebrows
+  // eyebrows (refs kept so RenderSync can angle them for emotion)
   const browMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
-  for (const ex of [-0.075, 0.075]) {
-    const brow = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.02), browMat);
-    brow.position.set(ex, 0.075, 0.19); headGroup.add(brow);
-  }
+  const browL = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.02), browMat);
+  browL.position.set(-0.075, 0.075, 0.19); headGroup.add(browL);
+  const browR = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.02), browMat);
+  browR.position.set(0.075, 0.075, 0.19); headGroup.add(browR);
   // nose
   const nose = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.06, 4), skinMat);
   nose.rotation.x = -Math.PI / 2; nose.position.set(0, -0.01, 0.22); headGroup.add(nose);
@@ -274,8 +285,41 @@ export function makeCharacter(kind: 'prisoner' | 'guard', color: number, look?: 
   return {
     group, rig, torso, legL, legR, armL, armR, head: headGroup,
     hit, ring, glow, icon, iconTex, iconCanvas, lastIcon: '', walkPhase: Math.random() * 6,
-    barGroup, barHealth, barEnergy, barSuspicion
+    barGroup, barHealth, barEnergy, barSuspicion,
+    weaponSlot, weaponKind: '', browL, browR, mouth
   };
+}
+
+// --- Stage 4.17: held-weapon meshes (pooled by kind; only rebuilt when the kind changes) ---
+export type WeaponKind = '' | 'shiv' | 'club' | 'blade' | 'tool';
+const WMAT = {
+  blade: new THREE.MeshStandardMaterial({ color: 0xcfd4da, roughness: 0.35, metalness: 0.7 }),
+  club: new THREE.MeshStandardMaterial({ color: 0x4a4d55, roughness: 0.6, metalness: 0.4 }),
+  shiv: new THREE.MeshStandardMaterial({ color: 0xb8bcc4, roughness: 0.4, metalness: 0.6 })
+};
+function buildWeapon(kind: Exclude<WeaponKind, ''>): THREE.Object3D {
+  if (kind === 'club' || kind === 'tool') {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.5, 6), WMAT.club);
+    m.position.set(0, -0.16, 0.02); m.rotation.x = Math.PI / 2.2; m.castShadow = true; shell(m, 1.1); return m;
+  }
+  const g = new THREE.Group();
+  const blade = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.30, 0.012), kind === 'blade' ? WMAT.blade : WMAT.shiv);
+  blade.position.set(0, -0.16, 0.05); blade.rotation.x = Math.PI / 2.4; blade.castShadow = true; shell(blade, 1.08); g.add(blade);
+  return g;
+}
+export function setWeapon(v: CharView, kind: WeaponKind) {
+  if (v.weaponKind === kind) return;
+  v.weaponKind = kind;
+  v.weaponSlot.clear();
+  if (!kind) { v.weaponSlot.visible = false; return; }
+  v.weaponSlot.add(buildWeapon(kind)); v.weaponSlot.visible = true;
+}
+// angle brows + tighten the mouth for anger (>0) / lift for fear (<0)
+export function setBrows(v: CharView, anger: number) {
+  const a = THREE.MathUtils.clamp(anger, -1, 1);
+  if (v.browL) v.browL.rotation.z = -a * 0.5;
+  if (v.browR) v.browR.rotation.z = a * 0.5;
+  if (v.mouth) v.mouth.scale.x = 1 - Math.max(0, a) * 0.3;
 }
 
 export function setIcon(v: CharView, text: string) {

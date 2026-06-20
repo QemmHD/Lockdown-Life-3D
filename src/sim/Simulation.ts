@@ -1508,6 +1508,7 @@ export class Simulation {
     fb.lastAttacker = e;
     this.bus.emit('impact', { x: fp.x, z: fp.z });
     if (dmg > 0.02) this.bus.emit('float', { x: fp.x, z: fp.z, text: `-${Math.round(dmg * 100)}`, color: '#ff7a6a' });
+    if (dmg > 0.05) this.bus.emit('blood', { x: fp.x, z: fp.z });   // Stage 4.17: splatter on a solid blow
     // knockback (path-safe) + hit reaction / stumble
     const ang = Math.atan2(fp.x - ep.x, fp.z - ep.z);
     this.nudge(fp, Math.sin(ang) * ATTACKS[atk].knockback * 0.6, Math.cos(ang) * ATTACKS[atk].knockback * 0.6);

@@ -14,6 +14,18 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.17.0-juice — Stage 4.17 Animation & combat-FX overhaul (render-only)
+The sim has always been richer than what you could see — this pass makes the bodies act it out. Build + smoke green; pure presentation,
+**no sim or save change** (RenderSync stays read-only).
+- **Full body language**: every state now has a pose loop — sleep-curl on the bunk, hammer/scrub at work, hand-to-mouth eating,
+  shower scrub, squat/curl training, gesture-and-nod talking/trading, arms-out frisk, alert respond — instead of one idle stance.
+- **Combat reads**: a **weapon appears in your hand** when violence is on (shiv/blade/pipe/tool), brows **furrow with anger / lift with
+  fear**, injured fighters **limp and hunch**, the KO'd **sprawl face-down**, and a winner throws a quick **victory arm-pump**. The
+  nervous **breakdown** now visibly shakes.
+- **Hit juice**: a new pooled **particle system** throws **sparks on every contact** and a **blood splatter on a solid blow** — fights
+  finally feel like they land. Capped/recycled pool (no GC churn), reset cleanly on new run/load.
+- Version → `v4.17.0-juice`.
+
 ## v4.16.0-builds — Stage 4.16 Character builds (zero-sum training + attributes that bite)
 Training is no longer a free ride to a maxed character — the Hard Time "you can never be good at everything" identity. Build + smoke green.
 - **Stations train different stats**: the **weights** build **Strength**, the **pull-up bar** builds **Agility** (each also tops up Stamina).

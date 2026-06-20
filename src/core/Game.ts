@@ -3,6 +3,7 @@ import { ThreeApp } from '../render/ThreeApp';
 import { IsoCamera } from '../render/IsoCamera';
 import { RenderSync } from '../render/RenderSync';
 import { Feedback } from '../render/Feedback';
+import { CombatFX } from '../render/CombatFX';
 import { AudioSystem } from '../audio/AudioSystem';
 import { buildPrison } from '../render/WorldRenderer';
 import { dressRooms } from '../render/PropRenderer';
@@ -30,6 +31,7 @@ export class Game {
   private sim: Simulation;
   private sync: RenderSync;
   private feedback!: Feedback;
+  private combatFx!: CombatFX;
   private audio = new AudioSystem();
   private hud: HUD;
   private menus!: Menus;
@@ -66,6 +68,7 @@ export class Game {
     this.objHighlight = new THREE.Mesh(new THREE.RingGeometry(0.55, 0.78, 28), new THREE.MeshBasicMaterial({ color: 0x9fe0ff, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
     this.objHighlight.rotation.x = -Math.PI / 2; this.objHighlight.position.y = 0.07; this.objHighlight.visible = false; this.app.scene.add(this.objHighlight);
     this.sync = new RenderSync(this.app.scene, this.sim.ecs);
+    this.combatFx = new CombatFX(this.app.scene);
     this.feedback = new Feedback();
     // character-focused camera: clamp to the prison, follow the player prisoner
     this.cam.setBounds(this.sim.map.width / 2 - 5, this.sim.map.height / 2 - 5);
@@ -114,7 +117,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.16.0-builds'
+      version: 'v4.17.0-juice'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -122,7 +125,8 @@ export class Game {
     this.bus.on('zoom', ({ factor }) => this.cam.zoomBy(factor));
     this.bus.on('tap', ({ x, y }) => this.onTap(x, y));
     this.bus.on('alert', ({ text, type }) => this.hud.alert(text, type));
-    this.bus.on('impact', ({ x, z }) => this.addImpact(x, z));
+    this.bus.on('impact', ({ x, z }) => { this.addImpact(x, z); this.combatFx.spark(x, z); });
+    this.bus.on('blood', ({ x, z }) => this.combatFx.blood(x, z));
     this.bus.on('float', ({ x, z, text, color }) => this.feedback.float(x, z, text, color));
     this.bus.on('bubble', ({ e, text, kind, dur }) => this.feedback.bubble(e, text, kind, dur));
     this.bus.on('actionResult', ({ text }) => this.hud.alert(text, 'info'));
@@ -437,7 +441,7 @@ export class Game {
   private beginRun(setup: any) {
     SaveManager.clear();
     this.sim.startNewRun(setup, this.interactableDefs as any);
-    this.sync.reset(); this.feedback.reset(); this.sync.setEcs(this.sim.ecs);
+    this.sync.reset(); this.feedback.reset(); this.combatFx.reset(); this.sync.setEcs(this.sim.ecs);
     for (const d of this.doorVisuals) d.lastOpen = undefined;   // re-prime door SFX (no stray clang on new run)
     this.endingShown = false;
     this.playerEntity = this.sim.player();
@@ -454,6 +458,7 @@ export class Game {
     this.sim.hydrate(data);
     this.sync.reset();
     this.feedback.reset();
+    this.combatFx.reset();
     this.sync.setEcs(this.sim.ecs);
     for (const d of this.doorVisuals) d.lastOpen = undefined;   // re-prime door SFX (no stray clang on load)
     this.endingShown = false;
@@ -523,6 +528,7 @@ export class Game {
 
     this.sync.update(dt, this.selected, t);
     this.updateFx(dt);
+    this.combatFx.update(dt);
     this.updateMarker(dt);
     this.updateDoors(dt);
     if (this.dbgPath) this.updateDebugPath();
