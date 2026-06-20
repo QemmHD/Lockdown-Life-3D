@@ -1292,6 +1292,25 @@ export class Simulation {
         else if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, b.foe); ag.repathCd = 0.6; }
         continue;
       }
+      // Stage 4.18 — investigate: the guard noticed something and goes to check before fully committing.
+      // A lockdown/alarm/riot starting mid-investigation preempts (falls through to the chaos post).
+      if (b.state === 'investigate' && b.foe != null && !(this.lockdown.active || this.alarm.active || this.riotLevel !== 'calm')) {
+        this.setGuardRole(b, 'investigate');
+        const fp = this.ecs.get<Position>(b.foe, 'Position');
+        const fb = this.ecs.get<Brain>(b.foe, 'Brain');
+        if (!fp || !fb) { b.actTimer = undefined; this.endRespond(e, b); continue; }
+        b.actTimer = (b.actTimer ?? 0) - dt;
+        if ((b.actTimer ?? 0) > 0) { p.facing = Math.atan2(fp.x - p.x, fp.z - p.z); continue; }   // pause to notice
+        const d = Math.hypot(fp.x - p.x, fp.z - p.z);
+        if (fb.state === 'fight') {                                  // confirmed live → commit to a full response
+          b.actTimer = undefined;
+          if (d < 1.7) { this.breakUpFight(e, b.foe); this.endRespond(e, b); }
+          else { b.state = 'respond'; if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, b.foe); ag.repathCd = 0.6; } }
+        } else if (d > 2.4) {                                        // it scattered — walk to the last spot, then stand down
+          if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, b.foe); ag.repathCd = 0.6; }
+        } else { b.actTimer = undefined; this.endRespond(e, b); }
+        continue;
+      }
       // visible search: walk to suspect, then run a timed search
       if (b.state === 'searching' && b.foe != null) {
         this.setGuardRole(b, 'search');
@@ -1611,7 +1630,7 @@ export class Simulation {
     this.dispatchGuard(a); this.registerFight(a);
   }
   private dispatchGuard(fighter: Entity) {
-    const guards = this.ecs.query('Brain', 'Position').filter((e) => { const b = this.ecs.get<Brain>(e, 'Brain')!; return b.role === 'guard' && b.state !== 'respond'; });
+    const guards = this.ecs.query('Brain', 'Position').filter((e) => { const b = this.ecs.get<Brain>(e, 'Brain')!; return b.role === 'guard' && b.state !== 'respond' && b.state !== 'investigate'; });
     if (!guards.length) return;
     const fp = this.ecs.get<Position>(fighter, 'Position')!;
     let best = guards[0], bd = Infinity;
@@ -1619,7 +1638,12 @@ export class Simulation {
     // a guard only responds if one is close enough to NOTICE (range + line-of-sight), unless an
     // alarm/lockdown already has them on alert — fixes guards reacting from across the prison
     if (!(this.alarm.active || this.lockdown.active) && (bd > 14 || !this.hasLOS(best, fighter))) return;
-    const b = this.ecs.get<Brain>(best, 'Brain')!; b.state = 'respond'; b.foe = fighter; this.ecs.get<Agent>(best, 'Agent')!.path = null;
+    const b = this.ecs.get<Brain>(best, 'Brain')!;
+    // Stage 4.18 — notice-then-investigate: only an already-alert guard reacts instantly; otherwise they
+    // clock it, pause to notice, then walk over to confirm (positioning + cover now matter).
+    if (this.alarm.active || this.lockdown.active) { b.state = 'respond'; b.foe = fighter; }
+    else { b.state = 'investigate'; b.foe = fighter; b.actTimer = Math.min(1.6, 0.5 + bd * 0.08); }
+    this.ecs.get<Agent>(best, 'Agent')!.path = null;
   }
   private breakUpFight(guard: Entity, near: Entity) {
     const np = this.ecs.get<Position>(near, 'Position')!; const gp = this.pos(guard);
@@ -2190,7 +2214,7 @@ export class Simulation {
     let best: Entity | null = null, bd = range;
     for (const g of this.ecs.query('Brain', 'Position')) {
       const b = this.brain(g)!;
-      if (b.role !== 'guard' || b.state === 'respond' || b.state === 'searching' || b.state === 'escorting') continue;
+      if (b.role !== 'guard' || b.state === 'respond' || b.state === 'investigate' || b.state === 'searching' || b.state === 'escorting') continue;
       const d = this.dist(g, target); if (d < bd) { bd = d; best = g; }
     }
     return best;

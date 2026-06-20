@@ -14,6 +14,18 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.18.0-guards — Stage 4.18 Smarter guards (notice → investigate → respond)
+Guards no longer teleport-react to violence from across the block — positioning and cover finally matter. Build + smoke + probe green.
+- A guard who **sees** a fight (range + line-of-sight) now **clocks it, pauses to notice** (a short, distance-scaled beat — closer
+  guards react faster), then **walks over to investigate** before fully committing to break it up.
+- If the brawl is **still going** when they arrive, they escalate to a full **response**; if it **scattered**, they walk to the spot,
+  look around, and **stand down** — so a quick fight out of sight can go unpunished.
+- **Already-alert guards stay instant**: during an **alarm or lockdown** they respond immediately, and **assaulting a guard** still trips
+  the whole block at once. A lockdown/riot starting mid-investigation **preempts** it (they man their post). Riot/heat escalation timing
+  is untouched.
+- New transient `investigate` state/role; no save change.
+- Version → `v4.18.0-guards`.
+
 ## v4.17.0-juice — Stage 4.17 Animation & combat-FX overhaul (render-only)
 The sim has always been richer than what you could see — this pass makes the bodies act it out. Build + smoke green; pure presentation,
 **no sim or save change** (RenderSync stays read-only).

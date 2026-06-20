@@ -22,7 +22,7 @@ export interface Needs {
 
 export type BrainState = 'idle' | 'goto' | 'wander' | 'fight' | 'respond' | 'down' | 'solitary'
   | 'talking' | 'threatening' | 'trading' | 'working' | 'resting' | 'washing' | 'eating' | 'training'
-  | 'searching' | 'beingSearched' | 'escorting' | 'escorted' | 'backoff' | 'breakdown';
+  | 'searching' | 'beingSearched' | 'escorting' | 'escorted' | 'backoff' | 'breakdown' | 'investigate';
 
 export interface Brain {
   role: 'prisoner' | 'guard';

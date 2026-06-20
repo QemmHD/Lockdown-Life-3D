@@ -6,7 +6,7 @@ export type PrisonerIntent =
   | 'returnCell' | 'hide' | 'comply' | 'wander';
 
 export type GuardRole =
-  | 'patrol' | 'checkpoint' | 'response' | 'escort' | 'search' | 'desk' | 'lockdown' | 'riot';
+  | 'patrol' | 'checkpoint' | 'response' | 'escort' | 'search' | 'desk' | 'lockdown' | 'riot' | 'investigate';
 
 // short status text shown on the inspect panel / as the NPC's current action
 export const INTENT_LABEL: Record<PrisonerIntent, string> = {
@@ -16,7 +16,7 @@ export const INTENT_LABEL: Record<PrisonerIntent, string> = {
 };
 export const ROLE_LABEL: Record<GuardRole, string> = {
   patrol: 'Patrolling', checkpoint: 'Holding checkpoint', response: 'Responding', escort: 'Escorting',
-  search: 'Searching', desk: 'At security desk', lockdown: 'Lockdown post', riot: 'Riot response'
+  search: 'Searching', desk: 'At security desk', lockdown: 'Lockdown post', riot: 'Riot response', investigate: 'Investigating'
 };
 
 // how long a guard dwells at a route post before moving to the next (sim-seconds)
