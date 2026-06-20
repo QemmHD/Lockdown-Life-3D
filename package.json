@@ -1,7 +1,7 @@
 {
   "name": "lockdown-life-3d",
   "private": true,
-  "version": "4.26.0-deathcause",
+  "version": "4.27.0-view",
   "type": "module",
   "description": "Lockdown Life 3D - a gritty 3D isometric prison-life sandbox simulator",
   "scripts": {

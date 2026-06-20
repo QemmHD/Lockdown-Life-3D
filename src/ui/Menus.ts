@@ -325,7 +325,8 @@ export class Menus {
       <div><b>Standing</b><span>Win fights, do jobs and favours to raise reputation & respect tiers.</span></div>
       <div><b>Suspicion</b><span>Contraband and restricted areas get you searched — and sent to solitary.</span></div>
       <div><b>Chaos</b><span>In a lockdown, return to your cell. In a riot, comply or take cover.</span></div>
-      <div><b>Fights</b><span>Strike / Heavy / Shove / Block. Guards break up brawls.</span></div>
+      <div><b>Fights</b><span>Strike / Heavy / Shove / Grapple / Throw / Block. Guards break up brawls.</span></div>
+      <div><b>Camera</b><span><b>Q</b>/<b>E</b> (or ← →) rotate the view · <b>C</b> toggles the close-up character camera · drag to pan, pinch/scroll to zoom.</span></div>
       <div><b>Save</b><span>Save/Load any time from this menu or the bottom bar.</span></div>
     </div>`;
   }

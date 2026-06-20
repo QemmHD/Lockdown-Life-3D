@@ -14,9 +14,9 @@ export const THEME = {
   // 4.9 realism: cut the flat ambient/hemi wash (the main "cartoony" tell) and lean on a strong warm
   // key + cool fill + back rim (the fill/rim lights are added in ThreeApp) for real shadow contrast.
   lights: {
-    ambient: 0x808ea8, ambientI: 0.5,
+    ambient: 0x808ea8, ambientI: 0.72,
     key: 0xffe6c0, keyI: 2.1,
-    hemiSky: 0x9fb0d0, hemiGround: 0x383631, hemiI: 0.42
+    hemiSky: 0x9fb0d0, hemiGround: 0x383631, hemiI: 0.6
   },
 
   walls: { side: 0x585b63, top: 0x868b96, base: 0x3a3d44, grime: 0x33363d, bars: 0x2a2e36, frame: 0x4c5059 },

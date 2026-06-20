@@ -14,6 +14,14 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.27.0-view — Rotatable camera + brighter image (test feedback)
+Two things you flagged while testing. Build + smoke + probe green; render-only, no save change.
+- **Rotate the view**: **Q** / **E** (or **← / →**) now orbit the camera in both the iso overview and the zoomed character camera — so walls
+  no longer hide what you want to see. (**C** still toggles the close-up camera; drag still pans, scroll/pinch zooms.) Added to the Help.
+- **Less dark**: bumped exposure and ambient/hemisphere light, and **softened the post-FX** (gentler vignette, less contrast crush, a small
+  overall lift) so the block reads clearly instead of muddy — the gritty look stays, the gloom goes.
+- Version → `v4.27.0-view`.
+
 ## v4.26.0-deathcause — Cause of death + debug test tools
 Testability + a clearer fail screen. Build + smoke + probe green; no save change.
 - **GAME OVER now tells you how you died** — the card leads with the specific cause: *Starved to death* / *Died of exhaustion*,

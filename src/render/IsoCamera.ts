@@ -14,7 +14,9 @@ export class IsoCamera {
   private zoom = THEME.camera.zoom;
   private minZoom = THEME.camera.min;
   private maxZoom = THEME.camera.max;
+  private baseOffset = new THREE.Vector3(THEME.camera.offset.x, THEME.camera.offset.y, THEME.camera.offset.z);
   private offset = new THREE.Vector3(THEME.camera.offset.x, THEME.camera.offset.y, THEME.camera.offset.z);
+  private isoAngle = 0;                 // yaw rotation of the iso overview (Q/E)
   private right = new THREE.Vector3();
   private fwd = new THREE.Vector3();
   // follow state
@@ -59,8 +61,17 @@ export class IsoCamera {
   setOccluder(fn: (wx: number, wz: number) => boolean) { this.occluder = fn; }
 
   private computeBasis() {
+    // rotate the base iso offset by isoAngle around Y so the whole overview can orbit
+    const a = this.isoAngle, bx = this.baseOffset.x, bz = this.baseOffset.z;
+    this.offset.set(bx * Math.cos(a) - bz * Math.sin(a), this.baseOffset.y, bx * Math.sin(a) + bz * Math.cos(a));
     this.fwd.set(-this.offset.x, 0, -this.offset.z).normalize();
     this.right.set(this.fwd.z, 0, -this.fwd.x).normalize();
+  }
+  // Q/E (and ← →) rotate the view: orbit the iso overview, or swing the character camera around.
+  rotateView(dir: number) {
+    const step = 0.13 * dir;
+    if (this._charMode) { this.charAngle += step; this.applyPersp(); }
+    else { this.isoAngle += step; this.computeBasis(); this.apply(); }
   }
   private updateProjection() {
     const aspect = window.innerWidth / window.innerHeight;

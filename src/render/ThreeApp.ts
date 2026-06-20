@@ -13,7 +13,7 @@ export class ThreeApp {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.22;   // brighter — the realism pass + post-FX read too dark
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.scene.background = new THREE.Color(THEME.bg);
     this.scene.fog = new THREE.Fog(THEME.fog.color, THEME.fog.near, THEME.fog.far);

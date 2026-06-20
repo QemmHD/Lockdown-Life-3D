@@ -123,7 +123,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.26.0-deathcause'
+      version: 'v4.27.0-view'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -145,7 +145,13 @@ export class Game {
     window.addEventListener('resize', onResize);
     window.addEventListener('orientationchange', () => setTimeout(onResize, 250));   // iOS settles after rotate
     window.visualViewport?.addEventListener('resize', onResize);                     // iOS toolbar show/hide
-    window.addEventListener('keydown', (ev) => { if (ev.key === 'c' || ev.key === 'C') { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); } });
+    window.addEventListener('keydown', (ev) => {
+      if ((ev.target as HTMLElement)?.tagName === 'INPUT') return;
+      const k = ev.key;
+      if (k === 'c' || k === 'C') { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); }
+      else if (k === 'q' || k === 'Q' || k === 'ArrowLeft') this.cam.rotateView(-1);
+      else if (k === 'e' || k === 'E' || k === 'ArrowRight') this.cam.rotateView(1);
+    });
     // debug hook (only with ?debug): inspect sim/door state + run an invariant self-test + draw overlays
     if (/[?&]debug/.test(location.search)) {
       (window as any).__game = this;

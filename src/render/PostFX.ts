@@ -8,11 +8,11 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
-    uVignette: { value: 0.9 },
-    uContrast: { value: 1.07 },
+    uVignette: { value: 0.55 },
+    uContrast: { value: 1.03 },
     uSaturation: { value: 1.08 },
     uTint: { value: new THREE.Color(0xfff1d8) },
-    uGrain: { value: 0.045 },
+    uGrain: { value: 0.03 },
     uTime: { value: 0 },
   },
   vertexShader: /* glsl */`
@@ -31,8 +31,9 @@ const GradeShader = {
       float l = dot(col, vec3(0.299, 0.587, 0.114));
       col = mix(vec3(l), col, uSaturation);                      // saturation
       col *= mix(vec3(1.0), uTint, 0.12);                        // subtle warm institutional tint
+      col *= 1.06;                                               // overall lift so the grade doesn't read dark
       vec2 d = vUv - 0.5;
-      col *= clamp(1.0 - dot(d, d) * uVignette, 0.5, 1.0);       // vignette
+      col *= clamp(1.0 - dot(d, d) * uVignette, 0.74, 1.0);      // gentler vignette (edges no longer crushed)
       col += (rand(vUv + fract(uTime)) - 0.5) * uGrain;          // film grain
       gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
     }
