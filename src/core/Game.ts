@@ -127,7 +127,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.29.0-combatdepth'
+      version: 'v4.30.0-grapplehold'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -442,7 +442,7 @@ export class Game {
   }
   private static SELF_KEYS = ['rest', 'wash', 'eat', 'train', 'work'];
   private static CHAOS_KEYS = ['comply', 'returncell', 'hide', 'calm', 'helpguard'];
-  private static COMBAT_KEYS = ['strike', 'heavy', 'shove', 'block', 'throw', 'grab', 'dodge'];
+  private static COMBAT_KEYS = ['strike', 'heavy', 'shove', 'block', 'throw', 'grab', 'dodge', 'choke', 'slam', 'release', 'struggle', 'reverse'];
   private static GANG_KEYS = ['askgang', 'acceptinvite', 'declineinvite', 'helpmember'];
   private doAction(key: string) {
     this.panelDirty = true;
@@ -455,7 +455,8 @@ export class Game {
     }
     const sel = this.selected ?? this.playerEntity;
     const isPlayerSel = sel === this.playerEntity || !!this.sim.ecs.get<Brain>(sel, 'Brain')?.isPlayer;
-    const fighting = isPlayerSel && this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.state === 'fight';
+    const pst = this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.state;
+    const fighting = isPlayerSel && (pst === 'fight' || pst === 'grappling' || pst === 'held');   // Stage 4.30: holds route through the combat panel too
     let status: string;
     if (!isPlayerSel && key === 'trade') { this.menus.showTrade(sel); this.paused = true; return; }   // open the trade panel
     if (fighting && (Game.COMBAT_KEYS.includes(key) || key === 'backoff')) status = this.sim.requestCombatAction(key);
@@ -628,8 +629,8 @@ export class Game {
     this.cam.addShakeOffset(this.shake, t);
     if (this.cam.isCharMode !== this.lastCamMode) { this.lastCamMode = this.cam.isCharMode; this.hud.setCamMode(this.cam.isCharMode); }   // pinch may auto-switch modes
 
-    // while the player is fighting, force the combat panel (so combat buttons are reachable)
-    if (!this.selectedObj && this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.state === 'fight' && this.selected !== this.playerEntity) { this.selected = this.playerEntity; this.panelDirty = true; }
+    // while the player is fighting OR in a grapple-hold, force the combat panel (so the buttons are reachable)
+    { const ps = this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.state; if (!this.selectedObj && (ps === 'fight' || ps === 'grappling' || ps === 'held') && this.selected !== this.playerEntity) { this.selected = this.playerEntity; this.panelDirty = true; } }
 
     // panel: refresh on demand (selection/action/inventory) or a few times a second — never every frame
     this.panelTimer -= dt;

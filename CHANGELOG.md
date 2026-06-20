@@ -14,6 +14,16 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.30.0-grapplehold — Grapple holds → elimination (submit / unconscious)
+The grapple verb finally pays off: a won grab on a worn-down or over-powered foe now **clinches into a persistent hold** instead of an instant slam, then plays out as a struggle that ends in a **chokeout** or a **submission**. NPCs grapple too — each other and you. Build + smoke + probe green; transient combat state only, **no save change (still v18)**.
+- **Hold**: clinch a faltering foe (low stamina, guard-broken, mid-stumble, or a big Strength edge). A strong grab on a fresh foe still just **Slams** (the v4.25 throw is preserved) — the hold is the *advanced* line, the reward for wearing someone down first.
+- **Choke → Unconscious**: as the holder, **Choke** tightens the squeeze (it costs *your* stamina, so you can't spam it); fill the meter and they go **out cold** (~14s, helpless on the ground). A sleeper hold can rarely kill — and the same risk applies to you.
+- **Submit**: a worn-down, low-respect foe may **tap out** before you finish them — a fast, non-lethal win. Choking someone out cold instead is pure dominance: more respect, more heat.
+- **Struggle / Reverse**: grabbed yourself? **Struggle** (tap fast) to break the grip, or **Reverse** it (a Strength/Agility contest) to turn the tables and become the one doing the choking. Lose the exchange and you're out cold — a real danger when you get ganged up on.
+- **NPCs grapple**: tough / aggressive / fighter inmates now grab a faltering foe (with a cooldown so it's a threat, not spam) — so you'll catch inmates choking each other out in the yard, and you can be clinched mid-brawl.
+- Hardened against soft-locks via a full `brain.state` call-site audit: a hold **always** resolves or cleanly breaks — on death, solitary, escort, lockdown, guard break-up, save-mid-hold, or an 8s stalemate timeout. Also fixed a latent v4.29 save-hygiene gap (the combat-depth fields weren't reset on load).
+- Version → `v4.30.0-grapplehold`.
+
 ## v4.29.0-combatdepth — Combat depth: momentum, parry, dodge, guard-break
 Stage B of the overhaul — turning button-mashing into a read-and-react duel. Build + smoke + probe green; transient combat state only, no save change.
 - **Parry**: tap **Block** *as the hit lands* (not just hold it) to **parry** — the attacker staggers and is left wide open for your counter.

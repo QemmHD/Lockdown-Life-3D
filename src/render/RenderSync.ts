@@ -48,7 +48,11 @@ export class RenderSync {
   }
 
   private icon(b: Brain, n: Needs): string {
-    if (b.state === 'breakdown') return '😵';
+    if (b.state === 'breakdown') return '😵‍💫';
+    if (b.state === 'unconscious') return '😵';   // Stage 4.30 — choked out cold
+    if (b.state === 'submit') return '🙇';         // tapped out
+    if (b.state === 'grappling') return '🤼';      // holding someone
+    if (b.state === 'held') return '😣';           // being held
     if (b.state === 'fight') return '⚔️';
     if (b.state === 'down') return '💫';
     if (b.state === 'respond') return '❗';
@@ -110,8 +114,8 @@ export class RenderSync {
     const injured = (b?.injuredT ?? 0) > 0;
     const mem = this.memOf(e);
 
-    // KO / down — face-down sprawl
-    if (state === 'down') {
+    // KO / down — face-down sprawl (Stage 4.30: a choked-out fighter sprawls the same way)
+    if (state === 'down' || state === 'unconscious') {
       v.rig.rotation.z = THREE.MathUtils.lerp(v.rig.rotation.z, Math.PI / 2.1, 0.15);
       v.rig.rotation.x = THREE.MathUtils.lerp(v.rig.rotation.x, 0.25, 0.12);
       v.rig.position.y = THREE.MathUtils.lerp(v.rig.position.y, 0.12, 0.15);
@@ -123,7 +127,7 @@ export class RenderSync {
     v.rig.rotation.z = THREE.MathUtils.lerp(v.rig.rotation.z, 0, 0.2);
 
     // became a winner (was fighting, now not) → trigger a brief victory pump
-    if (mem.last === 'fight' && state !== 'fight') mem.victoryT = 1.1;
+    if ((mem.last === 'fight' || mem.last === 'grappling') && state !== 'fight' && state !== 'grappling' && state !== 'held') mem.victoryT = 1.1;
 
     if (moving) {
       v.walkPhase += dt * 9 * (injured ? 0.6 : 1);
@@ -212,6 +216,18 @@ export class RenderSync {
         v.rig.position.y = Math.sin(time * 2 + e) * 0.02;
         v.head.rotation.y = THREE.MathUtils.lerp(v.head.rotation.y, Math.sin(time * 1.5 + e) * 0.2, 0.05);
         v.rig.rotation.x = THREE.MathUtils.lerp(v.rig.rotation.x, 0, 0.2); break;
+      // Stage 4.30 grapple-hold poses (read-only)
+      case 'submit':   // kneeling, one arm raised to tap
+        L(v.torso, 0.5, 0.1); L(v.legL, 1.2, 0.1); L(v.legR, 1.0, 0.1);
+        v.rig.position.y = THREE.MathUtils.lerp(v.rig.position.y, -0.12, 0.1);
+        L(v.armR, -0.9 + Math.sin(time * 12 + e) * 0.5, 0.3); L(v.armL, -0.2, 0.15);
+        v.head.rotation.x = THREE.MathUtils.lerp(v.head.rotation.x, 0.3, 0.1); break;
+      case 'grappling': {   // arms forward gripping, leaning in with effort
+        const g = Math.sin(time * 9 + e) * 0.08; L(v.armL, -1.35 + g, 0.3); L(v.armR, -1.35 - g, 0.3);
+        v.rig.rotation.x = THREE.MathUtils.lerp(v.rig.rotation.x, 0.18, 0.2); v.rig.position.y = Math.abs(g) * 0.3; break; }
+      case 'held': {   // pinned, twisting to break free
+        const s = Math.sin(time * 14 + e) * 0.18; L(v.armL, -1.0 + s, 0.3); L(v.armR, -1.0 - s, 0.3);
+        v.rig.rotation.z = s * 0.5; v.rig.rotation.x = THREE.MathUtils.lerp(v.rig.rotation.x, -0.12, 0.2); break; }
       default: {
         const breathe = Math.sin(time * 2 + e) * 0.02; const sub = e % 3;
         L(v.armL, 0.04 + breathe, 0.15); L(v.armR, 0.04 + breathe, 0.15);

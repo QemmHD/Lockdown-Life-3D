@@ -1,5 +1,5 @@
 import { ECS, Entity } from '../ecs/world';
-import { Position, Render, Agent, Needs, Brain, Social, Inventory, Attributes } from '../ecs/components';
+import { Position, Render, Agent, Needs, Brain, BrainState, Social, Inventory, Attributes } from '../ecs/components';
 import { TileMap } from '../world/TileMap';
 import { generatePrison, randomTileInRoom, Room, Cell } from '../world/WorldGen';
 import { findPath } from '../world/Pathfinding';
@@ -50,6 +50,46 @@ const USE_STATE: Record<string, string> = {
   job: 'working', shelf: 'working', trash: 'working'
 };
 const USING_STATES = new Set(['resting', 'washing', 'eating', 'training', 'working']);
+// ---- Stage 4.30 grapple-hold tuning (sim-only; numbers vetted by the design-review pass) ----
+const HOLD_CLINCH_ENERGY = 0.45;     // foe energy gate: below this a won grab clinches instead of slamming
+const HOLD_CLINCH_STRMARGIN = 28;    // alt clinch trigger: eff-STR margin (~0.73 pWin)
+const HOLD_SEED_BASE = 0.10;         // holdMeter never starts at a dead 0
+const HOLD_SEED_PERMARGIN = 0.004;   // + per eff-STR margin, up to the cap
+const HOLD_SEED_CAP = 0.30;          // a dominant grab opens ~0.30
+const HOLD_FILL_BASE = 0.16;         // base holdMeter /s (~5.6s solo — slower than the instant slam)
+const HOLD_FILL_STR_K = 0.0045;      // + /s per eff-STR margin
+const HOLD_FILL_RATE_MIN = 0.08;     // floor so a weak holder still progresses (no dead 8s clinch)
+const HOLD_FILL_RATE_MAX = 0.42;     // cap so a god-stat holder can't instant-choke (~2.6s min)
+const HOLD_FILL_EXHAUST_K = 0.12;    // + /s scaled by (1 - heldEnergy): squeezing a gassed foe finishes faster
+const HOLD_SQUEEZE_DRAIN = 0.06;     // held energy drained /s while squeezed
+const CHOKE_BTN_BOOST = 0.22;        // player Choke press → holdMeter (~4-5 presses from seed)
+const CHOKE_BTN_ENERGY = 0.07;       // a Choke costs YOUR energy (anti perma-grapple tax)
+const CHOKE_BTN_CD = 0.45;           // Choke internal cooldown (own field — the panel zeroes attackCd)
+const ESCAPE_FILL_NPC_BASE = 0.18;   // per NPC struggle attempt, scaled by the AGI/STR contest
+const ESCAPE_NPC_CADENCE = 0.55;     // NPC struggle tick (~1.8/s — outpaces a default fill)
+const ESCAPE_FILL_PLAYER_MASH = 0.11;  // per player Struggle press — active mashing reliably beats even a strong holder
+const STRUGGLE_DISRUPT = 0.05;         // each player Struggle also knocks the holder's choke meter back (you fight the grip)
+const STRUGGLE_CD = 0.25;            // player Struggle debounce (4/s max → min ~3s escape)
+const REVERSE_COST = 0.5;            // a failed Reverse burns half your escape progress
+const REVERSE_CD = 1.2;              // lockout after a Reverse (anti reverse-spam stall)
+const HOLD_MAX = 8;                  // hold timeout → breakHold (soft-lock guard)
+const SUBMIT_AUTOTAP_METER = 0.65;   // held may self-tap once the holder is clearly winning
+const SUBMIT_AUTOTAP_HEALTH = 0.25;  // ...and the held is low health OR
+const SUBMIT_AUTOTAP_ENERGY = 0.18;  // ...low energy
+const SUBMIT_AUTOTAP_CHANCE = 0.20;  // /s base tap chance (×(1 + (1 - respect/100)) — low-respect tap faster)
+const UNCONSCIOUS_TIME = 14;         // KO'd-cold lockout (~2.8× DOWN_TIME)
+const SUBMIT_TIME = 7;               // tapped-out lockout (~1.4× DOWN_TIME)
+const CHOKE_HEALTH_FLOOR = 0.12;     // a choked-cold loser wakes at 12%
+const SUBMIT_HEALTH_FLOOR = 0.22;    // a tapper recovers a bit better
+const CHOKEOUT_RESPECT_BONUS = 9;    // chokeout winner respect (vs +6 knockdown — domination)
+const CHOKEOUT_HEAT = 8;             // a brutal finish draws more heat (vs +5)
+const SUBMIT_LOSER_RESPECT_PEN = 9;  // a public tap costs the loser more standing (vs -4)
+const NPC_GRAB_CHANCE = 0.35;        // chance an eligible NPC actually grabs (then a 6-11s cd)
+const NPC_GRAB_SELF_ENERGY = 0.25;   // gassed NPCs don't grab (they'd lose the contest)
+// shared state-sets for the call-site audit (added everywhere a busy/incapacitated fighter must be excluded)
+const INERT = new Set<BrainState>(['down', 'unconscious', 'submit']);   // incapacitated bodies on the ground
+const NOAI = new Set<BrainState>(['fight', 'grappling', 'held', 'down', 'unconscious', 'submit', 'solitary', 'escorted', 'beingSearched']);
+const isBrawling = (s: string) => s === 'fight' || s === 'grappling' || s === 'held';
 export type InteractAction = 'talk' | 'compliment' | 'recruit' | 'insult' | 'threaten' | 'trade' | 'favor' | 'fight' | 'backoff' | 'comply' | 'argue' | 'rest' | 'wash' | 'eat' | 'train' | 'work' | 'pickup' | 'use' | 'inspect' | 'search' | 'hide' | 'take' | 'open' | 'close' | 'try' | 'escape';
 const SELF_ACTIONS: InteractAction[] = ['rest', 'wash', 'eat', 'train', 'work'];
 const ACTION_DUR: Record<string, number> = { talk: 0.8, insult: 0.9, threaten: 1.0, trade: 1.1, favor: 1.0, comply: 0.6, argue: 0.8, rest: 1.4, wash: 1.4, eat: 1.5, train: 1.4, work: 1.8, escape: 3.0 };
@@ -136,7 +176,7 @@ export class Simulation {
   economy: EconomyState = newEconomy();
 
   // lightweight playtest telemetry (?debug)
-  metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0, newGameStarted: 0, setupRandomized: 0, setupCompleted: 0, invitesGenerated: 0, invitesAccepted: 0, invitesDeclined: 0, invitesExpired: 0, rankUps: 0, gangJoined: 0, gangStandingChanges: 0, allyHelp: 0, trades: 0, buys: 0, sells: 0, itemsUsed: 0, itemsStashed: 0, itemsConfiscated: 0, jobMoneyEarned: 0, marketRestocks: 0, gangOffersGenerated: 0, economyObjectivesCompleted: 0 };
+  metrics: Record<string, number> = { fightsStarted: 0, fightsEnded: 0, fightsBrokenUp: 0, searches: 0, contrabandFound: 0, lockdownsStarted: 0, lockdownsEnded: 0, alarms: 0, riotWarnings: 0, riotEvents: 0, escapeAttempts: 0, blockedFallbacks: 0, guardCheckpointFails: 0, stuckPrisoners: 0, prisonerIntentChanges: 0, socialInteractions: 0, guardRoleSwitches: 0, standoffs: 0, standoffsEscalated: 0, standoffsDefused: 0, orderRefusals: 0, complianceEvents: 0, attacksAttempted: 0, hits: 0, misses: 0, blocks: 0, dodges: 0, knockdowns: 0, guardInterrupts: 0, fightDisciplines: 0, playerCombatChoices: 0, grapples: 0, holds: 0, chokeouts: 0, submits: 0, grappleEscapes: 0, reversals: 0, newGameStarted: 0, setupRandomized: 0, setupCompleted: 0, invitesGenerated: 0, invitesAccepted: 0, invitesDeclined: 0, invitesExpired: 0, rankUps: 0, gangJoined: 0, gangStandingChanges: 0, allyHelp: 0, trades: 0, buys: 0, sells: 0, itemsUsed: 0, itemsStashed: 0, itemsConfiscated: 0, jobMoneyEarned: 0, marketRestocks: 0, gangOffersGenerated: 0, economyObjectivesCompleted: 0 };
 
   constructor(public bus: EventBus, seed = Math.floor(Math.random() * 1e9)) { this.rng = new Random(seed); }
 
@@ -336,7 +376,7 @@ export class Simulation {
         for (const e of this.ecs.query('Brain')) {
           const b = this.ecs.get<Brain>(e, 'Brain')!;
           if (b.isPlayer) continue; // the player is not yanked by the schedule
-          if (b.role === 'prisoner' && b.state !== 'fight' && b.state !== 'down' && b.state !== 'solitary' && b.state !== 'escorted' && b.state !== 'beingSearched') {
+          if (b.role === 'prisoner' && !NOAI.has(b.state)) {
             // release any object held/claimed for the previous phase, then re-route
             this.releaseFor(e); b.objTarget = undefined;
             if (USING_STATES.has(b.state)) b.state = 'idle';
@@ -367,7 +407,7 @@ export class Simulation {
       if (!o.reservedBy) continue;
       o.reservedUntil -= dt;
       const b = this.brain(o.reservedBy);
-      if (!b || o.reservedUntil <= 0 || b.state === 'down' || b.state === 'solitary') {
+      if (!b || o.reservedUntil <= 0 || INERT.has(b.state) || b.state === 'solitary') {
         if (b && b.objTarget === o.id) b.objTarget = undefined;
         o.reservedBy = 0; o.reservedUntil = 0;
       }
@@ -465,7 +505,7 @@ export class Simulation {
     const crowd = room ? this.prisonersInRoom(room) : [];
     let flared = 0;
     for (const e of crowd) {
-      const b = this.brain(e)!; if (b.isPlayer || b.state === 'down' || b.state === 'solitary') continue;
+      const b = this.brain(e)!; if (b.isPlayer || INERT.has(b.state) || b.state === 'solitary') continue;
       const nd = this.ecs.get<Needs>(e, 'Needs')!; nd.anger = clamp01(nd.anger + 0.4);
       this.bubble(e, '😡', 'insult', 1.6);
       if (++flared >= 4) break;
@@ -502,7 +542,7 @@ export class Simulation {
     const ph = phaseAt(this.hour);
     for (const e of this.ecs.query('Brain', 'Agent')) {
       const b = this.brain(e)!; if (b.role !== 'prisoner' || b.isPlayer) continue;
-      if (['fight', 'down', 'solitary', 'escorted', 'beingSearched'].includes(b.state)) continue;
+      if (NOAI.has(b.state)) continue;
       this.releaseFor(e); b.objTarget = undefined; if (USING_STATES.has(b.state)) b.state = 'idle';
       b.targetRoom = ph.room; b.state = 'goto'; this.ecs.get<Agent>(e, 'Agent')!.path = null;
     }
@@ -516,7 +556,7 @@ export class Simulation {
   private orderPrisonersToCells() {
     for (const e of this.ecs.query('Brain', 'Agent', 'Position')) {
       const b = this.brain(e)!; if (b.role !== 'prisoner' || b.isPlayer) continue;
-      if (['fight', 'down', 'solitary', 'escorted', 'beingSearched'].includes(b.state)) continue;
+      if (NOAI.has(b.state)) continue;
       this.releaseFor(e); b.objTarget = undefined; if (USING_STATES.has(b.state)) b.state = 'idle';
       b.targetRoom = 'cellblock'; b.state = 'goto'; this.ecs.get<Agent>(e, 'Agent')!.path = null;
       if (this.rng.chance(0.5)) this.bubble(e, this.rng.chance(0.5) ? 'Return to cell!' : '😟', 'search', 1.4);
@@ -567,7 +607,7 @@ export class Simulation {
   }
   // two rivals in a room exchange a warning (bubble) — tension, not violence
   private standoff(roomId: string) {
-    const inmates = this.prisonersInRoom(roomId).filter((e) => { const b = this.brain(e)!; return b.gang && !b.bubbleCd && b.state !== 'fight' && !b.isPlayer; });
+    const inmates = this.prisonersInRoom(roomId).filter((e) => { const b = this.brain(e)!; return b.gang && !b.bubbleCd && !isBrawling(b.state) && !INERT.has(b.state) && !b.isPlayer; });
     for (const e of inmates) {
       const b = this.brain(e)!;
       const rival = inmates.find((o) => o !== e && areEnemies(b.gang, this.brain(o)!.gang));
@@ -625,7 +665,7 @@ export class Simulation {
     // a desperate prisoner near an opportunity zone
     const cand = this.ecs.query('Brain', 'Position', 'Needs').find((e) => {
       const b = this.brain(e)!; if (b.role !== 'prisoner' || b.isPlayer) return false;
-      if (['fight', 'down', 'solitary', 'escorted', 'beingSearched'].includes(b.state)) return false;
+      if (NOAI.has(b.state)) return false;
       const nd = this.ecs.get<Needs>(e, 'Needs')!; if (nd.fear > 0.5 || nd.anger < 0.4) return false;
       return ESCAPE_OPPORTUNITY_ROOMS.includes(this.roomTypeAt(this.pos(e)!));
     });
@@ -864,7 +904,7 @@ export class Simulation {
     let best = '', bs = INVITE_STANDING;
     for (const id in this.gang.standing) { const v = this.gang.standing[id]; if (v >= bs && GANG_MAP[id]) { bs = v; best = id; } }
     if (!best) return;
-    const member = this.ecs.query('Brain', 'Position').find((e) => { const b = this.brain(e)!; return b.gang === best && b.role === 'prisoner' && b.state !== 'down' && b.state !== 'solitary'; });
+    const member = this.ecs.query('Brain', 'Position').find((e) => { const b = this.brain(e)!; return b.gang === best && b.role === 'prisoner' && !INERT.has(b.state) && !isBrawling(b.state) && b.state !== 'solitary'; });
     if (member == null) return;
     this.openInvite(best, member);
   }
@@ -1200,7 +1240,7 @@ export class Simulation {
     for (const e of this.ecs.query('Brain', 'Agent', 'Position')) {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
       if (b.role !== 'prisoner' || b.isPlayer) continue;   // player is manually controlled
-      if (b.state === 'fight' || b.state === 'down' || b.state === 'solitary' || b.state === 'beingSearched' || b.state === 'escorted') continue;
+      if (NOAI.has(b.state)) continue;
       const ag = this.ecs.get<Agent>(e, 'Agent')!;
       const p = this.ecs.get<Position>(e, 'Position')!;
       // holding a use-pose at an object: keep the reservation alive, then release
@@ -1303,7 +1343,7 @@ export class Simulation {
   // ---- nearby-entity scans (cheap; population ~18) + simple avoidance moves ----
   private nearestFight(p: Position, range: number): Position | null {
     let best: Position | null = null, bd = range;
-    for (const e of this.ecs.query('Brain', 'Position')) { const b = this.brain(e)!; if (b.state !== 'fight') continue; const q = this.pos(e)!; const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = q; } }
+    for (const e of this.ecs.query('Brain', 'Position')) { const b = this.brain(e)!; if (!isBrawling(b.state)) continue; const q = this.pos(e)!; const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = q; } }
     return best;
   }
   private nearestEnemy(e: Entity, b: Brain, p: Position, range: number): Position | null {
@@ -1320,7 +1360,7 @@ export class Simulation {
     if (!b.gang) return null;
     let best: Entity | null = null, bd = range;
     for (const o of this.ecs.query('Brain', 'Position')) {
-      if (o === e) continue; const ob = this.brain(o)!; if (ob.role !== 'prisoner' || ob.gang !== b.gang || ob.state === 'fight') continue;
+      if (o === e) continue; const ob = this.brain(o)!; if (ob.role !== 'prisoner' || ob.gang !== b.gang || isBrawling(ob.state) || INERT.has(ob.state)) continue;
       const q = this.pos(o)!; const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = o; }
     }
     return best;
@@ -1401,7 +1441,7 @@ export class Simulation {
         this.setGuardRole(b, 'response');
         const fp = this.ecs.get<Position>(b.foe, 'Position');
         const fb = this.ecs.get<Brain>(b.foe, 'Brain');
-        if (!fp || !fb || (fb.state !== 'fight')) { this.endRespond(e, b); continue; }
+        if (!fp || !fb || !isBrawling(fb.state)) { this.endRespond(e, b); continue; }
         const d = Math.hypot(fp.x - p.x, fp.z - p.z);
         if (d < 1.7) { this.breakUpFight(e, b.foe); this.endRespond(e, b); }
         else if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, b.foe); ag.repathCd = 0.6; }
@@ -1417,11 +1457,11 @@ export class Simulation {
         b.actTimer = (b.actTimer ?? 0) - dt;
         if ((b.actTimer ?? 0) > 0) { p.facing = Math.atan2(fp.x - p.x, fp.z - p.z); continue; }   // pause to notice
         const d = Math.hypot(fp.x - p.x, fp.z - p.z);
-        if (fb.state === 'fight') {                                  // confirmed live → commit to a full response
+        if (isBrawling(fb.state)) {                                  // confirmed live → commit to a full response
           if (d < 1.7) { this.breakUpFight(e, b.foe); this.endRespond(e, b); }
           else { b.state = 'respond'; b.actTimer = undefined; b.investigateGiveup = undefined; if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, b.foe); ag.repathCd = 0.6; } }
         } else if (d > 2.4) {                                        // it scattered — chase briefly, then give up and stand down
-          if (fb.state === 'solitary' || fb.state === 'down' || fb.state === 'escorted' || fb.state === 'beingSearched') { this.endRespond(e, b); continue; }
+          if (fb.state === 'solitary' || INERT.has(fb.state) || fb.state === 'escorted' || fb.state === 'beingSearched') { this.endRespond(e, b); continue; }
           b.investigateGiveup = (b.investigateGiveup ?? 4) - dt;
           if (b.investigateGiveup <= 0) { this.endRespond(e, b); continue; }
           if (!ag.path && ag.repathCd <= 0) { this.gotoEntity(e, b.foe); if (!ag.path) { this.endRespond(e, b); continue; } ag.repathCd = 0.6; }
@@ -1560,17 +1600,43 @@ export class Simulation {
         if (b.timer <= 0) { b.state = 'idle'; b.cphase = undefined; const nn = this.ecs.get<Needs>(e, 'Needs')!; nn.health = Math.max(0.2, nn.health); }
         continue;
       }
+      if (b.state === 'unconscious') {   // Stage 4.30 — choked out cold: limp far longer than a knockdown, then come to
+        b.cphase = 'down'; b.timer -= dt;
+        if (b.timer <= 0) { b.state = 'idle'; b.cphase = undefined; b.action = 'Coming to'; const nn = this.ecs.get<Needs>(e, 'Needs')!; nn.health = Math.max(CHOKE_HEALTH_FLOOR, nn.health); }
+        continue;
+      }
+      if (b.state === 'submit') {   // Stage 4.30 — tapped out: defeated but conscious, recovers sooner
+        b.cphase = undefined; b.timer -= dt;
+        if (b.timer <= 0) { b.state = 'idle'; b.action = 'Idle'; const nn = this.ecs.get<Needs>(e, 'Needs')!; nn.health = Math.max(SUBMIT_HEALTH_FLOOR, nn.health); }
+        continue;
+      }
       if (b.blockT) b.blockT = Math.max(0, b.blockT - dt);
       if (b.parryT) b.parryT = Math.max(0, b.parryT - dt);
       if (b.dodgeT) b.dodgeT = Math.max(0, b.dodgeT - dt);
       if (b.guardBroken) b.guardBroken = Math.max(0, b.guardBroken - dt);
       if (b.guardDmg) b.guardDmg = Math.max(0, b.guardDmg - dt * 0.3);
       if (b.momentum) { if ((b.momentumT ?? 0) > 0) b.momentumT = Math.max(0, (b.momentumT ?? 0) - dt); else b.momentum = Math.max(0, b.momentum - dt * 0.5); }
+      if (b.grappleCd) b.grappleCd = Math.max(0, b.grappleCd - dt);   // Stage 4.30 cooldowns (tick for everyone)
+      if (b.chokeCd) b.chokeCd = Math.max(0, b.chokeCd - dt);
+      if (b.reverseCd) b.reverseCd = Math.max(0, b.reverseCd - dt);
+      // Stage 4.30 — grapple-hold routers (above the fight check). Reciprocal validity is the central soft-lock net.
+      if (b.state === 'grappling') {
+        const pb = b.grappleWith != null ? this.brain(b.grappleWith) : null;
+        const pp = b.grappleWith != null ? this.pos(b.grappleWith) : null;
+        if (!pb || !pp || pb.state !== 'held' || pb.grappleWith !== e) { this.breakHold(e); continue; }
+        this.advanceHold(e, b, pb, b.grappleWith!, pp, dt); continue;
+      }
+      if (b.state === 'held') {
+        const pb = b.grappleWith != null ? this.brain(b.grappleWith) : null;
+        if (!pb || pb.state !== 'grappling' || pb.grappleWith !== e) { this.breakHold(e); continue; }
+        if (b.isPlayer && b.struggleCd) b.struggleCd = Math.max(0, b.struggleCd - dt);   // player mash debounce (NPC held ticks in advanceHold)
+        continue;   // single-authority: the hold is only advanced from the holder side
+      }
       if (b.state !== 'fight' || b.foe == null) { if (b.cphase) b.cphase = undefined; continue; }
       const p = this.ecs.get<Position>(e, 'Position')!;
       const fb = this.ecs.get<Brain>(b.foe, 'Brain');
       const fp = this.ecs.get<Position>(b.foe, 'Position');
-      if (!fb || !fp || fb.state === 'down' || fb.state === 'solitary') { this.endFighter(e, b); continue; }
+      if (!fb || !fp || INERT.has(fb.state) || fb.state === 'grappling' || fb.state === 'held' || fb.state === 'solitary' || fb.state === 'escorted') { this.endFighter(e, b); continue; }   // foe got clinched/incapacitated → stand down
       // always face the foe + keep fighting spacing (no overlap)
       p.facing = Math.atan2(fp.x - p.x, fp.z - p.z);
       const d = Math.hypot(fp.x - p.x, fp.z - p.z);
@@ -1616,6 +1682,17 @@ export class Simulation {
     if (b.isPlayer && b.pendingAtk) { const a = b.pendingAtk as AttackType; b.pendingAtk = undefined; return a; }
     const n = this.ecs.get<Needs>(e, 'Needs')!;
     const weapon = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.combat ?? 0).reduce((a, c) => Math.max(a, c), 0);
+    // Stage 4.30 — strong/aggressive NPCs grab a worn-down foe to start a hold, then a 6-11s cooldown so it isn't spam
+    if (!b.isPlayer && b.foe != null && (b.grappleCd ?? 0) <= 0 && n.energy > NPC_GRAB_SELF_ENERGY) {
+      const grappler = b.traits.includes('tough') || b.traits.includes('aggressive') || b.traits.includes('fighter');
+      const fb = this.brain(b.foe); const fn = this.ecs.get<Needs>(b.foe, 'Needs');
+      if (grappler && fb && fn && !fb.blockT) {
+        const aStr = this.effStat(this.attrs(e)?.strength ?? 30, n.energy);
+        const dStr = this.effStat(this.attrs(b.foe)?.strength ?? 30, fn.energy);
+        const weakFoe = fn.energy < HOLD_CLINCH_ENERGY || (fb.guardBroken ?? 0) > 0 || fb.cphase === 'stumble' || (aStr - dStr) > HOLD_CLINCH_STRMARGIN;
+        if (weakFoe && this.rng.chance(NPC_GRAB_CHANCE)) { b.grappleCd = this.rng.range(6, 11); return 'grab'; }
+      }
+    }
     return chooseAttack({ anger: n.anger, fear: n.fear, energy: n.energy, weapon, tough: b.traits.includes('tough'), aggressive: b.traits.includes('aggressive') }, this.rng.float());
   }
   // resolve a windup into an outcome on the foe + feedback
@@ -1712,6 +1789,10 @@ export class Simulation {
       b.cphase = 'stumble'; b.cTimer = STUMBLE; an.fear = clamp01(an.fear + 0.05);
       return;
     }
+    // Stage 4.30 — a won grab on a worn-down / over-powered foe CLINCHES into a persistent hold; otherwise the v4.25 slam
+    this.metrics.grapples++;
+    const clinchable = fn.energy < HOLD_CLINCH_ENERGY || (fb.guardBroken ?? 0) > 0 || fb.cphase === 'stumble' || (aStr - dStr) > HOLD_CLINCH_STRMARGIN;
+    if (clinchable) { this.enterHold(e, b, foe, fb, fp, aStr, dStr); return; }
     this.metrics.hits++;
     const armor = (this.inv(foe)?.items ?? []).map((i) => ITEMS[i]?.armor ?? 0).reduce((a, c) => Math.max(a, c), 0);
     const dmg = this.rng.range(ATTACKS.grab.dmgMin, ATTACKS.grab.dmgMax) * (b.traits.includes('tough') ? 1.15 : 1) * (1 - armor * 0.6);
@@ -1726,7 +1807,151 @@ export class Simulation {
     this.faceWatchers(fp.x, fp.z);
     this.crowdReact(fp.x, fp.z);
   }
+  // Stage 4.30 — clinch the foe into a persistent hold (holder='grappling', held='held'). Advanced from the holder only.
+  private enterHold(holder: Entity, hb: Brain, held: Entity, hdb: Brain, hdp: Position, aStr: number, dStr: number) {
+    if (hb.grappleWith != null) this.cleanupHoldFor(holder);   // tear down any prior hold first so acquisition is idempotent (no clobbered links)
+    if (hdb.grappleWith != null) this.cleanupHoldFor(held);
+    hb.state = 'grappling'; hdb.state = 'held';
+    hb.grappleWith = held; hdb.grappleWith = holder;
+    hb.foe = held; hdb.foe = holder;
+    hb.holdMeter = clamp01(HOLD_SEED_BASE + Math.min(HOLD_SEED_PERMARGIN * Math.max(0, aStr - dStr), HOLD_SEED_CAP - HOLD_SEED_BASE));
+    hb.holdT = 0; hdb.escapeMeter = 0; hb.struggleCd = 0; hdb.struggleCd = 0; hb.chokeCd = 0; hdb.reverseCd = 0;
+    hb.cphase = undefined; hdb.cphase = undefined;
+    const ha = this.ecs.get<Agent>(holder, 'Agent'); if (ha) ha.path = null;
+    const da = this.ecs.get<Agent>(held, 'Agent'); if (da) da.path = null;
+    hb.action = 'Choking'; hdb.action = 'Held!';
+    this.metrics.holds++;
+    this.bus.emit('float', { x: hdp.x, z: hdp.z, text: 'CLINCH!', color: '#ffd24a' });
+    this.bus.emit('hitspark', { power: 0.5 });
+    if (hdb.isPlayer) this.bus.emit('alert', { type: 'critical', text: `${hb.name} has you in a hold — tap Struggle fast to break free!` });
+    else if (hb.isPlayer) this.bus.emit('alert', { type: 'player', text: `You clinch ${hdb.name} — Choke to finish, or Slam them down.` });
+  }
+  // per-tick hold progression — driven ONLY from the holder side (the held side waits in combatSystem)
+  private advanceHold(holder: Entity, hb: Brain, hdb: Brain, held: Entity, hdp: Position, dt: number) {
+    hb.holdT = (hb.holdT ?? 0) + dt;
+    if (hb.holdT > HOLD_MAX) { this.breakHold(holder, 'timeout'); return; }   // gassed / stalemate clinch separates (soft-lock guard)
+    const hp = this.pos(holder)!; const hn = this.ecs.get<Needs>(holder, 'Needs')!; const hdn = this.ecs.get<Needs>(held, 'Needs')!;
+    // lock the two together + face off; reposition the held via the walkable-clamped nudge so no one ends up in a wall
+    hp.facing = Math.atan2(hdp.x - hp.x, hdp.z - hp.z);
+    const want = COMBAT_SPACING * 0.8; const tx = hp.x + Math.sin(hp.facing) * want, tz = hp.z + Math.cos(hp.facing) * want;
+    if (Math.hypot(tx - hdp.x, tz - hdp.z) > 0.12) this.nudge(hdp, (tx - hdp.x) * 0.5, (tz - hdp.z) * 0.5);
+    hdp.facing = Math.atan2(hp.x - hdp.x, hp.z - hdp.z);
+    const aStr = this.effStat(this.attrs(holder)?.strength ?? 30, hn.energy);
+    const dStr = this.effStat(this.attrs(held)?.strength ?? 30, hdn.energy);
+    // holdMeter fills over time (NPC auto-tighten; the player adds via Choke on top), held energy drains from the squeeze
+    const rate = clamp(HOLD_FILL_BASE + HOLD_FILL_STR_K * Math.max(0, aStr - dStr) + HOLD_FILL_EXHAUST_K * (1 - hdn.energy), HOLD_FILL_RATE_MIN, HOLD_FILL_RATE_MAX);
+    if (!hb.isPlayer) hb.holdMeter = clamp01((hb.holdMeter ?? 0) + rate * dt);   // NPC holder auto-tightens; the PLAYER must drive the meter with Choke
+    hdn.energy = clamp01(hdn.energy - HOLD_SQUEEZE_DRAIN * dt);                   // the squeeze wears the held down (true for a player holder too)
+    hn.energy = clamp01(hn.energy - HOLD_SQUEEZE_DRAIN * 0.4 * dt);              // maintaining a hold tires the holder too (so a clinch can genuinely gas out)
+    // NPC held struggles on a cadence (the player held adds via the Struggle button instead)
+    if (!hdb.isPlayer) {
+      hdb.struggleCd = (hdb.struggleCd ?? 0) - dt;
+      if ((hdb.struggleCd ?? 0) <= 0) {
+        const dAgi = this.effStat(this.attrs(held)?.agility ?? 30, hdn.energy);
+        const contest = clamp(0.5 + ((dAgi * 0.6 + dStr * 0.4) - aStr) / 100, 0.2, 0.9);
+        hdb.escapeMeter = clamp01((hdb.escapeMeter ?? 0) + ESCAPE_FILL_NPC_BASE * contest);
+        hdb.struggleCd = ESCAPE_NPC_CADENCE;
+        if (this.rng.chance(0.4) && !hdb.bubbleCd) { this.bubble(held, '😣', 'insult', 0.6); hdb.bubbleCd = 1.2; }
+      }
+    }
+    if ((hdb.escapeMeter ?? 0) >= 1) { this.metrics.grappleEscapes++; this.breakHold(holder, 'escape'); return; }   // broke free
+    // the held may TAP before being choked out — likelier the weaker / lower-respect they are
+    const hds = this.social(held);
+    if (!hdb.isPlayer && (hb.holdMeter ?? 0) >= SUBMIT_AUTOTAP_METER && (hdn.health < SUBMIT_AUTOTAP_HEALTH || hdn.energy < SUBMIT_AUTOTAP_ENERGY)
+        && this.rng.chance(SUBMIT_AUTOTAP_CHANCE * (1 + (1 - (hds?.respect ?? 20) / 100)) * dt)) {
+      this.forceSubmit(held, hdb, holder, hb); return;   // the player is never force-tapped — they escape or get choked out
+    }
+    // a full meter = a finish
+    if ((hb.holdMeter ?? 0) >= 1) {
+      if (hb.isPlayer || hdb.isPlayer) { this.chokeOut(held, hdb, holder, hb); return; }   // a player on either end → a decisive chokeout (no forced tap)
+      const wpn = (this.inv(holder)?.items ?? []).some((id) => (ITEMS[id]?.combat ?? 0) >= 3);
+      const violent = hb.traits.includes('aggressive') || hb.traits.includes('tough') || hb.traits.includes('fighter') || wpn;
+      const weakFoe = (hds?.respect ?? 20) < 30 || hdb.traits.includes('weak');
+      if (violent || !weakFoe) this.chokeOut(held, hdb, holder, hb); else this.forceSubmit(held, hdb, holder, hb);
+    }
+  }
+  // Stage 4.30 — end a hold from EITHER end; idempotent, tolerant of an invalid id, clears all hold fields on BOTH parties
+  private breakHold(anyId: Entity, mode: 'escape' | 'release' | 'timeout' | 'force' = 'force') {
+    const ab = this.brain(anyId); if (!ab) return;
+    let holder: Entity | undefined, held: Entity | undefined;
+    const partner = ab.grappleWith;
+    if (ab.state === 'held') { held = anyId; holder = partner; }
+    else if (ab.state === 'grappling') { holder = anyId; held = partner; }
+    else if (partner != null) { holder = this.brain(partner)?.state === 'grappling' ? partner : anyId; held = partner; }
+    else { holder = anyId; }
+    const clearFields = (b: Brain | undefined) => { if (!b) return; b.grappleWith = undefined; b.holdMeter = undefined; b.holdT = undefined; b.escapeMeter = undefined; b.struggleCd = undefined; b.chokeCd = undefined; b.reverseCd = undefined; };
+    const hb = holder != null ? this.brain(holder) : undefined;
+    const hdb = held != null ? this.brain(held) : undefined;
+    clearFields(hb); clearFields(hdb);
+    if (hb) { hb.foe = undefined; if (hb.state === 'grappling') { hb.state = 'idle'; hb.cphase = mode === 'escape' ? 'stumble' : undefined; hb.cTimer = mode === 'escape' ? STUMBLE : 0; hb.action = 'Idle'; } }
+    if (hdb && hdb.state === 'held') {
+      hdb.foe = undefined; hdb.state = 'idle'; hdb.cphase = undefined; hdb.action = 'Idle';
+      const hdn = this.ecs.get<Needs>(held!, 'Needs'); if (hdn && mode === 'escape') hdn.fear = clamp01(hdn.fear - 0.1);
+      if (mode === 'escape') { const hdp = this.pos(held!); const hp = holder != null ? this.pos(holder) : null; if (hdp && hp) { const a = Math.atan2(hdp.x - hp.x, hdp.z - hp.z); this.nudge(hdp, Math.sin(a) * 0.6, Math.cos(a) * 0.6); } }
+    } else if (hdb) { hdb.foe = undefined; }
+  }
+  // call BEFORE any external code re-states an entity that might be mid-hold (escort, solitary, knockdown, schedule…)
+  private cleanupHoldFor(e: Entity) { const b = this.brain(e); if (b && b.grappleWith != null) this.breakHold(e, 'force'); }
+  // Stage 4.30 — a completed choke: the loser goes out cold (small lethal chance vs the player). Mirrors knockDown.
+  private chokeOut(loser: Entity, lb: Brain, winner: Entity, wb: Brain) {
+    this.cleanupHoldFor(loser); this.cleanupHoldFor(winner);   // drop the grip on both ends first
+    const ln = this.ecs.get<Needs>(loser, 'Needs')!;
+    if (lb.isPlayer) {
+      const weapon = (this.inv(winner)?.items ?? []).some((id) => (ITEMS[id]?.combat ?? 0) >= 3);
+      const chaos = this.lockdown.active || this.riotLevel === 'event' || this.alarm.active;
+      const risk = Math.min(0.06, (0.012 + (weapon ? 0.02 : 0) + (chaos ? 0.02 : 0)) * (lb.traits.includes('tough') ? 0.55 : 1));
+      if (this.rng.float() < risk) { this.bus.emit('hitspark', { power: 1.4, lethal: true }); this.endRun('dead', `Choked out cold by ${wb.name} — never woke up`); return; }
+    }
+    lb.state = 'unconscious'; lb.timer = UNCONSCIOUS_TIME; lb.foe = undefined; lb.cphase = 'down';
+    ln.health = Math.max(CHOKE_HEALTH_FLOOR, ln.health);
+    const la = this.ecs.get<Agent>(loser, 'Agent'); if (la) la.path = null;
+    this.injure(loser, lb);
+    wb.state = 'idle'; wb.foe = undefined; wb.cphase = undefined;
+    const wn = this.ecs.get<Needs>(winner, 'Needs'); if (wn) wn.anger = clamp01(wn.anger - 0.3);
+    this.metrics.chokeouts++; this.metrics.fightsEnded++;
+    this.bus.emit('float', { x: this.pos(loser)!.x, z: this.pos(loser)!.z, text: 'OUT COLD', color: '#9fd0ff' });
+    this.bus.emit('alert', { type: 'fight', text: `${wb.name} choked out ${lb.name}` });
+    if (lb.isPlayer || wb.isPlayer) this.bus.emit('hitspark', { power: 1.3, lethal: true });
+    this.onFightWin(winner, loser, wb, lb, 'chokeout');
+  }
+  // Stage 4.30 — the held taps out: defeated but conscious, recovers faster than a chokeout.
+  private forceSubmit(loser: Entity, lb: Brain, winner: Entity, wb: Brain) {
+    this.cleanupHoldFor(loser); this.cleanupHoldFor(winner);
+    const ln = this.ecs.get<Needs>(loser, 'Needs')!;
+    lb.state = 'submit'; lb.timer = SUBMIT_TIME; lb.foe = undefined; lb.cphase = undefined;
+    ln.health = Math.max(SUBMIT_HEALTH_FLOOR, ln.health);
+    const la = this.ecs.get<Agent>(loser, 'Agent'); if (la) la.path = null;
+    wb.state = 'idle'; wb.foe = undefined; wb.cphase = undefined;
+    const wn = this.ecs.get<Needs>(winner, 'Needs'); if (wn) wn.anger = clamp01(wn.anger - 0.3);
+    this.metrics.submits++; this.metrics.fightsEnded++;
+    this.bus.emit('float', { x: this.pos(loser)!.x, z: this.pos(loser)!.z, text: 'TAPS OUT', color: '#ffd24a' });
+    this.bus.emit('alert', { type: 'fight', text: `${lb.name} taps out to ${wb.name}` });
+    this.onFightWin(winner, loser, wb, lb, 'submit');
+    lb.action = 'Tapped out';   // label the tapped-out NPC (forceSubmit is only ever reached with an NPC loser)
+  }
+  // Stage 4.30 — the HELD player tries to flip the hold (STR/AGI contest). Win = roles swap and you become the holder.
+  private tryReverse(player: Entity, pb: Brain): boolean {
+    const holder = pb.grappleWith; if (holder == null) return false;
+    const hb = this.brain(holder); const hp = this.pos(holder); const pp = this.pos(player);
+    if (!hb || hb.state !== 'grappling' || !hp || !pp) { this.breakHold(player); return false; }
+    const pn = this.ecs.get<Needs>(player, 'Needs')!; const hn = this.ecs.get<Needs>(holder, 'Needs')!;
+    const pMix = this.effStat(this.attrs(player)?.strength ?? 30, pn.energy) * 0.5 + this.effStat(this.attrs(player)?.agility ?? 30, pn.energy) * 0.5;
+    const hStr = this.effStat(this.attrs(holder)?.strength ?? 30, hn.energy);
+    if (this.rng.float() < clamp01(0.5 + (pMix - hStr) / 110)) {
+      const carry = pb.escapeMeter ?? 0;
+      pb.state = 'grappling'; pb.grappleWith = holder; pb.foe = holder; pb.holdMeter = clamp01(HOLD_SEED_BASE + carry * 0.4); pb.holdT = 0; pb.escapeMeter = undefined; pb.struggleCd = 0; pb.chokeCd = 0; pb.reverseCd = undefined; pb.cphase = undefined; pb.action = 'Choking';
+      hb.state = 'held'; hb.grappleWith = player; hb.foe = player; hb.escapeMeter = 0; hb.holdMeter = undefined; hb.holdT = undefined; hb.struggleCd = 0; hb.reverseCd = 0; hb.chokeCd = undefined; hb.cphase = undefined; hb.action = 'Held!';
+      this.metrics.reversals++;
+      this.bus.emit('float', { x: pp.x, z: pp.z, text: 'REVERSAL!', color: '#9fd0ff' });
+      this.bus.emit('hitspark', { power: 0.7 });
+      return true;
+    }
+    pb.escapeMeter = Math.max(0, (pb.escapeMeter ?? 0) - REVERSE_COST);
+    this.bus.emit('float', { x: pp.x, z: pp.z, text: 'No good!', color: '#dfe3e6' });
+    return false;
+  }
   private knockDown(loser: Entity, lb: Brain, winner: Entity, wb: Brain) {
+    this.cleanupHoldFor(loser); this.cleanupHoldFor(winner);   // Stage 4.30 — a KO ends any hold either party was in (covers third-party KO of a holder/held)
     // the player can be beaten to DEATH in a brutal takedown (weapon / near-zero health / chaos pile-on)
     if (lb.isPlayer && this.lethalKnockdown(loser, winner)) {
       lb.state = 'down'; lb.foe = undefined; lb.cphase = 'down'; lb.timer = DOWN_TIME;
@@ -1765,7 +1990,7 @@ export class Simulation {
     if (b.isPlayer) this.bus.emit('alert', { type: 'critical', text: "You're hurt — get to the infirmary or use a medical item." });
   }
   // disengage a fighter whose foe is gone/downed
-  private endFighter(e: Entity, b: Brain) { b.state = 'idle'; b.foe = undefined; b.cphase = undefined; b.cTimer = 0; }
+  private endFighter(e: Entity, b: Brain) { this.cleanupHoldFor(e); b.state = 'idle'; b.foe = undefined; b.cphase = undefined; b.cTimer = 0; }
   // move a character by (dx,dz) but never through a wall/locked tile (clamp to current tile)
   private nudge(p: Position, dx: number, dz: number) {
     const nx = p.x + dx, nz = p.z + dz; const idx = this.map.worldToIdx(nx, nz);
@@ -1776,7 +2001,7 @@ export class Simulation {
     let watchers = 0;
     for (const e of this.ecs.query('Brain', 'Position', 'Needs')) {
       if (watchers >= 5) break;
-      const b = this.brain(e)!; if (b.role !== 'prisoner' || b.isPlayer || b.state === 'fight' || b.state === 'down') continue;
+      const b = this.brain(e)!; if (b.role !== 'prisoner' || b.isPlayer || isBrawling(b.state) || INERT.has(b.state)) continue;
       const p = this.pos(e)!; const d = Math.hypot(p.x - x, p.z - z); if (d < 1.2 || d > 6) continue;
       watchers++;
       const n = this.ecs.get<Needs>(e, 'Needs')!;
@@ -1788,7 +2013,7 @@ export class Simulation {
   private tryStartFight() {
     const prisoners = this.ecs.query('Brain', 'Needs', 'Position').filter((e) => {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
-      return b.role === 'prisoner' && !b.isPlayer && b.state !== 'fight' && b.state !== 'down' && b.state !== 'solitary';
+      return b.role === 'prisoner' && !b.isPlayer && !NOAI.has(b.state);
     });
     // group by room
     const byRoom = new Map<string, Entity[]>();
@@ -1839,12 +2064,14 @@ export class Simulation {
     const np = this.ecs.get<Position>(near, 'Position')!; const gp = this.pos(guard);
     if (gp && !this.brain(guard)!.bubbleCd) { this.bubble(guard, 'Break it up!', 'search', 1.4); this.brain(guard)!.bubbleCd = 3; }
     let broke = 0;
+    const seen = new Set<Entity>();   // Stage 4.30 — a hold is one event; skip the partner once handled
     for (const e of this.ecs.query('Brain', 'Position')) {
       const b = this.ecs.get<Brain>(e, 'Brain')!;
-      if (b.role !== 'prisoner' || b.state !== 'fight') continue;
+      if (b.role !== 'prisoner' || !isBrawling(b.state) || seen.has(e)) continue;
       const p = this.ecs.get<Position>(e, 'Position')!;
       if (Math.hypot(p.x - np.x, p.z - np.z) < 4) {
-        b.state = 'idle'; b.foe = undefined; b.cphase = 'stumble'; b.cTimer = 0.5;   // shoved apart
+        if (b.state === 'grappling' || b.state === 'held') { if (b.grappleWith != null) seen.add(b.grappleWith); this.breakHold(e, 'force'); }
+        else { b.state = 'idle'; b.foe = undefined; b.cphase = 'stumble'; b.cTimer = 0.5; }   // shoved apart
         if (gp) { const a = Math.atan2(p.x - gp.x, p.z - gp.z); this.nudge(p, Math.sin(a) * 0.5, Math.cos(a) * 0.5); }
         const n = this.ecs.get<Needs>(e, 'Needs')!; n.anger = clamp01(n.anger - 0.4); n.fear = clamp01(n.fear + 0.2);
         const ps = this.social(e); if (ps) ps.suspicion = clamp(ps.suspicion + 8, 0, 100);
@@ -1882,12 +2109,13 @@ export class Simulation {
   private dist(a: Entity, b: Entity) { const pa = this.pos(a), pb = this.pos(b); return pa && pb ? Math.hypot(pa.x - pb.x, pa.z - pb.z) : 999; }
   hasContraband(e: Entity) { return (this.inv(e)?.items ?? []).some(isContraband); }
   // Stage 4.15 — the player is locked out of manual control during a nervous breakdown
-  playerStunned() { const b = this.brain(this.playerId); return !!b && b.state === 'breakdown'; }
+  // grapple states ('grappling'/'held') are intentionally NOT stunned — the player keeps panel control (Choke/Struggle/Reverse)
+  playerStunned() { const b = this.brain(this.playerId); return !!b && (b.state === 'breakdown' || b.state === 'unconscious' || b.state === 'submit'); }
 
   // direct player movement (tap-to-move). Returns the world point walked to, or null.
   playerMoveTo(wx: number, wz: number): { x: number; z: number } | null {
     const pl = this.playerId; const pb = this.brain(pl)!;
-    if (pb.state === 'solitary' || pb.state === 'down' || pb.state === 'escorted' || pb.state === 'breakdown') return null;
+    if (pb.state === 'solitary' || pb.state === 'down' || pb.state === 'escorted' || pb.state === 'breakdown' || pb.state === 'grappling' || pb.state === 'held' || pb.state === 'unconscious' || pb.state === 'submit') return null;
     if (this.act && this.act.phase === 'perform') return null;   // locked mid-action
     this.releaseObj(); this.act = null;                          // tapping cancels a queued action
     if (pb.state === 'fight') { pb.state = 'idle'; pb.foe = undefined; }
@@ -1971,7 +2199,7 @@ export class Simulation {
       else { o.open = false; o.locked = false; }                               // closed but openable the rest of the day
     }
   }
-  private alive(e: Entity) { const b = this.brain(e); return !!b && b.state !== 'down'; }
+  private alive(e: Entity) { const b = this.brain(e); return !!b && !INERT.has(b.state); }
   objActions(id: string): { key: string; label: string; disabled?: boolean; reason?: string }[] {
     const o = this.objs.get(id); if (!o) return [];
     // doors/gates: contextual Inspect + Open/Close/Try depending on state
@@ -2002,7 +2230,7 @@ export class Simulation {
   requestObjectAction(objId: string, action: string): string {
     const o = this.objs.get(objId); if (!o) return '';
     const pl = this.playerId; const pb = this.brain(pl)!; const pinv = this.inv(pl)!;
-    if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down') return 'You can\'t act right now.';
+    if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down' || pb.state === 'unconscious' || pb.state === 'submit' || pb.state === 'grappling' || pb.state === 'held') return 'You can\'t act right now.';
     if (action === 'backoff') { this.releaseObj(); this.act = null; pb.action = 'Idle'; this.bubble(pl, '…', 'talk', 0.6); return 'You step away.'; }
     const exclusive = isExclusive(o.type);
     if (exclusive && o.reservedBy && o.reservedBy !== pl && this.alive(o.reservedBy)) return `${o.name} is in use.`;
@@ -2079,7 +2307,7 @@ export class Simulation {
   // immediate (in-place) chaos responses; returns a status string for the HUD
   requestChaosAction(key: string): string {
     const pl = this.playerId; const pb = this.brain(pl); const ps = this.social(pl); if (!pb || !ps) return '';
-    if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down') return 'You can\'t act right now.';
+    if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down' || pb.state === 'unconscious' || pb.state === 'submit' || pb.state === 'grappling' || pb.state === 'held') return 'You can\'t act right now.';
     switch (key) {
       case 'comply':
         this.metrics.complianceEvents++;
@@ -2146,7 +2374,7 @@ export class Simulation {
   // start a timed, abstract escape attempt (no real-world method — pure game action)
   requestEscape(): string {
     const pl = this.playerId; const pb = this.brain(pl)!;
-    if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down') return 'You can\'t act right now.';
+    if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down' || pb.state === 'unconscious' || pb.state === 'submit' || pb.state === 'grappling' || pb.state === 'held') return 'You can\'t act right now.';
     if (this.escapeCd > 0) return 'Too risky right now — lay low.';
     const spot = this.escapeOpportunity(); if (!spot) return 'No opportunity here.';
     if (this.act && this.act.phase === 'perform') return 'Finish what you\'re doing first.';
@@ -2190,7 +2418,7 @@ export class Simulation {
   // UI entry point: returns a status string (e.g. "Walking closer…")
   requestAction(target: Entity, action: InteractAction): string {
     const pl = this.playerId; const pb = this.brain(pl)!; const ps = this.social(pl)!;
-    if (pb.state === 'solitary' || pb.state === 'escorted') return 'You can\'t act right now.';
+    if (pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'down' || pb.state === 'unconscious' || pb.state === 'submit' || pb.state === 'grappling' || pb.state === 'held') return 'You can\'t act right now.';
     if (action === 'backoff') { this.act = null; if (pb.state === 'fight') { pb.state = 'idle'; pb.foe = undefined; } this.disengagePlayerFoes(); pb.action = 'Idle'; ps.reputation = clamp(ps.reputation - 1, -100, 100); this.bubble(pl, '…', 'talk', 0.8); return 'You back off.'; }
     if (action === 'fight') { this.act = null; this.startPlayerFight(target); return 'Fight!'; }
     const self = SELF_ACTIONS.includes(action);
@@ -2219,7 +2447,7 @@ export class Simulation {
   // abort the queued/in-progress player action cleanly (release reservation, reset to idle, notify)
   private cancelAction(msg?: string) {
     this.releaseObj(); this.act = null;
-    const pb = this.brain(this.playerId); if (pb && pb.state !== 'fight' && pb.state !== 'down') { pb.state = 'idle'; pb.action = 'Idle'; }
+    const pb = this.brain(this.playerId); if (pb && !isBrawling(pb.state) && !INERT.has(pb.state)) { pb.state = 'idle'; pb.action = 'Idle'; }
     this.ecs.get<Agent>(this.playerId, 'Agent')!.path = null;
     if (msg) this.bus.emit('actionResult', { text: msg });
   }
@@ -2242,7 +2470,7 @@ export class Simulation {
   private updatePlayerAction(dt: number) {
     if (!this.act) return;
     const pl = this.playerId; const pb = this.brain(pl)!;
-    if (pb.state === 'down' || pb.state === 'solitary' || pb.state === 'escorted') { this.releaseObj(); this.act = null; return; }
+    if (pb.state === 'down' || pb.state === 'solitary' || pb.state === 'escorted' || pb.state === 'unconscious' || pb.state === 'submit' || pb.state === 'grappling' || pb.state === 'held') { this.releaseObj(); this.act = null; return; }
     const a = this.act;
     if (a.objId) { const o = this.objs.get(a.objId); if (o && o.reservedBy === pl) o.reservedUntil = Math.max(o.reservedUntil, 4); }
     if (a.phase === 'approach') {
@@ -2308,13 +2536,13 @@ export class Simulation {
       case 'take': { const got = o.stash.splice(0); for (const it of got) pinv.items.push(it); if (got.length) { this.floatBy(pl, 'Took items', '#6dff9e'); result = `You retrieve your stash from the ${o.name}.`; } break; }
     }
     if (o.reservedBy === pl) o.reservedBy = 0;
-    if (pb.state !== 'fight' && pb.state !== 'down') { pb.state = 'idle'; pb.action = 'Idle'; }
+    if (!isBrawling(pb.state) && !INERT.has(pb.state)) { pb.state = 'idle'; pb.action = 'Idle'; }
     if (result) this.bus.emit('actionResult', { text: result });
   }
   private roomType(roomId: string) { return this.rooms.find((r) => r.id === roomId)?.type ?? ''; }
   private applyAction(a: { action: InteractAction; target: Entity }) {
     const pl = this.playerId; const pb = this.brain(pl)!; const ps = this.social(pl)!; const pinv = this.inv(pl)!;
-    if (a.action === 'escape') { this.resolveEscape(); if (pb.state !== 'solitary' && pb.state !== 'escorted' && pb.state !== 'down') { pb.state = 'idle'; if (pb.action !== 'ESCAPED') pb.action = 'Idle'; } return; }
+    if (a.action === 'escape') { this.resolveEscape(); if (pb.state !== 'solitary' && pb.state !== 'escorted' && !INERT.has(pb.state)) { pb.state = 'idle'; if (pb.action !== 'ESCAPED') pb.action = 'Idle'; } return; }
     const beforeRep = ps.reputation, beforeResp = ps.respect, beforeSusp = ps.suspicion, beforeMoney = pinv.money;
     let result = '';
     if (SELF_ACTIONS.includes(a.action)) result = this.selfAction(a.action);
@@ -2332,7 +2560,7 @@ export class Simulation {
       else if (a.action === 'threaten') this.bubble(a.target, back ? '😨' : '😤', 'threaten', 1.2);
       else if (a.action === 'trade') this.bubble(a.target, 'Deal.', 'trade', 1.2);
     }
-    if (pb.state !== 'fight' && pb.state !== 'down') { pb.state = 'idle'; pb.action = 'Idle'; }
+    if (!isBrawling(pb.state) && !INERT.has(pb.state)) { pb.state = 'idle'; pb.action = 'Idle'; }
     if (result) this.bus.emit('actionResult', { text: result });
   }
 
@@ -2367,7 +2595,7 @@ export class Simulation {
       }
       return;   // no manual control mid-breakdown
     }
-    if (pn && (pn.morale ?? 0.6) <= 0.08 && pb.state !== 'fight' && pb.state !== 'down' && pb.state !== 'beingSearched' && pb.state !== 'escorted' && !this.runEnd) {
+    if (pn && (pn.morale ?? 0.6) <= 0.08 && !isBrawling(pb.state) && !INERT.has(pb.state) && pb.state !== 'beingSearched' && pb.state !== 'escorted' && !this.runEnd) {
       pb.state = 'breakdown'; pb.breakdownT = this.rng.range(6, 10); pb.action = 'Breaking Down';
       this.releaseObj(); this.act = null; this.ecs.get<Agent>(pl, 'Agent')!.path = null;
       this.bus.emit('alert', { type: 'critical', text: 'You snap — a nervous breakdown. You lose control…' });
@@ -2382,7 +2610,7 @@ export class Simulation {
     let rise = 0;
     if (RESTRICTED.includes(room)) rise += dt * 6;
     if (this.hasContraband(pl)) rise += dt * 1.2;
-    if (pb.state === 'fight') rise += dt * 8;
+    if (isBrawling(pb.state)) rise += dt * 8;
     if (this.playerHas('magnet')) rise *= 1.3;      // trait: draws guard attention
     if (this.playerHas('quiet')) rise *= 0.85;
     ps.suspicion = clamp(ps.suspicion + rise - dt * 0.6, 0, 100);
@@ -2393,7 +2621,7 @@ export class Simulation {
     const carried = (this.inv(pl)?.items ?? []).map((id) => ITEMS[id]).filter(Boolean);
     const risk = searchRisk(ps.suspicion, carried, this.heat, this.diff.heatMul - 1);
     const threshold = this.diff.searchAt + (this.playerHas('watchful') ? 12 : 0);
-    if (this.suspTimer <= 0 && (ps.suspicion > threshold || risk > 0.6) && pb.state !== 'beingSearched' && pb.state !== 'fight') {
+    if (this.suspTimer <= 0 && (ps.suspicion > threshold || risk > 0.6) && pb.state !== 'beingSearched' && !isBrawling(pb.state) && !INERT.has(pb.state)) {
       this.suspTimer = 6;
       const guard = this.nearestGuard(pl, 9);
       if (guard != null) this.beginSearch(guard, pl);
@@ -2447,6 +2675,7 @@ export class Simulation {
   // guard escorts a prisoner to solitary (walks over, prisoner follows, then placed)
   private beginEscort(guard: Entity, target: Entity, reason: string) {
     const gb = this.brain(guard)!; const tb = this.brain(target)!;
+    this.cleanupHoldFor(target);   // Stage 4.30 — a body dragged off drops out of any hold first
     gb.state = 'escorting'; gb.escortTarget = target; gb.actTimer = 14; // safety timeout
     tb.state = 'escorted'; tb.foe = undefined; this.ecs.get<Agent>(target, 'Agent')!.path = null;
     this.ecs.get<Agent>(guard, 'Agent')!.path = null;
@@ -2456,6 +2685,7 @@ export class Simulation {
 
   sendToSolitary(guard: Entity, target: Entity, reason: string) {
     const tb = this.brain(target)!; const tp = this.pos(target)!; const ps = this.social(target);
+    this.cleanupHoldFor(target);   // Stage 4.30 — drop out of any hold before going to the hole
     tb.state = 'solitary'; tb.discipline = 'solitary'; tb.discTimer = 18; tb.foe = undefined;
     this.ecs.get<Agent>(target, 'Agent')!.path = null;
     const so = this.pickRoomOfType('solitary'); const k = randomTileInRoom(this.map, this.rooms, so.id, () => this.rng.float());
@@ -2467,14 +2697,14 @@ export class Simulation {
   }
 
   // ---------- combat outcome ----------
-  private onFightWin(winner: Entity, loser: Entity, wb: Brain, lb: Brain) {
+  private onFightWin(winner: Entity, loser: Entity, wb: Brain, lb: Brain, kind: 'knockdown' | 'chokeout' | 'submit' = 'knockdown') {
     const ws = this.social(winner), ls = this.social(loser);
-    if (ws) { ws.respect = clamp(ws.respect + 6, 0, 100); }
+    if (ws) { ws.respect = clamp(ws.respect + (kind === 'chokeout' ? CHOKEOUT_RESPECT_BONUS : 6), 0, 100); }
     const wn = this.ecs.get<Needs>(winner, 'Needs'); if (wn) wn.morale = clamp01((wn.morale ?? 0.6) + 0.16);   // winning fills your Spirit (adrenaline)
     const lnn = this.ecs.get<Needs>(loser, 'Needs'); if (lnn) lnn.morale = clamp01((lnn.morale ?? 0.6) - 0.18);  // a beating drains it
-    if (wb.isPlayer && ws) { ws.reputation = clamp(ws.reputation + 7, -100, 100); this.bus.emit('alert', { type: 'rep', text: `You beat ${lb.name}! Respect rises.` }); }
+    if (wb.isPlayer && ws) { ws.reputation = clamp(ws.reputation + (kind === 'chokeout' ? 10 : 7), -100, 100); if (kind === 'knockdown') this.bus.emit('alert', { type: 'rep', text: `You beat ${lb.name}! Respect rises.` }); else this.bus.emit('alert', { type: 'rep', text: kind === 'chokeout' ? `You choke ${lb.name} out — total dominance.` : `You force ${lb.name} to tap. Respect rises.` }); }
     if (lb.isPlayer && ls) { ls.reputation = clamp(ls.reputation - 6, -100, 100); this.bus.emit('alert', { type: 'rep', text: `You were beaten by ${wb.name}.` }); this.escortLoserToInfirmaryOrSolitary(); }
-    if (ls) ls.respect = clamp(ls.respect - 4, 0, 100);
+    if (ls) ls.respect = clamp(ls.respect - (kind === 'submit' ? SUBMIT_LOSER_RESPECT_PEN : 4), 0, 100);
     if (wb.isPlayer) this.prog('fightWin'); else if (lb.isPlayer) this.prog('fightLoss');
     // attacking a crew costs you standing with them
     if (wb.isPlayer && lb.gang) this.gangStanding(lb.gang, -8);
@@ -2482,7 +2712,7 @@ export class Simulation {
     // a fight always draws suspicion + a chance of being searched (winner especially)
     if (ws) ws.suspicion = clamp(ws.suspicion + 14, 0, 100);
     if (ls) ls.suspicion = clamp(ls.suspicion + 6, 0, 100);
-    this.addHeat(5);
+    this.addHeat(kind === 'chokeout' ? CHOKEOUT_HEAT : 5);
     // the loser remembers who beat them (and especially the player)
     if (lb.mem) rememberFoe(lb.mem, winner, 45);
     if (wb.isPlayer && ls) ls.rel = clamp(ls.rel - 30, -100, 100);
@@ -2502,7 +2732,8 @@ export class Simulation {
     const tb = this.brain(target); if (!tb) return [];
     if (tb.role === 'guard') return ['talk', 'comply', 'argue'];
     if (tb.isPlayer) return [];
-    return ['talk', 'compliment', 'recruit', 'insult', 'threaten', 'trade', 'favor', 'fight', 'backoff'];
+    const acts: InteractAction[] = ['talk', 'compliment', 'recruit', 'insult', 'threaten', 'trade', 'favor', 'fight', 'backoff'];
+    return (isBrawling(tb.state) || INERT.has(tb.state)) ? acts.filter((a) => a !== 'fight') : acts;   // can't pick a fight with someone mid-hold / KO'd
   }
 
   // applies an in-range interaction result (called by the action machine after walk+face+timer)
@@ -2579,6 +2810,7 @@ export class Simulation {
 
   private startPlayerFight(target: Entity, explicit = true) {
     const pl = this.playerId; const pb = this.brain(pl)!; const tb = this.brain(target)!;
+    this.cleanupHoldFor(pl); this.cleanupHoldFor(target);   // never re-state a mid-hold party into a fresh fight (no non-reciprocal grappleWith)
     pb.state = 'fight'; pb.foe = target; pb.attackCd = 0.3; pb.action = 'Fighting'; pb.cphase = 'squareUp'; pb.cTimer = 0.4;
     tb.state = 'fight'; tb.foe = pl; tb.attackCd = 0.5; tb.cphase = 'squareUp'; tb.cTimer = 0.4;
     if (tb.mem) rememberFoe(tb.mem, pl);
@@ -2605,7 +2837,7 @@ export class Simulation {
       if (e === player || e === foe) continue;
       const b = this.brain(e)!;
       if (b.role !== 'prisoner' || b.isPlayer) continue;
-      if (['fight', 'down', 'solitary', 'escorted', 'beingSearched'].includes(b.state)) continue;
+      if (NOAI.has(b.state)) continue;
       const p = this.pos(e)!; if (Math.hypot(p.x - pp.x, p.z - pp.z) > 8) continue;
       if (!this.hasLOS(e, player)) continue;
       const s = this.social(e)!;
@@ -2624,7 +2856,7 @@ export class Simulation {
   }
   // disengage every prisoner currently swinging at the player (Back Off actually ends the gank)
   private disengagePlayerFoes() {
-    for (const e of this.ecs.query('Brain')) { const b = this.brain(e)!; if (b.role === 'prisoner' && !b.isPlayer && b.state === 'fight' && b.foe === this.playerId) this.endFighter(e, b); }
+    for (const e of this.ecs.query('Brain')) { const b = this.brain(e)!; if (b.role === 'prisoner' && !b.isPlayer && isBrawling(b.state) && b.foe === this.playerId) this.endFighter(e, b); }
   }
   // line-of-sight: clear if no structural wall sits between the two points
   private hasLOS(a: Entity, b: Entity): boolean {
@@ -2638,6 +2870,9 @@ export class Simulation {
   // contextual fight buttons: only while fighting, or when standing next to a hostile inmate
   playerCombatActions(): { key: string; label: string }[] {
     const pl = this.playerId; const pb = this.brain(pl); if (!pb) return [];
+    // Stage 4.30 — in a hold the panel becomes hold verbs (holder) or escape verbs (held)
+    if (pb.state === 'grappling') return [{ key: 'choke', label: 'Choke' }, { key: 'slam', label: 'Slam' }, { key: 'release', label: 'Release' }];
+    if (pb.state === 'held') return [{ key: 'struggle', label: 'Struggle!' }, { key: 'reverse', label: 'Reverse' }];
     if (pb.state === 'fight') {
       const acts = [
         { key: 'strike', label: 'Strike' }, { key: 'heavy', label: 'Heavy' }, { key: 'shove', label: 'Shove' },
@@ -2651,7 +2886,7 @@ export class Simulation {
   private playerHasThrowable(): boolean { return (this.inv(this.playerId)?.items ?? []).some((id) => (ITEMS[id]?.combat ?? 0) > 0); }
   // queue a combat input for the player's next phase / set a block window / disengage
   requestCombatAction(key: string): string {
-    const pl = this.playerId; const pb = this.brain(pl)!; if (pb.state !== 'fight') return '';
+    const pl = this.playerId; const pb = this.brain(pl)!; if (pb.state !== 'fight' && pb.state !== 'grappling' && pb.state !== 'held') return '';
     this.metrics.playerCombatChoices++;
     switch (key) {
       case 'strike': pb.pendingAtk = 'quick'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Strike!';
@@ -2662,6 +2897,29 @@ export class Simulation {
       case 'block': pb.blockT = 0.9; pb.parryT = 0.25; pb.cphase = 'block'; pb.cTimer = 0.5; this.bubble(pl, '🛡️', 'search', 0.8); return 'Block — time it as the hit lands to PARRY.';
       case 'dodge': pb.dodgeT = 0.30; pb.cphase = 'dodge'; pb.cTimer = 0.4; this.bubble(pl, '💨', 'search', 0.6); return 'Dodge!';
       case 'backoff': { const foe = pb.foe; this.endFighter(pl, pb); pb.action = 'Idle'; if (foe != null) { const fb = this.brain(foe); if (fb && fb.state === 'fight') { fb.state = 'idle'; fb.foe = undefined; fb.cphase = undefined; } } this.social(pl)!.reputation = clamp(this.social(pl)!.reputation - 1, -100, 100); return 'You back off.'; }
+      // ---- Stage 4.30 grapple-hold: HOLDER (grappling) ----
+      case 'choke': { if (pb.state !== 'grappling' || pb.grappleWith == null || (pb.chokeCd ?? 0) > 0) return ''; pb.chokeCd = CHOKE_BTN_CD; pb.holdMeter = clamp01((pb.holdMeter ?? 0) + CHOKE_BTN_BOOST); const nn = this.ecs.get<Needs>(pl, 'Needs')!; nn.energy = clamp01(nn.energy - CHOKE_BTN_ENERGY); if ((pb.holdMeter ?? 0) >= 1) { const f = pb.grappleWith; this.chokeOut(f, this.brain(f)!, pl, pb); return 'You choke them out!'; } return 'You tighten the choke!'; }
+      case 'slam': {
+        if (pb.state !== 'grappling' || pb.grappleWith == null) return '';
+        const f = pb.grappleWith; const fb = this.brain(f)!; const fn = this.ecs.get<Needs>(f, 'Needs');
+        const nn = this.ecs.get<Needs>(pl, 'Needs')!; nn.energy = clamp01(nn.energy - 0.15);   // a slam is explosive — it costs you stamina
+        const aStr = this.effStat(this.attrs(pl)?.strength ?? 30, nn.energy);
+        const dStr = this.effStat(this.attrs(f)?.strength ?? 30, fn ? fn.energy : 1);
+        // a clean takedown only on a worn-down foe / built-up hold / a winning Strength roll — otherwise it whiffs (the choke is the reliable finish)
+        const solid = (pb.holdMeter ?? 0) > 0.5 || (!!fn && (fn.energy < 0.4 || fn.health < 0.4)) || this.rng.float() < clamp01(0.35 + (aStr - dStr) / 160);
+        if (solid) { this.knockDown(f, fb, pl, pb); return 'You slam them down hard!'; }
+        if (fn) { fn.health = clamp01(fn.health - this.rng.range(0.04, 0.09)); fn.fear = clamp01(fn.fear + 0.1); }
+        this.breakHold(pl, 'force');
+        pb.state = 'fight'; pb.foe = f; pb.cphase = 'recover'; pb.cTimer = RECOVER;
+        fb.state = 'fight'; fb.foe = pl; fb.cphase = 'stumble'; fb.cTimer = STUMBLE;
+        const fp = this.pos(f); if (fp) this.bus.emit('impact', { x: fp.x, z: fp.z });
+        this.bus.emit('hitspark', { power: 0.5 });
+        return 'You throw them off — they stumble free.';
+      }
+      case 'release': { if (pb.state !== 'grappling') return ''; this.breakHold(pl, 'release'); return 'You let go.'; }
+      // ---- Stage 4.30 grapple-hold: HELD ----
+      case 'struggle': { if (pb.state !== 'held' || (pb.struggleCd ?? 0) > 0) return ''; pb.struggleCd = STRUGGLE_CD; pb.escapeMeter = clamp01((pb.escapeMeter ?? 0) + ESCAPE_FILL_PLAYER_MASH); const shb = pb.grappleWith != null ? this.brain(pb.grappleWith) : null; if (shb) shb.holdMeter = Math.max(0, (shb.holdMeter ?? 0) - STRUGGLE_DISRUPT); if ((pb.escapeMeter ?? 0) >= 1) { this.metrics.grappleEscapes++; this.breakHold(pb.grappleWith ?? pl, 'escape'); return 'You break free!'; } return 'Struggle!'; }
+      case 'reverse': { if (pb.state !== 'held' || (pb.reverseCd ?? 0) > 0) return ''; pb.reverseCd = REVERSE_CD; return this.tryReverse(pl, pb) ? 'You reverse the hold!' : 'Reverse failed!'; }
     }
     return '';
   }
@@ -2876,7 +3134,10 @@ export class Simulation {
       this.ecs.set<Render>(e, 'Render', { kind: r.render.kind === 'guard' ? 'guard' : 'prisoner', color: num(r.render.color, 0xc98a3a), meshId: e, appearance: (r.render.appearance && typeof r.render.appearance === 'object') ? r.render.appearance : undefined });
       this.ecs.set<Agent>(e, 'Agent', { speed: num(r.agent?.speed, 2), path: null, step: 0, repathCd: 0 });
       this.ecs.set<Needs>(e, 'Needs', r.needs ?? { hunger: 0, sleep: 0, hygiene: 0, energy: 1, anger: 0, fear: 0, health: 1 });
-      this.ecs.set<Brain>(e, 'Brain', { ...r.brain, role: r.brain.role === 'guard' ? 'guard' : 'prisoner', traits: Array.isArray(r.brain.traits) ? r.brain.traits : [], targetRoom: r.brain.targetRoom ?? 'cellblock', attackCd: 0, timer: 0, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle', intent: 'schedule', intentCd: 0, checkpoint: undefined, dwell: 0, roleCd: 0, bubbleCd: 0, guardRole: r.brain.role === 'guard' ? 'patrol' : undefined, mem: r.brain.role === 'guard' ? undefined : sanitizeMemory(r.brain.mem), cphase: undefined, cTimer: 0, cResult: undefined, blockT: 0, pendingAtk: undefined, lastAttacker: undefined, injuredT: undefined, breakdownT: undefined, bleedT: undefined, bleedRate: undefined, investigateGiveup: undefined });
+      this.ecs.set<Brain>(e, 'Brain', { ...r.brain, role: r.brain.role === 'guard' ? 'guard' : 'prisoner', traits: Array.isArray(r.brain.traits) ? r.brain.traits : [], targetRoom: r.brain.targetRoom ?? 'cellblock', attackCd: 0, timer: 0, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle', intent: 'schedule', intentCd: 0, checkpoint: undefined, dwell: 0, roleCd: 0, bubbleCd: 0, guardRole: r.brain.role === 'guard' ? 'patrol' : undefined, mem: r.brain.role === 'guard' ? undefined : sanitizeMemory(r.brain.mem), cphase: undefined, cTimer: 0, cResult: undefined, blockT: 0, pendingAtk: undefined, lastAttacker: undefined, injuredT: undefined, breakdownT: undefined, bleedT: undefined, bleedRate: undefined, investigateGiveup: undefined,
+        // Stage 4.30 hold fields + the latent Stage 4.29 combat-depth fields — all transient, never restored from a save
+        grappleWith: undefined, holdMeter: undefined, holdT: undefined, escapeMeter: undefined, struggleCd: undefined, chokeCd: undefined, reverseCd: undefined, grappleCd: undefined,
+        parryT: undefined, dodgeT: undefined, momentum: undefined, momentumT: undefined, guardDmg: undefined, guardBroken: undefined });
       this.ecs.set<Social>(e, 'Social', r.social ?? { reputation: 0, respect: 20, suspicion: 0, rel: 0 });
       this.ecs.set<Attributes>(e, 'Attributes', (r.attrs && typeof r.attrs === 'object') ? { strength: num(r.attrs.strength, 40), agility: num(r.attrs.agility, 40), skill: num(r.attrs.skill, 40), stamina: num(r.attrs.stamina, 40) } : { strength: 40, agility: 40, skill: 40, stamina: 40 });
       this.ecs.set<Inventory>(e, 'Inventory', { items: Array.isArray(r.inv?.items) ? r.inv.items.filter((id: any) => typeof id === 'string') : [], money: num(r.inv?.money, 0) });

@@ -22,7 +22,10 @@ export interface Needs {
 
 export type BrainState = 'idle' | 'goto' | 'wander' | 'fight' | 'respond' | 'down' | 'solitary'
   | 'talking' | 'threatening' | 'trading' | 'working' | 'resting' | 'washing' | 'eating' | 'training'
-  | 'searching' | 'beingSearched' | 'escorting' | 'escorted' | 'backoff' | 'breakdown' | 'investigate';
+  | 'searching' | 'beingSearched' | 'escorting' | 'escorted' | 'backoff' | 'breakdown' | 'investigate'
+  // ---- Stage 4.30 grapple-hold ---- grappling = dominant holder, held = the one being held,
+  // unconscious = choked out cold, submit = tapped out (both transient elimination states)
+  | 'grappling' | 'held' | 'unconscious' | 'submit';
 
 export interface Brain {
   role: 'prisoner' | 'guard';
@@ -72,6 +75,15 @@ export interface Brain {
   guardBroken?: number;    // seconds of guard-broken vulnerability (takes extra damage)
   bleedT?: number;         // ---- Stage 4.7 ---- seconds left bleeding from a sharp-weapon wound
   bleedRate?: number;      // health drained per second while bleeding
+  // ---- Stage 4.30 grapple-hold (all transient, per-fight; not serialized — reset on load) ----
+  grappleWith?: Entity;    // symmetric partner link (holder <-> held)
+  holdMeter?: number;      // 0..1 dominance/choke progress, tracked on the HOLDER
+  holdT?: number;          // elapsed seconds in the hold (timeout safety)
+  escapeMeter?: number;    // 0..1 the HELD fighter's struggle-to-escape progress
+  struggleCd?: number;     // held fighter's per-attempt cadence / player mash debounce
+  chokeCd?: number;        // player Choke internal cooldown (NOT attackCd — the panel zeroes that)
+  reverseCd?: number;      // held Reverse cooldown
+  grappleCd?: number;      // NPC grab cooldown (gated in pickAttack) so grab can't spam
 }
 
 // ---- Stage 4.4 ---- persistent attributes (0..99, floor 30). "25% rule": effective = base*(0.75+0.25*energy).

@@ -3,7 +3,8 @@
 > Big build session **2026-06-19/20**. Pick up here next time.
 
 ## Where we are
-- **Version:** `v4.25.0-grapple` · **branch:** `main` · **HEAD:** `e1c804f` (clean, fully pushed)
+- **Version:** `v4.30.0-grapplehold` · **branch:** `main` · **HEAD:** latest on `main` (clean, pushed, auto-deployed)
+- > The 2026-06-20 session shipped **Stage 4.30 grapple-holds → elimination (submit / unconscious)** on top of the (previously untracked) v4.26→v4.29 combat/camera overhaul. Verified clean: `npm run build` + `node smoke.mjs` + a throwaway `node probe.mjs` covering **11 grapple invariants**, all green; vetted by two multi-agent passes (a pre-build design review and a post-build adversarial code review — all findings fixed, incl. gating the player-holder choke behind the Choke button and making Slam cost stamina / able to whiff).
 - **Live:** https://qemmhd.github.io/Lockdown-Life-3D/ (GitHub Pages auto-deploys on push to `main`)
 - **Repo:** `QemmHD/Lockdown-Life-3D` · **local:** `D:\ClaudeResourcesProjects\Projects-working-on\Lockdown-Life-3D`
 - **North star:** a modern version of **Mdickie's _Hard Time_** (procedural art + audio, no asset files).
@@ -36,9 +37,15 @@ node smoke.mjs       # headless-Chrome smoke (needs preview up + `npm install pu
 
 Two multi-agent **adversarial review passes** were run and all findings fixed (training farm, free-Spirit coffee, finisher, guard-stuck-investigating, court-bribe exploit, coach overlay, transient-field save hygiene).
 
+## Shipped after that (v4.26 → v4.29 — test-feedback combat & camera overhaul, was untracked here)
+13. **Cause of death + debug tools** (v4.26) — GAME OVER names the specific cause; `?debug` adds hotkeys (`K/B/M/J/G/H/Y`) + `window.__cheats.*`.
+14. **Rotatable + brighter camera** (v4.27) — Q/E/← → orbit; exposure/ambient lift, softer post-FX. **(v4.27.1)** rotation as a one-finger swipe for iOS; pinch out → overview pan, pinch in → focus.
+15. **Combat juice** (v4.28) — hitstop, decaying screen shake (respects reduce-motion), readable heavy/grab telegraphs; camera mapping fixed to spec.
+16. **Combat depth** (v4.29) — momentum meter (build on clean hits, reset on getting hit), timed **parry**, **dodge**, and **guard-break** vs turtling. Read-and-react duel; NPCs use the same rules. Transient combat state only — no save-format change.
+17. **Grapple holds → elimination** (v4.30) — a won grab on a worn-down/over-powered foe **clinches into a persistent hold** (states `grappling`/`held`) → **Choke** (out cold / `unconscious` ~14s) or the foe **taps** (`submit`). **Struggle**/**Reverse** to escape; **NPCs grapple** each other + you (choke-out drama in the yard). Full `brain.state` call-site audit; transient state only — **save stays v18**. Probe: 11 invariants green.
+
 ## What's next (remaining backlog — ranked, NOT yet built)
-- **S — Grapple holds → elimination states** (UNCONSCIOUS / SUBMIT): extend the throw into a persistent grab + choke/struggle meter. Highest combat-spine value left.
-- **A — Persistent-death world**: a dead character lives on as an NPC owning the same cell. Needs world-state serialized independent of the save slot (structural; playtest with care).
+- **A — Persistent-death world**: a dead character lives on as an NPC owning the same cell. Needs world-state serialized independent of the save slot (structural; playtest with care). *Now the top combat-spine item is done (4.30), this is the highest-value goal-loop piece left.*
 - **A — Map / layout reorg** (`src/world/WorldGen.ts`): dig-zones, sealable perimeter escape routes, an on-the-run outside zone. Touches pathing/collision — re-run `selfTest`/smoke hard.
 - **B — Romance** (please-loop → morale/health, jealousy) and **addictive-loop polish** (streak/notoriety surfacing) — peripheral; existing tiers/objectives/alerts already cover most of the latter.
 
