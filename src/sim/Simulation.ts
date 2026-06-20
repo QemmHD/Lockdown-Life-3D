@@ -126,6 +126,8 @@ export class Simulation {
   served = 0;                          // days served so far
   runEnd: { kind: 'released' | 'escaped' | 'dead'; title: string; lines: string[] } | null = null;
   wardenCondition: WardenCondition | null = null;   // Stage 4.10: a timed warden release condition
+  charges: { kind: string; severity: number; day: number }[] = [];   // Stage 4.21: rap sheet of witnessed crimes
+  nextHearingDay = 0;                                                  // 0 = no hearing scheduled
   setup: NewGameSetup = defaultSetup();
   diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1, moneyScale: 1 };
   gang: PlayerGangState = newGangState();
@@ -152,7 +154,7 @@ export class Simulation {
     this.lockdown = newLockdown(); this.alarm = { active: false, timer: 0, reason: '' };
     this.heat = 0; this.riotPressure = 0; this.riotLevel = 'calm'; this.riotEventTimer = 0; this.escape = newEscape(); this.escapeSite = newEscapeSite();
     this.tension = {}; this.progression = newProgression(); this.objectives = []; this.pendingSummary = null; this.lastSummaryDay = 0;
-    this.sentence = 30; this.served = 0; this.runEnd = null; this.wardenCondition = null;
+    this.sentence = 30; this.served = 0; this.runEnd = null; this.wardenCondition = null; this.charges = []; this.nextHearingDay = 0;
     this.fightCd = 6; this.suspTimer = 0; this.jobStreak = 0; this.diff = { heatMul: 1, searchAt: 45, riotMul: 1, rewardMul: 1, decayMul: 1, moneyScale: 1 };
     this.gang = newGangState();
     this.economy = newEconomy();
@@ -681,10 +683,10 @@ export class Simulation {
       case 'earn': P.moneyEarned += amt; this.bumpObjective('earn', amt); break;
       case 'spend': P.moneySpent += amt; break;
       case 'respect': if (amt > 0) this.bumpObjective('respect', amt); break;
-      case 'fightWin': P.fights++; P.wins++; D.fights++; D.wins++; break;
-      case 'fightLoss': P.fights++; P.losses++; D.fights++; break;
+      case 'fightWin': P.fights++; P.wins++; D.fights++; D.wins++; if (this.crimeWitnessed()) this.addCharge('fighting', 2); break;
+      case 'fightLoss': P.fights++; P.losses++; D.fights++; if (this.crimeWitnessed()) this.addCharge('fighting', 2); break;
       case 'search': P.searches++; D.searches++; break;
-      case 'contraband': P.contrabandIncidents++; D.contraband++; this.addTime(1, 'caught with contraband'); break;
+      case 'contraband': P.contrabandIncidents++; D.contraband++; this.addTime(1, 'caught with contraband'); this.addCharge('possession of contraband', 1); break;
       case 'solitary': P.solitary++; D.solitary++; this.addTime(2, 'a stint in solitary'); break;
       case 'lockdown': P.lockdowns++; D.lockdowns++; break;
       case 'escape': P.escapes++; break;
@@ -693,6 +695,7 @@ export class Simulation {
     }
   }
   private onDayRollover() {
+    this.holdHearing();   // Stage 4.21: pending charges go to a hearing first — a conviction can extend the sentence before release
     // resolve passive "survive the day" objectives, then summarise + roll a fresh set
     for (const o of this.objectives) if (!o.done && o.kind === 'surviveNoSolitary' && this.daily.solitary === 0) this.completeObjective(o);
     this.progression.daysSurvived++;
@@ -756,6 +759,43 @@ export class Simulation {
     if (this.runEnd || days <= 0) return;
     this.sentence += days;
     this.bus.emit('alert', { type: 'critical', text: `+${days} day${days > 1 ? 's' : ''} on your sentence — ${reason}.` });
+  }
+  // ---- Stage 4.21: court — witnessed crimes accrue a rap sheet, judged at a rep-coupled hearing ----
+  private crimeWitnessed(): boolean {
+    const pp = this.pos(this.playerId); if (!pp) return false;
+    for (const g of this.ecs.query('Brain', 'Position')) {
+      const b = this.brain(g)!; if (b.role !== 'guard') continue;
+      const gp = this.pos(g)!; if (Math.hypot(gp.x - pp.x, gp.z - pp.z) > 12) continue;
+      if (this.hasLOS(g, this.playerId)) return true;
+    }
+    return false;
+  }
+  private addCharge(kind: string, severity: number) {
+    if (this.runEnd) return;
+    this.charges.push({ kind, severity, day: this.day });
+    if (this.charges.length > 12) this.charges.shift();
+    if (!this.nextHearingDay) this.nextHearingDay = this.day + 3;
+    this.bus.emit('alert', { type: 'warning', text: `📋 On the record: ${kind}. Hearing day ${this.nextHearingDay}.` });
+  }
+  private holdHearing() {
+    if (this.runEnd || !this.charges.length || !this.nextHearingDay || this.day < this.nextHearingDay) return;
+    const ps = this.social(this.playerId)!; const pinv = this.inv(this.playerId)!;
+    const repFactor = Math.max(0, ps.reputation) / 100;                 // notoriety counts AGAINST you at trial
+    const skill = this.effStat(this.attrs(this.playerId)?.skill ?? 30, 1);
+    let convicted = 0, daysAdded = 0, acquitted = 0, bribed = 0;
+    for (const c of this.charges) {
+      let pGuilty = Math.min(0.97, 0.22 + c.severity * 0.18 + repFactor * 0.35 - (skill - 30) / 69 * 0.2);
+      const bribeCost = 4 + c.severity * 3;
+      if (pGuilty > 0.4 && pGuilty < 0.85 && pinv.money >= bribeCost) { pinv.money -= bribeCost; pGuilty -= 0.5; bribed++; }   // grease the wheels
+      if (this.rng.float() < pGuilty) { convicted++; daysAdded += c.severity; } else acquitted++;
+    }
+    this.charges = []; this.nextHearingDay = 0;
+    if (daysAdded > 0) this.sentence += daysAdded;
+    const parts: string[] = [];
+    if (convicted) parts.push(`guilty on ${convicted} (+${daysAdded}d)`);
+    if (acquitted) parts.push(`cleared on ${acquitted}`);
+    if (bribed) parts.push(`${bribed} greased`);
+    this.bus.emit('alert', { type: convicted ? 'critical' : 'player', text: `⚖ Hearing — ${parts.join(', ') || 'no action'}.` });
   }
   // Stage 4.10 — the warden sets you a timed condition; meet it for days off, blow it for days added.
   private evalWarden() {
@@ -1070,6 +1110,7 @@ export class Simulation {
       strength: Math.round(this.attrs(pl)?.strength ?? 0), agility: Math.round(this.attrs(pl)?.agility ?? 0), skill: Math.round(this.attrs(pl)?.skill ?? 0), stamina: Math.round(this.attrs(pl)?.stamina ?? 0),
       gang: pb.gang ? GANG_MAP[pb.gang].name : 'Unaffiliated', tier: tier.name, heat: Math.round(this.heat),
       sentence: this.sentence, served: this.served, daysLeft: Math.max(0, this.sentence - this.served), warden: this.wardenCondition?.text ?? '',
+      charges: this.charges.length, hearingDay: this.nextHearingDay,
       backstory: backstoryDef(this.setup.backstory).name, difficulty: diffDef(this.setup.difficulty).name,
       traits: pb.traits.slice(0, 4), gangLean: this.setup.gangLean === 'none' ? 'Unaffiliated' : (GANG_MAP[this.setup.gangLean]?.name ?? this.setup.gangLean)
     };
@@ -2457,6 +2498,7 @@ export class Simulation {
     this.triggerAlarm('assault', 3);
     const ps = this.social(pl)!; ps.suspicion = clamp(ps.suspicion + 40, 0, 100); this.addHeat(20);
     this.bus.emit('alert', { type: 'critical', text: 'You hit a guard — the whole block is coming for you!' });
+    this.addCharge('assaulting an officer', 3);
     for (const g of this.ecs.query('Brain')) { const gb = this.brain(g)!; if (gb.role === 'guard' && gb.state !== 'respond' && gb.state !== 'down') { gb.state = 'respond'; gb.foe = pl; this.ecs.get<Agent>(g, 'Agent')!.path = null; } }
   }
   // Stage 4.6: nearby inmates who can SEE the brawl take sides — your gang/friends jump in for you,
@@ -2715,8 +2757,8 @@ export class Simulation {
       tension: this.tension,
       escapeSite: this.escapeSite
     };
-    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang, economy: this.economy, jobStreak: this.jobStreak, sentence: this.sentence, served: this.served, wardenCondition: this.wardenCondition };
-    return { version: 17, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
+    const prog = { progression: this.progression, objectives: this.objectives, daily: this.daily, lastSummaryDay: this.lastSummaryDay, setup: this.setup, gang: this.gang, economy: this.economy, jobStreak: this.jobStreak, sentence: this.sentence, served: this.served, wardenCondition: this.wardenCondition, charges: this.charges, nextHearingDay: this.nextHearingDay };
+    return { version: 18, seed: this.rng.seed, day: this.day, hour: this.hour, phaseId: this.phaseId, ents, objs, ...chaos, ...prog };
   }
   hydrate(data: any) {
     // never crash on an old/foreign/corrupt save — bail out and keep the freshly generated world
@@ -2777,6 +2819,8 @@ export class Simulation {
     this.served = (typeof data.served === 'number' && data.served >= 0) ? Math.min(Math.round(data.served), this.sentence) : 0;
     this.runEnd = null;
     this.wardenCondition = (data.wardenCondition && typeof data.wardenCondition === 'object' && typeof data.wardenCondition.text === 'string') ? data.wardenCondition : null;
+    this.charges = Array.isArray(data.charges) ? data.charges.filter((c: any) => c && typeof c.kind === 'string' && typeof c.severity === 'number').slice(0, 12).map((c: any) => ({ kind: c.kind, severity: c.severity, day: Number(c.day) || 0 })) : [];
+    this.nextHearingDay = (typeof data.nextHearingDay === 'number' && data.nextHearingDay >= 0) ? Math.round(data.nextHearingDay) : 0;
     // character setup + derived difficulty (old saves get a sensible default)
     this.setup = sanitizeSetup(data.setup);
     // faction / gang state (old saves: default; derive a little standing from the lean)

@@ -214,6 +214,7 @@ export class Menus {
         <div class="m-kv"><span>Heat</span><b>${st.heat}</b></div>
         <div class="m-kv"><span>Gang</span><b>${st.gang}</b></div>
         <div class="m-kv"><span>Discipline</span><b>${st.discipline}${st.solitaryTimer ? ` (${st.solitaryTimer}s)` : ''}</b></div>
+        ${st.charges ? `<div class="m-kv"><span>Rap sheet</span><b>${st.charges} pending · hearing day ${st.hearingDay}</b></div>` : ''}
         <div class="m-hr"></div>
         <div class="m-kv"><span>Days survived</span><b>${p.daysSurvived}</b></div>
         <div class="m-kv"><span>Objectives done</span><b>${p.objectivesCompleted}</b></div>

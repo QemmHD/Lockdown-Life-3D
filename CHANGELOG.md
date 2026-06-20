@@ -14,6 +14,18 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.21.0-court — Stage 4.21 Court & witnessed-crime hearings
+The signature Hard Time twist on the sentence: your **reputation works against you at trial**. Build + smoke + probe green; save 17 → 18 (backward-compatible).
+- **Witnessed crimes go on a rap sheet**: getting caught with **contraband**, **fighting where a guard can see you**, and especially
+  **assaulting an officer** are logged as charges (a crime out of sight stays off the books).
+- **A hearing is held** a few days after your first pending charge. For each charge **P(guilty) = base + severity + notoriety − your
+  Skill defense** — so the more **feared/famous** you are, the more the court assumes you did it. Guilty adds days to your sentence;
+  a hearing can even **extend your time the day you'd otherwise walk**.
+- **Work the system**: high **Skill** argues your case down, and on a borderline charge you'll **grease the wheels** with cash if you can
+  afford it. Severe charges (hitting a guard) are near-certain.
+- Rap sheet + next hearing day show in **Stats**; persisted in the save (**v18**). A whole new tension layer on top of warden conditions.
+- Version → `v4.21.0-court`.
+
 ## v4.20.0-crafting — Stage 4.20 Crafting (combine two items into something better)
 A named Hard Time pillar, and the make-side of the contraband loop. Build + smoke + probe green; render/UI only over existing data — no save change.
 - A **🔧 Workshop** panel in the Inventory tab lists every recipe you currently hold the parts for. **Skill-gated**: lower-skill recipes
