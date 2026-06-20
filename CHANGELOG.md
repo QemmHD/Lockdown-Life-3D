@@ -14,6 +14,14 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.23.0-onboarding — Stage 4.23 First-run onboarding (coach overlay)
+Hard Time's biggest weakness was legibility; new players now get oriented. Build + smoke + flow-probe green; UI-only, no save change.
+- Starting a **New Game** shows a short, paused **4-card coach** the first time only — Move · People & Fights · Stay Alive · Do Your Time —
+  each pointing at a real system (Spirit/vices, allies, guard sightlines, training/crafting, the rep-coupled hearing).
+- **Next/Skip**, then it dismisses and the run begins; a `localStorage` flag means it never nags again. **Quick Start** stays a clean
+  jump-straight-in path (no overlay).
+- Version → `v4.23.0-onboarding`.
+
 ## v4.22.0-postfx — Stage 4.22 Graphics realism v2 (post-processing grade)
 A filmic finish over the whole frame — the "less cartoony" graphics ask. Build + smoke green (verified on headless swiftshader + a live screenshot); render-only, **no save change**.
 - An **EffectComposer** post stack now drives the final image: a subtle **contrast + saturation** grade, a **warm institutional tint**,

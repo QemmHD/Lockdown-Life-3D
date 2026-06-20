@@ -115,13 +115,14 @@ export class Game {
       onDropItem: (id) => { const r = this.sim.dropItem(id); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; },
       onStashItem: (id) => { const r = this.sim.stashNearest(id); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; },
       onCraft: (id) => { const r = this.sim.craft(id); if (r) this.hud.alert(r, 'info'); this.panelDirty = true; },
+      onCoachDone: () => { try { localStorage.setItem('ll3d_seen_coach', '1'); } catch { /* ignore */ } this.closeMenu(); },
       onBuy: (seller, id) => { const r = this.sim.buyItem(seller, id); if (r) this.hud.alert(r, 'trade'); },
       onSell: (buyer, id) => { const r = this.sim.sellItem(buyer, id); if (r) this.hud.alert(r, 'trade'); },
       tradeData: (seller) => this.sim.tradePanel(seller),
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.22.0-postfx'
+      version: 'v4.23.0-onboarding'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -454,6 +455,13 @@ export class Game {
     this.hud.clearAlerts();
     this.panelDirty = true; this.menus.hide(); this.select(this.playerEntity);
     this.hud.alert(`Welcome to the block, ${this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.name ?? 'inmate'}.`, 'player');
+    this.maybeShowCoach();
+  }
+
+  // first-run onboarding: show the coach overlay once (persisted in localStorage)
+  private maybeShowCoach() {
+    try { if (localStorage.getItem('ll3d_seen_coach')) return; } catch { return; }
+    this.menus.showCoach(0); this.paused = true;
   }
 
   private load() {

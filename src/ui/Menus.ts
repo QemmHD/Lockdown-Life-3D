@@ -25,10 +25,11 @@ export interface MenuHooks {
   hasSave: () => boolean;
   saveInfo: () => { name: string; day: number } | null;
   snapshot: () => any;
+  onCoachDone: () => void;
   version: string;
 }
 
-type Mode = 'hidden' | 'title' | 'pause' | 'summary' | 'setup' | 'trade' | 'ending';
+type Mode = 'hidden' | 'title' | 'pause' | 'summary' | 'setup' | 'trade' | 'ending' | 'coach';
 const GANG_NAMES: Record<string, string> = { none: 'Unaffiliated', iron_block: 'Iron Block', yard_kings: 'Yard Kings', blue_chain: 'Blue Chain', redline_crew: 'Redline Crew', north_hall: 'North Hall', cell_rats: 'Cell Rats' };
 
 export class Menus {
@@ -56,6 +57,7 @@ export class Menus {
   showPause() { this.mode = 'pause'; this.render(); }
   showSummary(data: any) { this.summary = data; this.mode = 'summary'; this.render(); }
   showEnding(data: any) { this.ending = data; this.mode = 'ending'; this.render(); }
+  showCoach(step = 0) { this.step = step; this.mode = 'coach'; this.render(); }
   hide() { this.mode = 'hidden'; this.root.className = 'hidden'; }
 
   private onClick(e: Event) {
@@ -72,6 +74,8 @@ export class Menus {
     if (a === 'drop') { this.hooks.onDropItem(el.dataset.id!); this.render(); return; }
     if (a === 'stash') { this.hooks.onStashItem(el.dataset.id!); this.render(); return; }
     if (a === 'craft') { this.hooks.onCraft(el.dataset.id!); this.render(); return; }
+    if (a === 'coach-next') { if (this.step >= 3) this.hooks.onCoachDone(); else { this.step++; this.render(); } return; }
+    if (a === 'coach-skip') { this.hooks.onCoachDone(); return; }
     if (a === 'closetrade') { this.hooks.onResume(); return; }
     if (a === 'accept-invite') { this.hooks.onAcceptInvite(); this.render(); return; }
     if (a === 'decline-invite') { this.hooks.onDeclineInvite(); this.render(); return; }
@@ -130,7 +134,27 @@ export class Menus {
     if (this.mode === 'ending') { this.root.innerHTML = this.endingCard(this.ending); return; }
     if (this.mode === 'setup') { this.root.innerHTML = this.setupCard(); return; }
     if (this.mode === 'trade') { this.root.innerHTML = this.tradeCard(); return; }
+    if (this.mode === 'coach') { this.root.innerHTML = this.coachCard(); return; }
     this.root.innerHTML = this.pause();
+  }
+
+  // first-run onboarding overlay (Stage 4.23) — addresses the original's #1 legibility gap
+  private coachCard(): string {
+    const cards = [
+      { t: 'Welcome to the block', b: 'Tap anywhere to walk. Tap an inmate, guard, or object to size it up and act. The camera follows you.' },
+      { t: 'People & fights', b: 'Open someone to talk, compliment, recruit, threaten — or fight. Recruited allies pile into your brawls. Guards who SEE a fight come to break it up; hit one and the whole block turns on you.' },
+      { t: 'Stay alive', b: 'Mind your Health and the gold Spirit bar. Eat, sleep, and wash on the day’s schedule. Smokes & hooch lift Spirit — at a cost. Let Spirit bottom out and you lose control.' },
+      { t: 'Do your time', b: 'Serve your sentence to walk free — or work an escape. Train a build, earn respect, craft in the Workshop, and keep your nose clean: witnessed crimes go to a hearing where your reputation works against you.' },
+    ];
+    const i = Math.max(0, Math.min(cards.length - 1, this.step));
+    const c = cards[i]; const last = i === cards.length - 1;
+    return `<div class="m-card" style="max-width:520px">
+      <div class="m-head"><b>${c.t}</b><span class="m-pill">${i + 1}/${cards.length}</span></div>
+      <div class="m-sub" style="font-size:15px;line-height:1.55;margin:12px 0">${c.b}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="m-tab act" data-m="coach-skip">Skip</button>
+        <button class="m-btn primary" data-m="coach-next">${last ? 'Start ▶' : 'Next ›'}</button>
+      </div></div>`;
   }
 
   private title(): string {
