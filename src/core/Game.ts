@@ -127,7 +127,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.28.0-combatfeel'
+      version: 'v4.29.0-combatdepth'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -442,7 +442,7 @@ export class Game {
   }
   private static SELF_KEYS = ['rest', 'wash', 'eat', 'train', 'work'];
   private static CHAOS_KEYS = ['comply', 'returncell', 'hide', 'calm', 'helpguard'];
-  private static COMBAT_KEYS = ['strike', 'heavy', 'shove', 'block', 'throw', 'grab'];
+  private static COMBAT_KEYS = ['strike', 'heavy', 'shove', 'block', 'throw', 'grab', 'dodge'];
   private static GANG_KEYS = ['askgang', 'acceptinvite', 'declineinvite', 'helpmember'];
   private doAction(key: string) {
     this.panelDirty = true;
@@ -610,7 +610,9 @@ export class Game {
     this.updateDoors(dt);
     if (this.dbgPath) this.updateDebugPath();
     this.feedback.update(dt, this.cam.activeCamera, (e) => this.sync.worldOf(e));
-    this.hud.setAction(this.sim.actionLabel(), this.sim.actionProgress());
+    const pbr = this.sim.ecs.get<Brain>(this.playerEntity, 'Brain');
+    const mom = pbr?.state === 'fight' ? (pbr.momentum ?? 0) : 0;
+    this.hud.setAction(this.sim.actionLabel() + (mom > 0.05 ? `  ·  🔥 ${Math.round(mom * 100)}%` : ''), this.sim.actionProgress());
 
     // character-focused follow: always track the player prisoner with a small movement lead
     const ft = this.followTarget();

@@ -1561,6 +1561,11 @@ export class Simulation {
         continue;
       }
       if (b.blockT) b.blockT = Math.max(0, b.blockT - dt);
+      if (b.parryT) b.parryT = Math.max(0, b.parryT - dt);
+      if (b.dodgeT) b.dodgeT = Math.max(0, b.dodgeT - dt);
+      if (b.guardBroken) b.guardBroken = Math.max(0, b.guardBroken - dt);
+      if (b.guardDmg) b.guardDmg = Math.max(0, b.guardDmg - dt * 0.3);
+      if (b.momentum) { if ((b.momentumT ?? 0) > 0) b.momentumT = Math.max(0, (b.momentumT ?? 0) - dt); else b.momentum = Math.max(0, b.momentum - dt * 0.5); }
       if (b.state !== 'fight' || b.foe == null) { if (b.cphase) b.cphase = undefined; continue; }
       const p = this.ecs.get<Position>(e, 'Position')!;
       const fb = this.ecs.get<Brain>(b.foe, 'Brain');
@@ -1621,6 +1626,25 @@ export class Simulation {
     if (atk === 'grab') { this.resolveGrab(e, b, foe, fb, fp); return; }   // Stage 4.25: STR-contested throw
     const fn = this.ecs.get<Needs>(foe, 'Needs')!;
     const def = { fear: fn.fear, energy: fn.energy, coward: fb.traits.includes('cowardly') || fb.traits.includes('weak'), blocking: !!fb.blockT };
+    // Stage 4.29 — timed defense: a parry/dodge nailed just before the hit lands beats the normal block roll
+    if (fb.isPlayer) {
+      if ((fb.dodgeT ?? 0) > 0) {
+        fb.dodgeT = 0; this.metrics.dodges++;
+        b.cphase = 'recover'; b.cTimer = ATTACKS[atk].recover * 1.4;          // attacker over-extends into recovery
+        fb.momentum = clamp01((fb.momentum ?? 0) + 0.2); fb.momentumT = 3.5;
+        this.bus.emit('float', { x: fp.x, z: fp.z, text: 'WHIFF!', color: '#9fff9e' });
+        return;
+      }
+      if ((fb.parryT ?? 0) > 0) {
+        fb.parryT = 0; this.metrics.blocks++;
+        b.cphase = 'stumble'; b.cTimer = STUMBLE; b.attackCd = Math.max(b.attackCd, 0.8);   // attacker staggered + open
+        const en2 = this.ecs.get<Needs>(e, 'Needs')!; en2.fear = clamp01(en2.fear + 0.1);
+        fb.attackCd = 0; fb.guardBroken = 0; fb.momentum = clamp01((fb.momentum ?? 0) + 0.15); fb.momentumT = 3.5;   // you can counter now
+        this.bus.emit('float', { x: fp.x, z: fp.z, text: 'PARRY!', color: '#9fd0ff' });
+        this.bus.emit('hitspark', { power: 0.6 });
+        return;
+      }
+    }
     const outcome = resolveDefense(atk, def, this.rng.float(), this.rng.float(), this.rng.float());
     const ep = this.pos(e)!;
     if (outcome === 'miss' || outcome === 'dodged' || outcome === 'blocked') {
@@ -1629,6 +1653,15 @@ export class Simulation {
       this.bus.emit('float', { x: fp.x, z: fp.z, text: OUTCOME_TEXT[outcome], color: outcome === 'blocked' ? '#9fd0ff' : '#dfe3e6' });
       if (outcome === 'blocked') this.bus.emit('impact', { x: (ep.x + fp.x) / 2, z: (ep.z + fp.z) / 2 });
       if (outcome === 'blocked' && (b.isPlayer || fb.isPlayer)) this.bus.emit('hitspark', { power: 0.3 });
+      if (outcome === 'blocked') {   // Stage 4.29: blocking drains stamina; sustained pressure breaks the guard
+        fn.energy = clamp01(fn.energy - ATTACKS[atk].stamina * 1.4);
+        fb.guardDmg = (fb.guardDmg ?? 0) + (ATTACKS[atk].knockback > 0.5 ? 0.34 : 0.18);
+        if ((fb.guardDmg ?? 0) >= 1 || fn.energy < 0.06) {
+          fb.guardDmg = 0; fb.blockT = 0; fb.parryT = 0; fb.cphase = 'stumble'; fb.cTimer = STUMBLE * 1.2; fb.guardBroken = 0.9;
+          this.bus.emit('float', { x: fp.x, z: fp.z, text: 'GUARD BROKEN!', color: '#ffd24a' });
+          if (b.isPlayer || fb.isPlayer) this.bus.emit('hitspark', { power: 0.7 });
+        }
+      }
       return;
     }
     // a landed hit
@@ -1638,11 +1671,15 @@ export class Simulation {
     const aatt = this.attrs(e); const aen = this.ecs.get<Needs>(e, 'Needs')!;
     const strMul = aatt ? (0.7 + this.effStat(aatt.strength, aen.energy) / 99 * 0.6) : 1;   // ~0.88x..1.3x by effective strength
     const amor = aen.morale ?? 0.6; const moraleMul = amor > 0.9 ? 1.28 : amor > 0.8 ? 1.15 : amor < 0.2 ? 0.82 : 1;   // adrenaline rush / finisher / breakdown
-    let dmg = this.rng.range(ATTACKS[atk].dmgMin, ATTACKS[atk].dmgMax) * (b.traits.includes('tough') ? 1.2 : 1) * (b.traits.includes('weak') ? 0.7 : 1) * strMul * moraleMul;
+    const momMul = b.isPlayer ? 1 + (b.momentum ?? 0) * 0.35 : 1;   // Stage 4.29: momentum rewards sustained aggression
+    let dmg = this.rng.range(ATTACKS[atk].dmgMin, ATTACKS[atk].dmgMax) * (b.traits.includes('tough') ? 1.2 : 1) * (b.traits.includes('weak') ? 0.7 : 1) * strMul * moraleMul * momMul;
     dmg += weapon * 0.025; if (outcome === 'glancing') dmg *= 0.45;
+    if ((fb.guardBroken ?? 0) > 0) dmg *= 1.5;   // Stage 4.29: a guard-broken foe is wide open
     if (b.injuredT) dmg *= 0.7;   // an injured attacker hits softer
     dmg *= (1 - armor * 0.8);     // the defender's armor soaks part of the blow
     fn.health = clamp01(fn.health - dmg);
+    if (b.isPlayer) { b.momentum = clamp01((b.momentum ?? 0) + (dmg > 0.16 ? 0.26 : 0.15)); b.momentumT = 3.5; }   // Stage 4.29: build momentum on a clean hit
+    if (fb.isPlayer) { fb.momentum = 0; fb.momentumT = 0; }                                                         // taking a hit kills your momentum
     if (weapon >= 3 && b.isPlayer) this.addHeat(2);   // brandishing a real weapon draws guard attention
     const bleed = (this.inv(e)?.items ?? []).map((id) => ITEMS[id]?.bleed ?? 0).reduce((a, c) => Math.max(a, c), 0);
     if (bleed > 0) { fb.bleedT = Math.max(fb.bleedT ?? 0, 6); fb.bleedRate = bleed; this.floatBy(foe, '🩸', '#ff5a4d'); }   // a sharp weapon opens a wound
@@ -1658,7 +1695,7 @@ export class Simulation {
     const heavy = ATTACKS[atk].knockback > 0.5 || dmg > 0.16;
     const finisher = b.isPlayer && amor > 0.9 && fn.health < 0.30 && !fb.blockT && this.rng.float() < 0.6;   // Stage 4.15: adrenaline finisher (chance)
     if (finisher) this.bus.emit('float', { x: fp.x, z: fp.z, text: 'ADRENALINE!', color: '#ffd24a' });
-    if (fn.health <= 0.2 || (heavy && fn.energy < 0.2) || (blunt > 0 && fn.health < 0.5 && this.rng.float() < blunt) || finisher) { this.knockDown(foe, fb, e, b); }
+    if (fn.health <= 0.2 || (heavy && fn.energy < 0.2) || (blunt > 0 && fn.health < 0.5 && this.rng.float() < blunt) || finisher || (b.isPlayer && (b.momentum ?? 0) > 0.8 && fn.health < 0.32)) { this.knockDown(foe, fb, e, b); }
     else { fb.cphase = heavy ? 'stumble' : 'hitReact'; fb.cTimer = heavy ? STUMBLE : HITREACT; fn.fear = clamp01(fn.fear + 0.06); }
     this.faceWatchers(fp.x, fp.z);
     this.crowdReact(fp.x, fp.z);
@@ -2604,7 +2641,7 @@ export class Simulation {
     if (pb.state === 'fight') {
       const acts = [
         { key: 'strike', label: 'Strike' }, { key: 'heavy', label: 'Heavy' }, { key: 'shove', label: 'Shove' },
-        { key: 'grab', label: 'Grapple' }, { key: 'block', label: 'Block' }, { key: 'backoff', label: 'Back Off' }
+        { key: 'grab', label: 'Grapple' }, { key: 'block', label: 'Block' }, { key: 'dodge', label: 'Dodge' }, { key: 'backoff', label: 'Back Off' }
       ];
       if (this.playerHasThrowable()) acts.splice(4, 0, { key: 'throw', label: 'Throw' });   // Stage 4.19 (before Block)
       return acts;
@@ -2622,7 +2659,8 @@ export class Simulation {
       case 'shove': pb.pendingAtk = 'shove'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Shove!';
       case 'grab': pb.pendingAtk = 'grab'; pb.attackCd = Math.min(pb.attackCd, 0); return 'Grapple!';
       case 'throw': return this.throwWeapon();
-      case 'block': pb.blockT = 0.9; pb.cphase = 'block'; pb.cTimer = 0.5; this.bubble(pl, '🛡️', 'search', 0.8); return 'Blocking.';
+      case 'block': pb.blockT = 0.9; pb.parryT = 0.25; pb.cphase = 'block'; pb.cTimer = 0.5; this.bubble(pl, '🛡️', 'search', 0.8); return 'Block — time it as the hit lands to PARRY.';
+      case 'dodge': pb.dodgeT = 0.30; pb.cphase = 'dodge'; pb.cTimer = 0.4; this.bubble(pl, '💨', 'search', 0.6); return 'Dodge!';
       case 'backoff': { const foe = pb.foe; this.endFighter(pl, pb); pb.action = 'Idle'; if (foe != null) { const fb = this.brain(foe); if (fb && fb.state === 'fight') { fb.state = 'idle'; fb.foe = undefined; fb.cphase = undefined; } } this.social(pl)!.reputation = clamp(this.social(pl)!.reputation - 1, -100, 100); return 'You back off.'; }
     }
     return '';

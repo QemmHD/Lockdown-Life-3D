@@ -63,6 +63,13 @@ export interface Brain {
   injuredT?: number;       // ---- Stage 4.1 ---- seconds of lingering injury (weaker hits) after a beating
   breakdownT?: number;     // ---- Stage 4.15 ---- seconds left in a nervous breakdown (transient loss of control)
   investigateGiveup?: number; // ---- Stage 4.18 ---- seconds a guard chases a scattered fight before standing down
+  // ---- Stage 4.29 combat depth (all transient, per-fight; not serialized) ----
+  parryT?: number;         // active parry window after a timed Block
+  dodgeT?: number;         // active dodge i-frame window
+  momentum?: number;       // 0..1 combo/aggression meter (buffs damage; resets on being hit)
+  momentumT?: number;      // momentum hold timer before it bleeds
+  guardDmg?: number;       // accumulated guard damage from blocking; crossing 1 breaks the guard
+  guardBroken?: number;    // seconds of guard-broken vulnerability (takes extra damage)
   bleedT?: number;         // ---- Stage 4.7 ---- seconds left bleeding from a sharp-weapon wound
   bleedRate?: number;      // health drained per second while bleeding
 }

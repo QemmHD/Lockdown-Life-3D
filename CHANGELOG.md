@@ -14,6 +14,18 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.29.0-combatdepth — Combat depth: momentum, parry, dodge, guard-break
+Stage B of the overhaul — turning button-mashing into a read-and-react duel. Build + smoke + probe green; transient combat state only, no save change.
+- **Parry**: tap **Block** *as the hit lands* (not just hold it) to **parry** — the attacker staggers and is left wide open for your counter.
+  Holding block still soaks chip damage, but timing it is far stronger.
+- **Dodge**: a new **Dodge** button — time it into an incoming strike to make the attacker **whiff** and over-extend, then punish.
+- **Momentum**: landing clean hits builds a **🔥 momentum meter** (shown by your action) that boosts your damage and, when high, lets a
+  blow **finish** a weakened foe. **Getting hit resets it** — so pressing the attack beats turtling.
+- **Guard-break**: hammering a blocking opponent (especially with **Heavy**) drains their stamina and **shatters their guard** — a stagger
+  + a 50%-extra-damage window. Turtling is no longer safe (works on you too, so keep moving).
+- **Telegraphed reads**: pairs with v4.28's heavy/grab wind-up tells so parry/dodge are skill, not luck. NPCs use the same rules.
+- Version → `v4.29.0-combatdepth`.
+
 ## v4.28.0-combatfeel — Combat juice (hitstop + shake + telegraphs) & camera fix
 Stage A of the combat overhaul — making hits *feel* like they land — plus the camera mapping you asked for. Build + smoke + probe green; no save change.
 - **Hitstop**: a solid blow briefly freezes the action (a few frames, scaled by power; bigger on a knockdown) — the single biggest "punch" upgrade.
