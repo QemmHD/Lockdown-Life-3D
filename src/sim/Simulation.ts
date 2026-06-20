@@ -1594,6 +1594,7 @@ export class Simulation {
         if (inRange && b.attackCd <= 0) {
           const atk = this.pickAttack(e, b);
           b.cphase = 'windup'; b.cTimer = ATTACKS[atk].windup; b.cResult = atk;
+          if (!b.isPlayer && (atk === 'heavy' || atk === 'grab')) this.bubble(e, atk === 'grab' ? '🤜' : '⚠️', 'threaten', ATTACKS[atk].windup);   // Stage 4.28: telegraph the big hit
           const aa = this.attrs(e); const en = this.ecs.get<Needs>(e, 'Needs');
           const agiMul = aa && en ? (1.12 - 0.28 * this.effStat(aa.agility, en.energy) / 99) : 1;   // Stage 4.16: agile fighters recover faster
           b.attackCd = (ATTACKS[atk].windup + ATTACKS[atk].recover) * agiMul + this.rng.range(0.2, 0.6);
@@ -1627,6 +1628,7 @@ export class Simulation {
       if (outcome !== 'miss') { fb.cphase = outcome === 'blocked' ? 'block' : 'dodge'; fb.cTimer = 0.3; }
       this.bus.emit('float', { x: fp.x, z: fp.z, text: OUTCOME_TEXT[outcome], color: outcome === 'blocked' ? '#9fd0ff' : '#dfe3e6' });
       if (outcome === 'blocked') this.bus.emit('impact', { x: (ep.x + fp.x) / 2, z: (ep.z + fp.z) / 2 });
+      if (outcome === 'blocked' && (b.isPlayer || fb.isPlayer)) this.bus.emit('hitspark', { power: 0.3 });
       return;
     }
     // a landed hit
@@ -1648,6 +1650,7 @@ export class Simulation {
     this.bus.emit('impact', { x: fp.x, z: fp.z });
     if (dmg > 0.02) this.bus.emit('float', { x: fp.x, z: fp.z, text: `-${Math.round(dmg * 100)}`, color: '#ff7a6a' });
     if (dmg > 0.05) this.bus.emit('blood', { x: fp.x, z: fp.z });   // Stage 4.17: splatter on a solid blow
+    if (b.isPlayer || fb.isPlayer) this.bus.emit('hitspark', { power: outcome === 'glancing' ? 0.3 : dmg > 0.16 ? 1 : 0.6 });   // Stage 4.28: hitstop + shake
     // knockback (path-safe) + hit reaction / stumble
     const ang = Math.atan2(fp.x - ep.x, fp.z - ep.z);
     this.nudge(fp, Math.sin(ang) * ATTACKS[atk].knockback * 0.6, Math.cos(ang) * ATTACKS[atk].knockback * 0.6);
@@ -1680,6 +1683,7 @@ export class Simulation {
     this.bus.emit('impact', { x: fp.x, z: fp.z });
     this.bus.emit('blood', { x: fp.x, z: fp.z });
     this.bus.emit('float', { x: fp.x, z: fp.z, text: `SLAM -${Math.round(dmg * 100)}`, color: '#ff7a6a' });
+    this.bus.emit('hitspark', { power: 0.95 });
     if (fn.health <= 0.25 || this.rng.float() < 0.8) this.knockDown(foe, fb, e, b);   // a throw usually puts them down
     else { fb.cphase = 'stumble'; fb.cTimer = STUMBLE; fn.fear = clamp01(fn.fear + 0.14); }
     this.faceWatchers(fp.x, fp.z);
@@ -1703,6 +1707,7 @@ export class Simulation {
     const wn = this.ecs.get<Needs>(winner, 'Needs')!; wn.anger = clamp01(wn.anger - 0.3);
     this.metrics.knockdowns++; this.metrics.fightsEnded++;
     this.bus.emit('alert', { type: 'fight', text: `${wb.name} knocked down ${lb.name}` });
+    if (lb.isPlayer || wb.isPlayer) this.bus.emit('hitspark', { power: 1.3, lethal: true });   // Stage 4.28: big knockdown kick
     this.onFightWin(winner, loser, wb, lb);
   }
   // chance a knockdown KILLS the player — scaled by weapon, near-zero health, a pile-on, and chaos
@@ -2648,6 +2653,7 @@ export class Simulation {
     this.bus.emit('blood', { x: fp.x, z: fp.z });
     this.bus.emit('float', { x: fp.x, z: fp.z, text: `-${Math.round(dmg * 100)}`, color: '#ff7a6a' });
     if (def.bleed) { fb.bleedT = Math.max(fb.bleedT ?? 0, 6); fb.bleedRate = def.bleed; this.floatBy(foe, '🩸', '#ff5a4d'); }
+    this.bus.emit('hitspark', { power: 0.7 });
     const knock = (def.wKnock ?? 0) + (def.combat ?? 0) * 0.04;
     if (fn.health <= 0.18 || this.rng.float() < knock) this.knockDown(foe, fb, pl, pb);
     else { fb.cphase = 'stumble'; fb.cTimer = STUMBLE; fn.fear = clamp01(fn.fear + 0.1); }

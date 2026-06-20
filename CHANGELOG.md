@@ -14,6 +14,16 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.28.0-combatfeel — Combat juice (hitstop + shake + telegraphs) & camera fix
+Stage A of the combat overhaul — making hits *feel* like they land — plus the camera mapping you asked for. Build + smoke + probe green; no save change.
+- **Hitstop**: a solid blow briefly freezes the action (a few frames, scaled by power; bigger on a knockdown) — the single biggest "punch" upgrade.
+- **Screen shake**: a decaying camera kick on every hit you land or take (respects the OS *reduce-motion* setting). Knockdowns hit harder.
+- **Telegraphs**: enemies wind up **heavy** and **grab** attacks with a bigger, readable pose + a ⚠️/🤜 tell — so you can learn to react
+  (sets up the parry/dodge in the next stage). Quick jabs stay un-telegraphed.
+- **Camera, fixed to your spec**: the **default/overview camera pans freely** (drag anywhere); **only the character-focus close-up rotates**
+  (one-finger swipe). **Pinch in** to drop into that close-up, **pinch out** to return to the overview. Q/E rotate on desktop.
+- Version → `v4.28.0-combatfeel`. (Stage B next: momentum meter, parry, dodge, guard-break.)
+
 ## v4.27.1-swipe — Camera rotation as a one-finger swipe (iOS)
 The v4.27.0 rotation was keyboard-only; this makes it a natural touch gesture for the iOS target. Build + smoke + probe green.
 - **One-finger swipe rotates the view when zoomed in** (the normal play distance), so you can look around your character / past walls.

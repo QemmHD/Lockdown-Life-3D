@@ -143,7 +143,7 @@ export class Menus {
   // first-run onboarding overlay (Stage 4.23) — addresses the original's #1 legibility gap
   private coachCard(): string {
     const cards = [
-      { t: 'Welcome to the block', b: 'Tap anywhere to walk. Tap an inmate, guard, or object to size it up and act. The camera follows you — swipe one finger to rotate the view, pinch to zoom.' },
+      { t: 'Welcome to the block', b: 'Tap anywhere to walk. Tap an inmate, guard, or object to size it up and act. Drag to pan the view; pinch in to focus on your character, then swipe to rotate around them.' },
       { t: 'People & fights', b: 'Open someone to talk, compliment, recruit, threaten — or fight. Recruited allies pile into your brawls. Guards who SEE a fight come to break it up; hit one and the whole block turns on you.' },
       { t: 'Stay alive', b: 'Mind your Health and the gold Spirit bar. Eat, sleep, and wash on the day’s schedule. Smokes & hooch lift Spirit — at a cost. Let Spirit bottom out and you lose control.' },
       { t: 'Do your time', b: 'Serve your sentence to walk free — or work an escape. Train a build, earn respect, craft in the Workshop, and keep your nose clean: witnessed crimes go to a hearing where your reputation works against you.' },
@@ -326,7 +326,7 @@ export class Menus {
       <div><b>Suspicion</b><span>Contraband and restricted areas get you searched — and sent to solitary.</span></div>
       <div><b>Chaos</b><span>In a lockdown, return to your cell. In a riot, comply or take cover.</span></div>
       <div><b>Fights</b><span>Strike / Heavy / Shove / Grapple / Throw / Block. Guards break up brawls.</span></div>
-      <div><b>Camera</b><span><b>One-finger swipe rotates</b> the view when zoomed in (pinch out to the overview to drag-pan instead) · <b>pinch</b> to zoom · <b>Q</b>/<b>E</b> on desktop · <b>C</b> toggles the close-up camera.</span></div>
+      <div><b>Camera</b><span><b>Drag to pan</b> the overview freely · <b>pinch in</b> to focus on your character, then <b>swipe to rotate</b> around them · pinch out for the overview · <b>Q</b>/<b>E</b> rotate on desktop · <b>C</b> toggles the close-up.</span></div>
       <div><b>Save</b><span>Save/Load any time from this menu or the bottom bar.</span></div>
     </div>`;
   }

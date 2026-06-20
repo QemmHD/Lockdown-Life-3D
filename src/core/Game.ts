@@ -34,6 +34,10 @@ export class Game {
   private feedback!: Feedback;
   private combatFx!: CombatFX;
   private post!: PostFX;
+  private shake = 0;            // Stage 4.28 — combat juice: camera trauma + hitstop
+  private hitstop = 0;
+  private reduceMotion = false;
+  private lastCamMode = false;  // track auto mode-switch (pinch in/out) to keep the HUD label in sync
   private audio = new AudioSystem();
   private hud: HUD;
   private menus!: Menus;
@@ -123,7 +127,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.27.1-swipe'
+      version: 'v4.28.0-combatfeel'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -138,6 +142,13 @@ export class Game {
     this.bus.on('actionResult', ({ text }) => this.hud.alert(text, 'info'));
     // audio (read-only presentation listeners): combat thud, typed event cues, UI confirm
     this.bus.on('impact', () => this.audio.hit());
+    // Stage 4.28 — combat juice: a solid hit kicks the camera + briefly freezes the action (hitstop)
+    this.reduceMotion = (() => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } })();
+    this.bus.on('hitspark', ({ power, lethal }) => {
+      if (this.reduceMotion) { this.hitstop = Math.max(this.hitstop, 0.02); return; }
+      this.shake = Math.min(0.9, this.shake + (lethal ? 0.6 : 0.3 * (power ?? 0.5)));
+      this.hitstop = Math.max(this.hitstop, lethal ? 0.09 : 0.04 + 0.05 * (power ?? 0.5));
+    });
     this.bus.on('alert', ({ type }) => this.audio.alert(type));
     this.bus.on('actionResult', ({ text }) => this.audio.result(text));   // confirm on success, soft 'no' on failure
 
@@ -584,9 +595,13 @@ export class Game {
     const dt = Math.min(0.05, this.clock.getDelta());
     const t = this.clock.elapsedTime;
     const speed = this.paused ? 0 : SPEEDS[this.speedIdx];
-    this.acc += dt * speed;
-    let steps = 0;
-    while (this.acc >= FIXED && steps < 8) { this.sim.step(FIXED); this.acc -= FIXED; steps++; }
+    if (this.hitstop > 0) {
+      this.hitstop -= dt;                                   // freeze the sim for a few frames on a solid hit
+    } else {
+      this.acc += dt * speed;
+      let steps = 0;
+      while (this.acc >= FIXED && steps < 8) { this.sim.step(FIXED); this.acc -= FIXED; steps++; }
+    }
 
     this.sync.update(dt, this.selected, t);
     this.updateFx(dt);
@@ -607,6 +622,9 @@ export class Game {
       this.cam.setFollow(w.x + (pos ? Math.sin(pos.facing) * lead : 0), w.z + (pos ? Math.cos(pos.facing) * lead : 0), pos?.facing);
     }
     this.cam.tick(dt);
+    this.shake = Math.max(0, this.shake - dt * 4.5);   // trauma decays; applied as an additive camera offset
+    this.cam.addShakeOffset(this.shake, t);
+    if (this.cam.isCharMode !== this.lastCamMode) { this.lastCamMode = this.cam.isCharMode; this.hud.setCamMode(this.cam.isCharMode); }   // pinch may auto-switch modes
 
     // while the player is fighting, force the combat panel (so combat buttons are reachable)
     if (!this.selectedObj && this.sim.ecs.get<Brain>(this.playerEntity, 'Brain')?.state === 'fight' && this.selected !== this.playerEntity) { this.selected = this.playerEntity; this.panelDirty = true; }

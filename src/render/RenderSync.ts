@@ -138,7 +138,7 @@ export class RenderSync {
       const k = Math.min(1, dt * 16);
       let aL = -0.6, aR = -1.0, lL = 0.18, lR = -0.18, leanX = 0, leanZ = 0, lift = 0;
       switch (cphase) {
-        case 'windup': aR = 0.9; aL = -0.4; leanX = -0.12; leanZ = -0.15; break;
+        case 'windup': aR = 0.9; aL = -0.4; leanX = -0.12; leanZ = -0.15; if (b?.cResult === 'heavy' || b?.cResult === 'grab') { aR = 1.35; leanX = -0.28; } break;   // bigger telegraphed wind-up
         case 'strike': aR = -2.1; aL = -0.3; leanX = 0.3; lift = 0.04; break;
         case 'block': aL = -1.5; aR = -1.5; leanX = -0.18; break;
         case 'dodge': aL = -0.5; aR = -0.5; leanZ = 0.35; break;
