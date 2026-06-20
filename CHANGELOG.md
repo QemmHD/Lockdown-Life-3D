@@ -14,6 +14,18 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.24.0-commissary — Stage 4.24 Commissary + review-pass fixes
+The honest money sink, plus a second adversarial-review pass over the recent stages. Build + smoke + probe green; no save change.
+- **Commissary** tab in the pause menu: buy legit goods (food, soap, towel, coffee, cards, book, batteries, wraps) at **honest base
+  prices** — the reliable spend sink for keeping yourself together. Contraband still only comes off the block.
+- **Review fixes** (from a multi-agent review of v4.19–4.23):
+  - **Court bribe rebalanced** — was a flat near-acquittal for pocket change. Now **one grease per hearing**, aimed at your **worst**
+    charge, at a **steep cost that scales with severity + your notoriety**, and it only **bends the odds** (×0.55), never guarantees.
+    Severe charges are now bribeable too, at a price.
+  - **Coach overlay** now uses the standard centered/dimmed modal shell (it rendered off-center on the first screen).
+  - **Save hygiene**: load now clears stale transient combat timers (injury/bleed/breakdown/investigate) so they can't leak across a save.
+- Version → `v4.24.0-commissary`.
+
 ## v4.23.0-onboarding — Stage 4.23 First-run onboarding (coach overlay)
 Hard Time's biggest weakness was legibility; new players now get oriented. Build + smoke + flow-probe green; UI-only, no save change.
 - Starting a **New Game** shows a short, paused **4-card coach** the first time only — Move · People & Fights · Stay Alive · Do Your Time —

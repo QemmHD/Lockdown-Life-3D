@@ -79,6 +79,8 @@ const RECIPES: Recipe[] = [
   { id: 'hone', a: 'shiv', b: 'part', out: 'blade', minSkill: 55, label: 'Hone a Blade' },
   { id: 'rig', a: 'batteries', b: 'part', out: 'phone', minSkill: 60, label: 'Rig a Phone' }
 ];
+// Stage 4.24 — commissary catalog: legit goods only, sold at honest (base) prices
+const COMMISSARY_STOCK = ['snack', 'soap', 'towel', 'cards', 'book', 'batteries', 'wrap', 'coffee'];
 
 // The authoritative game world. Decides what happens; render only reflects it.
 export class Simulation {
@@ -782,19 +784,23 @@ export class Simulation {
     const ps = this.social(this.playerId)!; const pinv = this.inv(this.playerId)!;
     const repFactor = Math.max(0, ps.reputation) / 100;                 // notoriety counts AGAINST you at trial
     const skill = this.effStat(this.attrs(this.playerId)?.skill ?? 30, 1);
+    const queue = [...this.charges].sort((a, b) => b.severity - a.severity);   // if you bribe, it goes toward the worst charge
     let convicted = 0, daysAdded = 0, acquitted = 0, bribed = 0;
-    for (const c of this.charges) {
+    for (const c of queue) {
       let pGuilty = Math.min(0.97, 0.22 + c.severity * 0.18 + repFactor * 0.35 - (skill - 30) / 69 * 0.2);
-      const bribeCost = 4 + c.severity * 3;
-      if (pGuilty > 0.4 && pGuilty < 0.85 && pinv.money >= bribeCost) { pinv.money -= bribeCost; pGuilty -= 0.5; bribed++; }   // grease the wheels
-      if (this.rng.float() < pGuilty) { convicted++; daysAdded += c.severity; } else acquitted++;
+      // grease ONE palm per hearing: steep, scales with severity + your notoriety, and only bends the odds (no auto-acquittal)
+      if (pGuilty > 0.35 && bribed < 1) {
+        const bribeCost = Math.round((6 + c.severity * 6) * (1 + repFactor));
+        if (pinv.money >= bribeCost) { pinv.money -= bribeCost; pGuilty *= 0.55; bribed++; }
+      }
+      if (this.rng.float() < Math.max(0, pGuilty)) { convicted++; daysAdded += c.severity; } else acquitted++;
     }
     this.charges = []; this.nextHearingDay = 0;
     if (daysAdded > 0) this.sentence += daysAdded;
     const parts: string[] = [];
     if (convicted) parts.push(`guilty on ${convicted} (+${daysAdded}d)`);
     if (acquitted) parts.push(`cleared on ${acquitted}`);
-    if (bribed) parts.push(`${bribed} greased`);
+    if (bribed) parts.push(`greased a palm`);
     this.bus.emit('alert', { type: convicted ? 'critical' : 'player', text: `⚖ Hearing — ${parts.join(', ') || 'no action'}.` });
   }
   // Stage 4.10 — the warden sets you a timed condition; meet it for days off, blow it for days added.
@@ -1057,6 +1063,24 @@ export class Simulation {
     this.bus.emit('actionResult', { text: `You craft a ${out?.name}.` });
     return `Crafted ${out?.name}.`;
   }
+  // ---- Stage 4.24: commissary — a legit store at subsidized (base) prices; the honest money sink ----
+  commissaryStock() {
+    const money = this.inv(this.playerId)?.money ?? 0;
+    return COMMISSARY_STOCK.filter((id) => ITEMS[id]).map((id) => {
+      const it = ITEMS[id]; const price = Math.max(1, it.value);
+      return { id, name: it.name, icon: it.icon, price, affordable: money >= price };
+    });
+  }
+  commissaryBuy(id: string): string {
+    if (!COMMISSARY_STOCK.includes(id) || !ITEMS[id]) return '';
+    const inv = this.inv(this.playerId); if (!inv) return '';
+    const price = Math.max(1, ITEMS[id].value);
+    if (inv.money < price) return `You can't afford ${ITEMS[id].name} ($${price}).`;
+    inv.money -= price; inv.items.push(id);
+    this.metrics.buys++; this.daily.bought++; this.daily.moneySpent += price; this.prog('spend', price);
+    this.bus.emit('actionResult', { text: `Commissary: bought ${ITEMS[id].name} for $${price}.` });
+    return `Bought ${ITEMS[id].name} for $${price}.`;
+  }
   // stash a specific item in the nearest reachable stash spot with room (menu convenience)
   stashNearest(itemId: string): string {
     const pinv = this.inv(this.playerId)!; const i = pinv.items.indexOf(itemId); if (i < 0) return '';
@@ -1134,7 +1158,7 @@ export class Simulation {
       goals: this.objectives.filter((o) => o.gang).map((o) => ({ text: o.text, progress: o.progress, goal: o.goal, done: o.done })),
       crewOffers: this.crewOffers()
     };
-    return { stats, tier, progression: this.progression, objectives: this.objectives, relationships, inventory, gangs, faction, crafting: this.craftRecipes(), contrabandCarried: inv.items.some(isContraband) };
+    return { stats, tier, progression: this.progression, objectives: this.objectives, relationships, inventory, gangs, faction, crafting: this.craftRecipes(), commissary: this.commissaryStock(), contrabandCarried: inv.items.some(isContraband) };
   }
   private relWordSim(v: number) { return v <= -50 ? 'enemy' : v <= -15 ? 'dislikes you' : v < 15 ? 'neutral' : v < 50 ? 'friendly' : 'ally'; }
   private standingWord(v: number) { return v <= -30 ? 'threatened' : v <= -10 ? 'disliked' : v < 12 ? 'neutral' : v < 40 ? 'respected' : 'watched'; }
@@ -2778,7 +2802,7 @@ export class Simulation {
       this.ecs.set<Render>(e, 'Render', { kind: r.render.kind === 'guard' ? 'guard' : 'prisoner', color: num(r.render.color, 0xc98a3a), meshId: e, appearance: (r.render.appearance && typeof r.render.appearance === 'object') ? r.render.appearance : undefined });
       this.ecs.set<Agent>(e, 'Agent', { speed: num(r.agent?.speed, 2), path: null, step: 0, repathCd: 0 });
       this.ecs.set<Needs>(e, 'Needs', r.needs ?? { hunger: 0, sleep: 0, hygiene: 0, energy: 1, anger: 0, fear: 0, health: 1 });
-      this.ecs.set<Brain>(e, 'Brain', { ...r.brain, role: r.brain.role === 'guard' ? 'guard' : 'prisoner', traits: Array.isArray(r.brain.traits) ? r.brain.traits : [], targetRoom: r.brain.targetRoom ?? 'cellblock', attackCd: 0, timer: 0, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle', intent: 'schedule', intentCd: 0, checkpoint: undefined, dwell: 0, roleCd: 0, bubbleCd: 0, guardRole: r.brain.role === 'guard' ? 'patrol' : undefined, mem: r.brain.role === 'guard' ? undefined : sanitizeMemory(r.brain.mem), cphase: undefined, cTimer: 0, cResult: undefined, blockT: 0, pendingAtk: undefined, lastAttacker: undefined });
+      this.ecs.set<Brain>(e, 'Brain', { ...r.brain, role: r.brain.role === 'guard' ? 'guard' : 'prisoner', traits: Array.isArray(r.brain.traits) ? r.brain.traits : [], targetRoom: r.brain.targetRoom ?? 'cellblock', attackCd: 0, timer: 0, foe: undefined, escortTarget: undefined, actTimer: undefined, objTarget: undefined, state: safeState(r.brain.state), action: 'Idle', intent: 'schedule', intentCd: 0, checkpoint: undefined, dwell: 0, roleCd: 0, bubbleCd: 0, guardRole: r.brain.role === 'guard' ? 'patrol' : undefined, mem: r.brain.role === 'guard' ? undefined : sanitizeMemory(r.brain.mem), cphase: undefined, cTimer: 0, cResult: undefined, blockT: 0, pendingAtk: undefined, lastAttacker: undefined, injuredT: undefined, breakdownT: undefined, bleedT: undefined, bleedRate: undefined, investigateGiveup: undefined });
       this.ecs.set<Social>(e, 'Social', r.social ?? { reputation: 0, respect: 20, suspicion: 0, rel: 0 });
       this.ecs.set<Attributes>(e, 'Attributes', (r.attrs && typeof r.attrs === 'object') ? { strength: num(r.attrs.strength, 40), agility: num(r.attrs.agility, 40), skill: num(r.attrs.skill, 40), stamina: num(r.attrs.stamina, 40) } : { strength: 40, agility: 40, skill: 40, stamina: 40 });
       this.ecs.set<Inventory>(e, 'Inventory', { items: Array.isArray(r.inv?.items) ? r.inv.items.filter((id: any) => typeof id === 'string') : [], money: num(r.inv?.money, 0) });

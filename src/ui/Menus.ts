@@ -19,6 +19,7 @@ export interface MenuHooks {
   onDropItem: (id: string) => void;
   onStashItem: (id: string) => void;
   onCraft: (id: string) => void;
+  onCommissaryBuy: (id: string) => void;
   onBuy: (seller: number, id: string) => void;
   onSell: (buyer: number, id: string) => void;
   tradeData: (seller: number) => any;
@@ -74,6 +75,7 @@ export class Menus {
     if (a === 'drop') { this.hooks.onDropItem(el.dataset.id!); this.render(); return; }
     if (a === 'stash') { this.hooks.onStashItem(el.dataset.id!); this.render(); return; }
     if (a === 'craft') { this.hooks.onCraft(el.dataset.id!); this.render(); return; }
+    if (a === 'commbuy') { this.hooks.onCommissaryBuy(el.dataset.id!); this.render(); return; }
     if (a === 'coach-next') { if (this.step >= 3) this.hooks.onCoachDone(); else { this.step++; this.render(); } return; }
     if (a === 'coach-skip') { this.hooks.onCoachDone(); return; }
     if (a === 'closetrade') { this.hooks.onResume(); return; }
@@ -148,13 +150,13 @@ export class Menus {
     ];
     const i = Math.max(0, Math.min(cards.length - 1, this.step));
     const c = cards[i]; const last = i === cards.length - 1;
-    return `<div class="m-card" style="max-width:520px">
+    return `<div class="m-overlay"><div class="m-card" style="max-width:520px">
       <div class="m-head"><b>${c.t}</b><span class="m-pill">${i + 1}/${cards.length}</span></div>
       <div class="m-sub" style="font-size:15px;line-height:1.55;margin:12px 0">${c.b}</div>
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button class="m-tab act" data-m="coach-skip">Skip</button>
         <button class="m-btn primary" data-m="coach-next">${last ? 'Start ▶' : 'Next ›'}</button>
-      </div></div>`;
+      </div></div></div>`;
   }
 
   private title(): string {
@@ -179,7 +181,7 @@ export class Menus {
   private pause(): string {
     const tabs = [
       ['objectives', 'Objectives'], ['stats', 'Stats'], ['relationships', 'People'],
-      ['inventory', 'Inventory'], ['gangs', 'Gangs'], ['help', 'Help'], ['settings', 'Settings']
+      ['inventory', 'Inventory'], ['commissary', 'Commissary'], ['gangs', 'Gangs'], ['help', 'Help'], ['settings', 'Settings']
     ];
     const list = tabs.map(([k, n]) => `<button class="m-tab ${this.tab === k ? 'on' : ''}" data-m="tab" data-tab="${k}">${n}</button>`).join('');
     return `<div class="m-overlay">
@@ -206,6 +208,7 @@ export class Menus {
       case 'stats': return this.statsTab(s);
       case 'relationships': return this.relTab(s);
       case 'inventory': return this.invTab(s);
+      case 'commissary': return this.commissaryTab(s);
       case 'gangs': return this.gangTab(s);
       case 'help': return this.helpBody();
       case 'settings': return `<div class="m-note">Settings coming soon. (Audio, quality, and controls are planned.)</div>`;
@@ -283,6 +286,13 @@ export class Menus {
         <div class="m-item-s">${c.inputs}${c.canMake ? '' : ' · need more skill'}</div></div>`).join('')
       : '';
     return `<div class="m-h">Inventory</div>${warn}${rows}${craft}<div class="m-sub">Use items to manage needs; stash contraband near a bed/locker/shelf; sell via Trade. Combine parts in the Workshop.</div>`;
+  }
+  private commissaryTab(s: any): string {
+    const money = s.stats.money;
+    const rows = (s.commissary ?? []).map((c: any) => `<div class="m-inv">
+      <div class="m-inv-top"><span class="m-item-n">${c.icon} ${c.name}</span>
+        <span class="m-inv-act"><button class="su-card ${c.affordable ? 'on' : ''}" data-m="commbuy" data-id="${c.id}" ${c.affordable ? '' : 'disabled'}>$${c.price}</button></span></div></div>`).join('');
+    return `<div class="m-h">Commissary <span class="m-pill">$${money}</span></div><div class="m-sub">Legit goods at honest prices — the safe money sink. Contraband you still have to find on the block.</div>${rows}`;
   }
   private gangTab(s: any): string {
     const f = s.faction;

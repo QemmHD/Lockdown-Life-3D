@@ -116,13 +116,14 @@ export class Game {
       onStashItem: (id) => { const r = this.sim.stashNearest(id); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; },
       onCraft: (id) => { const r = this.sim.craft(id); if (r) this.hud.alert(r, 'info'); this.panelDirty = true; },
       onCoachDone: () => { try { localStorage.setItem('ll3d_seen_coach', '1'); } catch { /* ignore */ } this.closeMenu(); },
+      onCommissaryBuy: (id) => { const r = this.sim.commissaryBuy(id); if (r) this.hud.alert(r, 'trade'); this.panelDirty = true; },
       onBuy: (seller, id) => { const r = this.sim.buyItem(seller, id); if (r) this.hud.alert(r, 'trade'); },
       onSell: (buyer, id) => { const r = this.sim.sellItem(buyer, id); if (r) this.hud.alert(r, 'trade'); },
       tradeData: (seller) => this.sim.tradePanel(seller),
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.23.0-onboarding'
+      version: 'v4.24.0-commissary'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
