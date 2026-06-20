@@ -14,6 +14,15 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.26.0-deathcause — Cause of death + debug test tools
+Testability + a clearer fail screen. Build + smoke + probe green; no save change.
+- **GAME OVER now tells you how you died** — the card leads with the specific cause: *Starved to death* / *Died of exhaustion*,
+  *Bled out from a sharp-weapon wound*, *Beaten to death by <name>*, *Stabbed to death by <name>*, or *Beaten to death in a pile-on*.
+- **`?debug` test helpers** (never in normal play): hotkeys while playing — **K** start a fight · **B** breakdown · **M** +$50 ·
+  **J** give a pipe · **G** give crafting parts · **H** arm a hearing tonight · **Y** skip to night. Full set on `window.__cheats.*`
+  (money/give/spirit/hurt/heal/starve/fight/charge/hearing/win/die) — logged to the console on load.
+- Version → `v4.26.0-deathcause`.
+
 ## v4.25.0-grapple — Stage 4.25 Grapple throws (the wrestling verb)
 The central Hard Time brawling move that pays off a Strength build. Build + smoke + probe green; no save change.
 - New **Grapple** button in a fight: contest your **effective Strength** against the foe's strength + nimbleness. Win and you **slam them

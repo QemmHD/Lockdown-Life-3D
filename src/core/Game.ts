@@ -123,7 +123,7 @@ export class Game {
       hasSave: () => SaveManager.has(),
       saveInfo: () => { const d: any = SaveManager.load(); return d && Array.isArray(d.ents) ? { name: (d.ents.find((e: any) => e.isPlayer)?.brain?.name) || 'Inmate', day: d.day || 1 } : null; },
       snapshot: () => this.sim.uiSnapshot(),
-      version: 'v4.25.0-grapple'
+      version: 'v4.26.0-deathcause'
     });
     this.menus.showTitle(); this.paused = true;   // start at the title screen
 
@@ -147,7 +147,20 @@ export class Game {
     window.visualViewport?.addEventListener('resize', onResize);                     // iOS toolbar show/hide
     window.addEventListener('keydown', (ev) => { if (ev.key === 'c' || ev.key === 'C') { this.cam.toggleMode(); this.hud.setCamMode(this.cam.isCharMode); this.cam.recenter(); } });
     // debug hook (only with ?debug): inspect sim/door state + run an invariant self-test + draw overlays
-    if (/[?&]debug/.test(location.search)) { (window as any).__game = this; console.info('[selfTest]', this.sim.selfTest()); this.buildDebugOverlay(); }
+    if (/[?&]debug/.test(location.search)) {
+      (window as any).__game = this;
+      console.info('[selfTest]', this.sim.selfTest());
+      this.buildDebugOverlay();
+      this.installCheats();
+      window.addEventListener('keydown', (ev) => {
+        if ((ev.target as HTMLElement)?.tagName === 'INPUT' || this.paused) return;
+        const c = (window as any).__cheats; if (!c) return;
+        const k = ev.key.toLowerCase();
+        if (k === 'k') c.fight(); else if (k === 'b') c.breakdown(); else if (k === 'm') c.money();
+        else if (k === 'j') c.give('club'); else if (k === 'g') { c.give('part'); c.give('part'); }
+        else if (k === 'h') c.hearing(); else if (k === 'y') c.skipday();
+      });
+    }
     this.loop();
   }
 
@@ -463,6 +476,36 @@ export class Game {
   private maybeShowCoach() {
     try { if (localStorage.getItem('ll3d_seen_coach')) return; } catch { return; }
     this.menus.showCoach(0); this.paused = true;
+  }
+
+  // ?debug-only test helpers — never wired into normal play. window.__cheats.* + hotkeys (see ctor).
+  private installCheats() {
+    const sim: any = this.sim;
+    const get = (name: string) => sim.ecs.get(sim.player(), name);
+    const cheats: any = {
+      money: (n = 50) => { get('Inventory').money += n; this.panelDirty = true; this.hud.alert(`+$${n}`, 'trade'); },
+      give: (id = 'club') => { get('Inventory').items.push(id); this.panelDirty = true; this.hud.alert(`Gave ${id}`, 'info'); },
+      spirit: (v = 1) => { get('Needs').morale = v; },
+      breakdown: () => { get('Needs').morale = 0; this.hud.alert('Spirit → 0 (breakdown imminent)', 'fight'); },
+      hurt: (h = 0.15) => { get('Needs').health = h; },
+      heal: () => { const n = get('Needs'); n.health = 1; const b = get('Brain'); if (b) { b.injuredT = 0; b.bleedT = 0; } },
+      starve: () => { get('Needs').hunger = 0.99; },
+      fight: () => {
+        const p = get('Position'); let best: any = null, bd = 1e9;
+        for (const e of sim.ecs.query('Brain', 'Position')) {
+          const b = sim.ecs.get(e, 'Brain'); if (b.role !== 'prisoner' || b.isPlayer || b.state === 'down') continue;
+          const q = sim.ecs.get(e, 'Position'); const d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; best = e; }
+        }
+        if (best != null) { const bp = sim.ecs.get(best, 'Position'); bp.x = p.x + 0.9; bp.z = p.z; sim.requestAction(best, 'fight'); this.select(this.playerEntity); }
+      },
+      charge: (sev = 2) => { sim.charges.push({ kind: 'debug charge', severity: sev, day: sim.day }); if (!sim.nextHearingDay) sim.nextHearingDay = sim.day; this.hud.alert(`Charge logged (sev ${sev})`, 'info'); },
+      hearing: () => { if (!sim.charges.length) sim.charges.push({ kind: 'debug charge', severity: 2, day: sim.day }); sim.nextHearingDay = sim.day; this.hud.alert('Hearing armed for tonight', 'info'); },
+      skipday: () => { sim.hour = 23.9; },
+      win: () => sim.endRun('released'),
+      die: (cause = 'Debug death') => sim.endRun('dead', cause),
+    };
+    (window as any).__cheats = cheats;
+    console.info('%c[cheats ?debug] keys: K=fight B=breakdown M=+$ J=club G=parts H=hearing Y=skip-to-night  | or call window.__cheats.* (money/give/spirit/hurt/heal/starve/fight/charge/hearing/win/die)', 'color:#ffd24a');
   }
 
   private load() {

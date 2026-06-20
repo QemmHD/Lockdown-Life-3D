@@ -831,14 +831,14 @@ export class Simulation {
     const target = Math.max(-25, Math.round(ps.reputation - 8)); return { kind: 'reputation', target, dueDay: due, text: `Warden: keep your reputation below ${target} until day ${due}.` };
   }
   // end the run with a verdict (release = win, escape = alt win, death = loss). The UI shows the card.
-  endRun(kind: 'released' | 'escaped' | 'dead') {
+  endRun(kind: 'released' | 'escaped' | 'dead', cause?: string) {
     if (this.runEnd) return;
     const P = this.progression, tier = this.tier().name;
     const head = { released: 'RELEASED', escaped: 'ESCAPED', dead: 'GAME OVER' }[kind];
     const lead = {
       released: `You served your ${this.sentence} days and walked out the gate a free man.`,
       escaped: `You broke out — a fugitive, but free.`,
-      dead: `You didn't make it out of your sentence alive.`
+      dead: cause ? `${cause}.` : `You didn't make it out of your sentence alive.`
     }[kind];
     this.runEnd = {
       kind, title: head,
@@ -1176,7 +1176,7 @@ export class Simulation {
       // Stage 4.5: neglect is fatal — maxed hunger/sleep eats your health; for you that's a GAME OVER.
       if (n.hunger >= 0.98 || n.sleep >= 0.98) {
         n.health = clamp01(n.health - dt * 0.02);
-        if (b.isPlayer && n.health <= 0.001 && !this.runEnd) { this.bus.emit('alert', { type: 'critical', text: 'You collapse from neglect…' }); this.endRun('dead'); }
+        if (b.isPlayer && n.health <= 0.001 && !this.runEnd) { this.bus.emit('alert', { type: 'critical', text: 'You collapse from neglect…' }); this.endRun('dead', n.hunger >= 0.98 ? 'Starved to death — you let the hunger go too long' : 'Died of exhaustion — your body gave out without sleep'); }
       } else if (n.health < 1 && n.hunger < 0.6 && n.sleep < 0.6) {
         n.health = clamp01(n.health + dt * 0.006);   // recover slowly when you keep yourself together
       }
@@ -1552,7 +1552,7 @@ export class Simulation {
       if (b.bleedT && b.bleedT > 0) {   // Stage 4.7: sharp-weapon bleed drains health over time
         b.bleedT = Math.max(0, b.bleedT - dt);
         const bn = this.ecs.get<Needs>(e, 'Needs')!; bn.health = clamp01(bn.health - (b.bleedRate ?? 0.01) * dt);
-        if (b.isPlayer && bn.health <= 0.001 && !this.runEnd) { this.bus.emit('alert', { type: 'critical', text: 'You bleed out…' }); this.endRun('dead'); }
+        if (b.isPlayer && bn.health <= 0.001 && !this.runEnd) { this.bus.emit('alert', { type: 'critical', text: 'You bleed out…' }); this.endRun('dead', 'Bled out from a sharp-weapon wound'); }
         if (b.bleedT <= 0) b.bleedRate = undefined;
       }
       if (b.state === 'down') {   // knocked down — hold the pose, then get up (still hurt)
@@ -1690,7 +1690,10 @@ export class Simulation {
     if (lb.isPlayer && this.lethalKnockdown(loser, winner)) {
       lb.state = 'down'; lb.foe = undefined; lb.cphase = 'down'; lb.timer = DOWN_TIME;
       this.ecs.get<Agent>(loser, 'Agent')!.path = null;
-      this.endRun('dead');
+      const wpn = (this.inv(winner)?.items ?? []).map((id) => ITEMS[id]?.combat ?? 0).reduce((a, c) => Math.max(a, c), 0);
+      const pileOn = this.ecs.query('Brain').filter((g) => { const gb = this.brain(g); return !!gb && gb.role === 'prisoner' && gb.state === 'fight' && gb.foe === loser; }).length;
+      const cause = wpn >= 3 ? `Stabbed to death by ${wb.name}` : pileOn >= 2 ? `Beaten to death in a pile-on (${wb.name} and others)` : `Beaten to death by ${wb.name}`;
+      this.endRun('dead', cause);
       return;
     }
     lb.state = 'down'; lb.timer = DOWN_TIME; lb.foe = undefined; lb.cphase = 'down'; lb.cTimer = DOWN_TIME;
