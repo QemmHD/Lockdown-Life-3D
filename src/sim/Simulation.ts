@@ -62,6 +62,12 @@ const OBJ_STATE: Record<string, string> = { rest: 'resting', wash: 'washing', ea
 const OBJ_ICON: Record<string, string> = { rest: '😴', wash: '🚿', eat: '🍽️', train: '🏋️', work: '💪', search: '🔍', hide: '🤫', take: '🖐️', use: '🚪', inspect: '👁️', open: '🚪', close: '🚪', try: '🔒' };
 // shown when a player convenience action finds no reachable matching object
 const SELF_REASON: Record<string, string> = { rest: 'Find a bed.', wash: 'No reachable shower or sink.', eat: 'No food station nearby.', train: 'No training equipment nearby.', work: 'No work object nearby.' };
+// Stage 4.14 — vices: a hit of Spirit (morale) now, paid for in health + a sickness gamble. Feeds the adrenaline buff (>80% morale = +15% dmg).
+const VICE: Record<string, { morale: number; healthCost: number; angerRelief: number; sick: number; label: string }> = {
+  coffee: { morale: 0.18, healthCost: 0.00, angerRelief: 0.06, sick: 0.00, label: 'Caffeinated' },
+  cig:    { morale: 0.24, healthCost: 0.03, angerRelief: 0.14, sick: 0.05, label: 'Smoke break' },
+  hooch:  { morale: 0.34, healthCost: 0.08, angerRelief: 0.22, sick: 0.22, label: 'Buzzed' }
+};
 
 // The authoritative game world. Decides what happens; render only reflects it.
 export class Simulation {
@@ -911,6 +917,22 @@ export class Simulation {
       case 'hygiene': n.hygiene = clamp01(n.hygiene - it.useAmt); this.floatBy(this.playerId, '+Hygiene', '#9fcad8'); break;
       case 'comfort': n.fear = clamp01(n.fear - it.useAmt); n.anger = clamp01(n.anger - it.useAmt * 0.6); n.morale = clamp01((n.morale ?? 0.6) + it.useAmt * 0.6); this.floatBy(this.playerId, '+Spirit', '#f1c40f'); break;
       case 'medical': n.health = clamp01(n.health + it.useAmt); { const pbb = this.brain(this.playerId); if (pbb) { pbb.injuredT = 0; pbb.bleedT = 0; } } this.floatBy(this.playerId, '+Health', '#6dff9e'); break;
+      case 'vice': {
+        const v = VICE[itemId] ?? { morale: it.useAmt, healthCost: 0.03, angerRelief: 0.08, sick: 0.1, label: 'Buzzed' };
+        n.morale = clamp01((n.morale ?? 0.6) + v.morale);
+        n.anger = clamp01(n.anger - v.angerRelief);
+        n.fear = clamp01(n.fear - v.angerRelief * 0.5);
+        if (v.healthCost) n.health = clamp01(n.health - v.healthCost);
+        this.floatBy(this.playerId, '+Spirit', '#f1c40f');
+        if (v.sick && this.rng.float() < v.sick) {
+          n.health = clamp01(n.health - 0.06);
+          n.morale = clamp01((n.morale ?? 0.6) - 0.12);
+          n.hunger = clamp01(n.hunger + 0.1);
+          this.floatBy(this.playerId, 'Sick', '#7fae5a');
+          this.bus.emit('alert', { type: 'warning', text: `The ${it.name} turns your stomach.` });
+        }
+        break;
+      }
     }
     this.bus.emit('actionResult', { text: `You use the ${it.name}.` });
     return `Used ${it.name}.`;

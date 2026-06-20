@@ -14,6 +14,18 @@
 > prototype that now lives under `src/legacy/` (excluded from the build) — those features are
 > **not** active in the current game. Latest QA pass: **Stage QA 2.4** (truth/docs/hardening).
 
+## v4.14.0-vices — Stage 4.14 Vices (smoking & drinking feed the Spirit bar)
+Hard Time's vice loop — something now feeds the Spirit/Mind bar from the demand side of contraband. Build + smoke green.
+- Three consumables: **☕ Instant Coffee** (legit), **🚬 Cigarette**, and **🍶 Prison Hooch** (both contraband). Use one for an
+  immediate hit of **Spirit (morale)** plus anger/fear relief.
+- It's a **gamble, not a freebie**: cigarettes cost a little health, hooch costs more — and the stronger the vice, the higher the
+  chance it **makes you sick** (extra health loss + a Spirit clawback + hunger). Coffee is the safe, mild option.
+- Plays straight into the **adrenaline buff** (push Spirit > 80% before a brawl for +15% damage) — a real "drink before the fight?"
+  decision, traded against the health hit and sickness risk.
+- New `vice` use-kind; vices auto-flow through the **economy/search** like any item (inmates carry & sell them, guards confiscate them).
+- Rides the existing `Needs.morale` field — **no save-format change**; old saves load unchanged.
+- Version → `v4.14.0-vices`.
+
 ## v4.13.0-spirit — Stage 4.13 Spirit (the second bar)
 Adds Hard Time's missing HUD half — your mental state now matters. Build + smoke green.
 - New **Spirit** meter on every inmate (gold bar in the player panel, under Health). It **sags** when

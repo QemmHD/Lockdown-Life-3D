@@ -1,7 +1,7 @@
 // Abstract game-item data only (no real-world procedures). Contraband is a gameplay flag.
 // Stage 3.7 adds category / rarity / demand-supply weights / use effects for the economy.
 export type ItemCategory = 'food' | 'hygiene' | 'comfort' | 'utility' | 'barter' | 'risky' | 'crew' | 'rare' | 'medical';
-export type UseKind = 'food' | 'hygiene' | 'comfort' | 'medical' | 'barter' | 'none';
+export type UseKind = 'food' | 'hygiene' | 'comfort' | 'medical' | 'barter' | 'none' | 'vice';
 
 export interface ItemDef {
   id: string;
@@ -40,11 +40,14 @@ export const ITEMS: Record<string, ItemDef> = {
   batteries: I({ id: 'batteries', name: 'Batteries', icon: '🔋', type: 'device', category: 'utility', value: 5, demandWeight: 0.5, supplyWeight: 0.4, rarity: 0.4, use: 'none' }),
   token:    I({ id: 'token', name: 'Commissary Token', icon: '🪙', type: 'misc', category: 'barter', value: 5, demandWeight: 0.7, supplyWeight: 0.4, rarity: 0.35, use: 'barter', useAmt: 0 }),
   wrap:     I({ id: 'wrap', name: 'Medical Wrap', icon: '🩹', type: 'medicine', category: 'medical', value: 7, demandWeight: 0.55, supplyWeight: 0.35, rarity: 0.5, use: 'medical', useAmt: 0.22 }),
+  coffee:   I({ id: 'coffee', name: 'Instant Coffee', icon: '☕', type: 'food', category: 'comfort', value: 3, demandWeight: 0.6, supplyWeight: 0.6, rarity: 0.2, use: 'vice', useAmt: 0.18 }),
   // --- contraband (fictional, abstract) ---
   note:     I({ id: 'note', name: 'Hidden Note', icon: '📝', type: 'note', category: 'risky', contraband: true, value: 4, risk: 0.2, concealment: 0.85, suspicion: 0.1, demandWeight: 0.35, supplyWeight: 0.5, rarity: 0.4 }),
   magazine: I({ id: 'magazine', name: 'Old Magazine', icon: '📰', type: 'media', category: 'comfort', contraband: true, value: 5, risk: 0.15, concealment: 0.3, suspicion: 0.1, demandWeight: 0.45, supplyWeight: 0.45, rarity: 0.4, use: 'comfort', useAmt: 0.15 }),
   medicine: I({ id: 'medicine', name: 'Medicine Bottle', icon: '💊', type: 'medicine', category: 'medical', contraband: true, value: 10, risk: 0.35, concealment: 0.5, suspicion: 0.2, demandWeight: 0.6, supplyWeight: 0.3, rarity: 0.6, use: 'medical', useAmt: 0.18 }),
   dice:     I({ id: 'dice', name: 'Handmade Dice', icon: '🎲', type: 'gambling', category: 'risky', contraband: true, value: 6, risk: 0.25, concealment: 0.7, suspicion: 0.15, demandWeight: 0.5, supplyWeight: 0.45, rarity: 0.45 }),
+  cig:      I({ id: 'cig', name: 'Cigarette', icon: '🚬', type: 'misc', category: 'risky', contraband: true, value: 4, risk: 0.18, concealment: 0.7, suspicion: 0.08, demandWeight: 0.8, supplyWeight: 0.5, rarity: 0.3, use: 'vice', useAmt: 0.24 }),
+  hooch:    I({ id: 'hooch', name: 'Prison Hooch', icon: '🍶', type: 'misc', category: 'risky', contraband: true, value: 7, risk: 0.4, concealment: 0.4, suspicion: 0.18, demandWeight: 0.65, supplyWeight: 0.3, rarity: 0.5, use: 'vice', useAmt: 0.34 }),
   phone:    I({ id: 'phone', name: 'Phone Device', icon: '📱', type: 'device', category: 'rare', contraband: true, value: 20, risk: 0.7, concealment: 0.45, suspicion: 0.4, demandWeight: 0.75, supplyWeight: 0.15, rarity: 0.85 }),
   tool:     I({ id: 'tool', name: 'Improvised Tool', icon: '🔧', type: 'tool', category: 'risky', contraband: true, value: 12, risk: 0.55, concealment: 0.4, suspicion: 0.35, demandWeight: 0.5, supplyWeight: 0.25, rarity: 0.65, combat: 2, escapeAid: 0.25 }),
   part:     I({ id: 'part', name: 'Repair Part', icon: '⚙️', type: 'tool', category: 'utility', contraband: true, value: 9, risk: 0.4, concealment: 0.45, suspicion: 0.25, demandWeight: 0.45, supplyWeight: 0.3, rarity: 0.6 }),
